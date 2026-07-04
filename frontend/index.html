@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>VFC Application Portal</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <main class="page-shell">
+    <section class="hero-card">
+      <p class="eyebrow">Vancouver Finance Company Inc.</p>
+      <h1>Business Application Portal</h1>
+      <p class="subtitle">Submit your business profile and supporting documents for review.</p>
+    </section>
+
+    <form id="applicationForm" class="form-card">
+      <div class="grid">
+        <label>Business Name<input name="businessName" required /></label>
+        <label>Owner Name<input name="ownerName" required /></label>
+        <label>Email<input name="email" type="email" required /></label>
+        <label>Phone<input name="phone" required /></label>
+        <label>Industry<input name="industry" /></label>
+        <label>Time in Business<input name="timeInBusiness" required /></label>
+        <label>Score<input name="creditScore" type="number" min="300" max="900" required /></label>
+        <label>Estimated Monthly Sales<input name="monthlySalesEstimate" type="number" min="0" required /></label>
+      </div>
+
+      <label class="full">Supporting Documents
+        <input name="documents" type="file" multiple required />
+      </label>
+
+      <label class="consent">
+        <input name="consent" type="checkbox" required />
+        I consent to this information being reviewed for business financing pre-screening.
+      </label>
+
+      <button type="submit">Submit Application</button>
+      <p id="statusMessage" class="status"></p>
+    </form>
+  </main>
+
+  <script src="script.js"></script>
+</body>
+</html>
