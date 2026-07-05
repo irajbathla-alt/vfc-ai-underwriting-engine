@@ -157,35 +157,215 @@ with your real Web App URL.
 
 ---
 
-## 6. Google Cloud Storage Setup
+## 6. Google Cloud Storage Setup — Click-by-Click
 
-In Google Cloud Console:
+Use Google Cloud Storage for private statement/document storage.
 
-1. Create or choose a project.
-2. Enable Cloud Storage API.
-3. Create a private bucket.
+### Step 6.1 — Open Google Cloud Console
 
-Recommended bucket name:
+Go to:
+
+```txt
+https://console.cloud.google.com
+```
+
+Sign in with the Google account you want to use for the VFC project.
+
+### Step 6.2 — Create or choose a project
+
+At the top left, click the project dropdown.
+
+Then choose one of these:
+
+```txt
+Select existing project
+```
+
+or
+
+```txt
+New Project
+```
+
+Recommended project name:
+
+```txt
+VFC AI Underwriting Engine
+```
+
+After creating the project, make sure it is selected in the top project dropdown.
+
+### Step 6.3 — Make sure billing is connected
+
+Google Cloud usually requires billing for Cloud Storage.
+
+Go to:
+
+```txt
+Billing
+```
+
+Attach a billing account if Google asks for it.
+
+### Step 6.4 — Enable Cloud Storage API
+
+In Google Cloud Console search bar, search:
+
+```txt
+Cloud Storage API
+```
+
+Open it and click:
+
+```txt
+Enable
+```
+
+If it already says enabled, move to the next step.
+
+### Step 6.5 — Go to Buckets
+
+In the search bar, search:
+
+```txt
+Cloud Storage Buckets
+```
+
+Open:
+
+```txt
+Cloud Storage → Buckets
+```
+
+Click:
+
+```txt
+Create
+```
+
+### Step 6.6 — Name the bucket
+
+Bucket names must be globally unique across Google Cloud, so `vfc-statement-uploads` may already be taken.
+
+Try one of these:
 
 ```txt
 vfc-statement-uploads
+vfc-statement-uploads-raj
+vfc-underwriting-statements
+vfc-underwriting-statements-prod
 ```
 
-Recommended settings:
+Best recommendation:
 
 ```txt
-Public access prevention: On
-Uniform bucket-level access: On
-Location: Canada if available
+vfc-underwriting-statements-prod
 ```
 
-Do not make uploaded documents public.
+Do not use spaces or capital letters.
+
+### Step 6.7 — Choose location
+
+Choose:
+
+```txt
+Region
+```
+
+Then choose a Canadian region if available:
+
+```txt
+northamerica-northeast1 (Montréal)
+```
+
+or
+
+```txt
+northamerica-northeast2 (Toronto)
+```
+
+If you cannot find Canada, choose the closest region you prefer.
+
+### Step 6.8 — Choose storage class
+
+Choose:
+
+```txt
+Standard
+```
+
+This is best for documents you may need to read soon after upload.
+
+### Step 6.9 — Access control settings
+
+Choose:
+
+```txt
+Uniform bucket-level access: Enabled
+```
+
+Do not choose fine-grained access for this MVP.
+
+### Step 6.10 — Public access prevention
+
+Set:
+
+```txt
+Public access prevention: Enforced / On
+```
+
+This helps prevent uploaded documents from becoming public.
+
+### Step 6.11 — Data protection
+
+For MVP, use defaults.
+
+Recommended:
+
+```txt
+Soft delete: On if available
+Object versioning: Off for MVP
+Retention policy: Off for MVP
+Encryption: Google-managed encryption key
+```
+
+Later, production can use stronger retention and key management.
+
+### Step 6.12 — Create bucket
+
+Click:
+
+```txt
+Create
+```
+
+Your private bucket is now ready.
+
+### Step 6.13 — Copy bucket name
+
+After creation, copy the bucket name exactly.
+
+Example:
+
+```txt
+vfc-underwriting-statements-prod
+```
+
+This value will later go into Apps Script as:
+
+```txt
+GCS_BUCKET_NAME
+```
 
 ---
 
 ## 7. Service Account Setup for Cloud Storage
 
-In Google Cloud Console:
+The service account allows the backend to upload files into the private bucket.
+
+### Step 7.1 — Create service account
+
+In Google Cloud Console, go to:
 
 ```txt
 IAM & Admin → Service Accounts → Create Service Account
@@ -197,13 +377,65 @@ Name:
 vfc-apps-script-storage
 ```
 
-Give it access to the bucket only, using:
+Service account ID will look like:
+
+```txt
+vfc-apps-script-storage@your-project-id.iam.gserviceaccount.com
+```
+
+### Step 7.2 — Give bucket permission only
+
+Go back to:
+
+```txt
+Cloud Storage → Buckets → your bucket → Permissions
+```
+
+Click:
+
+```txt
+Grant Access
+```
+
+New principal:
+
+```txt
+vfc-apps-script-storage@your-project-id.iam.gserviceaccount.com
+```
+
+Role:
 
 ```txt
 Storage Object Admin
 ```
 
-For production, use the least permissions possible.
+For production, you can reduce this later to tighter permissions.
+
+### Step 7.3 — Create service account key
+
+Go to:
+
+```txt
+IAM & Admin → Service Accounts → vfc-apps-script-storage → Keys
+```
+
+Click:
+
+```txt
+Add Key → Create new key → JSON
+```
+
+Download the JSON key.
+
+Important:
+
+```txt
+Do not upload this JSON key to GitHub.
+Do not email it.
+Do not paste it into frontend code.
+```
+
+For Apps Script MVP, store needed key values in Apps Script Properties or use Google Drive first until Cloud Storage upload code is finalized.
 
 ---
 
