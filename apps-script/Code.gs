@@ -16,21 +16,10 @@ function doPost(e) {
     const action = request.action;
     const payload = request.payload || {};
 
-    if (action === 'submitApplication') {
-      return jsonResponse(submitApplication(payload));
-    }
-
-    if (action === 'uploadDocument') {
-      return jsonResponse(uploadDocumentForApplication(payload));
-    }
-
-    if (action === 'runAnalysis') {
-      return jsonResponse(runApplicationAnalysis(payload.applicationId));
-    }
-
-    if (action === 'finalDecision') {
-      return jsonResponse(saveFinalDecision(payload));
-    }
+    if (action === 'submitApplication') return jsonResponse(submitApplication(payload));
+    if (action === 'uploadDocument') return jsonResponse(uploadDocumentForApplication(payload));
+    if (action === 'runAnalysis') return jsonResponse(runApplicationAnalysis(payload.applicationId));
+    if (action === 'finalDecision') return jsonResponse(saveFinalDecision(payload));
 
     return jsonResponse({ ok: false, error: 'Unknown action' });
   } catch (error) {
@@ -45,7 +34,7 @@ function doGet(e) {
 }
 
 function submitApplication(payload) {
-  const applicationId = 'APP-' + new Date().getTime();
+  const applicationId = payload.applicationId || ('APP-' + new Date().getTime());
   const row = [
     applicationId,
     new Date(),
@@ -121,13 +110,9 @@ function saveFinalDecision(payload) {
     'Manual decision saved'
   ]);
 
-  if (payload.status === 'Approved') {
-    sendApprovalEmail(payload);
-  } else if (payload.status === 'Declined') {
-    sendDeclineEmail(payload);
-  } else if (payload.status === 'More Docs Required') {
-    sendMoreDocsEmail(payload);
-  }
+  if (payload.status === 'Approved') sendApprovalEmail(payload);
+  else if (payload.status === 'Declined') sendDeclineEmail(payload);
+  else if (payload.status === 'More Docs Required') sendMoreDocsEmail(payload);
 
   return { ok: true };
 }
