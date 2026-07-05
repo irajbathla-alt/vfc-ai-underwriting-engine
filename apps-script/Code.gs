@@ -23,6 +23,7 @@ function doPost(e) {
 
     if (action === 'submitApplication') return jsonResponse(submitApplication(payload));
     if (action === 'uploadDocument') return jsonResponse(uploadDocumentForApplication(payload));
+    if (action === 'uploadClientDocument') return jsonResponse(uploadClientDocument(payload));
     if (action === 'runAnalysis') return jsonResponse(runApplicationAnalysis(payload.applicationId));
     if (action === 'finalDecision' || action === 'saveFinalDecision') return jsonResponse(saveFinalDecision(payload));
 
@@ -37,6 +38,12 @@ function doGet(e) {
     if (e.parameter.page === 'admin') {
       return HtmlService.createHtmlOutputFromFile('AdminDashboard')
         .setTitle('VFC Admin Dashboard')
+        .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+    }
+
+    if (e.parameter.page === 'client') {
+      return HtmlService.createHtmlOutputFromFile('ClientPortal')
+        .setTitle('VFC Client Portal')
         .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
     }
 
@@ -83,6 +90,7 @@ function submitApplication(payload) {
 
   appendRow(CONFIG.APPLICATIONS_TAB, row);
   appendStatusHistory(applicationId, 'Submitted', 'Client submitted application');
+  updateClientUserFromApplication(payload);
   notifyAdminNewApplication(applicationId, payload);
   return { ok: true, applicationId, folder: folderResult };
 }
