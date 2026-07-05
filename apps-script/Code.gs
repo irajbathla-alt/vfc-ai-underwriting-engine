@@ -4,6 +4,7 @@ const CONFIG = {
   ANALYSIS_TAB: 'Statement Analysis',
   RESULTS_TAB: 'Underwriting Results',
   ADMIN_EMAIL: 'admin@vancouverfinancecompany.com',
+  DRIVE_UPLOAD_FOLDER_ID: '1OuMVNc5RnLzCPWb5h0dWdsCsHbQNICA1',
   GCP_PROJECT_ID: 'project-a528a6b2-3583-415a-bba',
   GCS_BUCKET_NAME: 'vfc-statement-uploads',
   GCS_SERVICE_ACCOUNT_EMAIL: 'vfc-apps-script-storage-43@project-a528a6b2-3583-415a-bba.iam.gserviceaccount.com'
@@ -17,6 +18,10 @@ function doPost(e) {
 
     if (action === 'submitApplication') {
       return jsonResponse(submitApplication(payload));
+    }
+
+    if (action === 'uploadDocument') {
+      return jsonResponse(uploadDocumentForApplication(payload));
     }
 
     if (action === 'runAnalysis') {
@@ -60,6 +65,12 @@ function submitApplication(payload) {
   appendRow(CONFIG.APPLICATIONS_TAB, row);
   notifyAdminNewApplication(applicationId, payload);
   return { ok: true, applicationId };
+}
+
+function uploadDocumentForApplication(payload) {
+  const uploadResult = saveBase64FileToDrive(payload);
+  updateApplicationDocumentLinks(payload.applicationId, uploadResult.fileUrl);
+  return uploadResult;
 }
 
 function runApplicationAnalysis(applicationId) {
