@@ -58,7 +58,7 @@ function submitApplication(payload) {
 
 function uploadDocumentForApplication(payload) {
   const uploadResult = saveBase64FileToDrive(payload);
-  updateApplicationDocumentLinks(payload.applicationId, uploadResult.fileUrl);
+  updateApplicationDocumentLinks(payload.applicationId, uploadResult.fileUrl, uploadResult.applicationFolderUrl);
   return uploadResult;
 }
 
