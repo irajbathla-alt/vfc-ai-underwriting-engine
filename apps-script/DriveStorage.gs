@@ -6,6 +6,8 @@ function getUploadFolder() {
 }
 
 function getOrCreateApplicationFolder(payload) {
+  payload = hydrateApplicationFolderPayload(payload || {});
+
   const parentFolder = getUploadFolder();
   const applicationId = payload.applicationId || 'APP-UNKNOWN';
   const businessName = payload.businessName || 'Unknown Business';
@@ -16,6 +18,34 @@ function getOrCreateApplicationFolder(payload) {
   if (existingFolders.hasNext()) return existingFolders.next();
 
   return parentFolder.createFolder(folderName);
+}
+
+function createApplicationFolderForPayload(payload) {
+  const folder = getOrCreateApplicationFolder(payload);
+  return {
+    ok: true,
+    applicationId: payload.applicationId,
+    applicationFolderId: folder.getId(),
+    applicationFolderName: folder.getName(),
+    applicationFolderUrl: folder.getUrl()
+  };
+}
+
+function hydrateApplicationFolderPayload(payload) {
+  if (payload.businessName && payload.ownerName) return payload;
+  if (!payload.applicationId) return payload;
+
+  try {
+    const application = getApplication(payload.applicationId);
+    if (application && application.ok && application.data) {
+      payload.businessName = payload.businessName || application.data.businessName;
+      payload.ownerName = payload.ownerName || application.data.ownerName;
+    }
+  } catch (error) {
+    // Keep fallback values if sheet lookup is not available yet.
+  }
+
+  return payload;
 }
 
 function saveBase64FileToDrive(payload) {
@@ -65,11 +95,19 @@ function updateApplicationDocumentLinks(applicationId, fileUrl, folderUrl) {
   for (let i = 1; i < rows.length; i++) {
     if (String(rows[i][applicationIdColumn]) === String(applicationId)) {
       const existing = String(rows[i][documentLinksColumn] || '').trim();
-      const folderLine = folderUrl ? 'Application Folder: ' + folderUrl : '';
-      const fileLine = fileUrl ? 'Document: ' + fileUrl : '';
-      const newLines = [folderLine, fileLine].filter(Boolean).join('\n');
-      const updated = existing ? existing + '\n' + newLines : newLines;
-      sheet.getRange(i + 1, documentLinksColumn + 1).setValue(updated);
+      const lines = existing ? existing.split('\n').map(line => line.trim()).filter(Boolean) : [];
+
+      if (folderUrl) {
+        const folderLine = 'Application Folder: ' + folderUrl;
+        if (!lines.includes(folderLine)) lines.unshift(folderLine);
+      }
+
+      if (fileUrl) {
+        const fileLine = 'Document: ' + fileUrl;
+        if (!lines.includes(fileLine)) lines.push(fileLine);
+      }
+
+      sheet.getRange(i + 1, documentLinksColumn + 1).setValue(lines.join('\n'));
       return { ok: true };
     }
   }
@@ -97,17 +135,11 @@ function testDriveFolderConnection() {
 }
 
 function testCreateApplicationFolder() {
-  const folder = getOrCreateApplicationFolder({
+  const result = createApplicationFolderForPayload({
     applicationId: 'APP-TEST-123',
     businessName: 'ABC Pizza Ltd',
     ownerName: 'John Smith'
   });
-  const result = {
-    ok: true,
-    folderId: folder.getId(),
-    folderName: folder.getName(),
-    folderUrl: folder.getUrl()
-  };
   Logger.log(JSON.stringify(result, null, 2));
   return result;
 }
