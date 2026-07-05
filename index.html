@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>VFC AI Underwriting Engine</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="#top">
+      <span class="brand-mark">VFC</span>
+      <span>
+        <strong>Vancouver Finance Company Inc.</strong>
+        <small>AI Underwriting Engine</small>
+      </span>
+    </a>
+    <nav>
+      <a href="#how-it-works">How It Works</a>
+      <a href="#review">Review</a>
+      <a href="#apply">Apply</a>
+      <a class="nav-button" href="dashboard.html">Dashboard</a>
+    </nav>
+  </header>
+
+  <main id="top">
+    <section class="landing-hero">
+      <div class="hero-copy">
+        <p class="eyebrow">Merchant Cash Advance Pre-Screening</p>
+        <h1>Read business cash flow. Score risk. Suggest funding limits.</h1>
+        <p class="subtitle">A premium intake and underwriting workflow for business financing files — built for fast document review, AI-assisted notes, and human final approval.</p>
+        <div class="hero-actions">
+          <a class="primary-link" href="#apply">Start Application</a>
+          <a class="secondary-link" href="dashboard.html">View Dashboard</a>
+        </div>
+        <div class="trust-row">
+          <span>Bank statement review</span>
+          <span>Risk grading</span>
+          <span>Offer range</span>
+          <span>Client email updates</span>
+        </div>
+      </div>
+
+      <aside class="hero-panel" aria-label="Sample underwriting result">
+        <div class="panel-topline">
+          <span>Live File Preview</span>
+          <strong>Pending Review</strong>
+        </div>
+        <h2>ABC Business Ltd.</h2>
+        <div class="score-orb">B+</div>
+        <div class="metric-list">
+          <div><span>Average Deposits</span><strong>$72,500</strong></div>
+          <div><span>Low Offer</span><strong>$35,000</strong></div>
+          <div><span>High Offer</span><strong>$62,000</strong></div>
+        </div>
+        <p class="panel-note">AI notes and rule-based limits appear here before final human approval.</p>
+      </aside>
+    </section>
+
+    <section id="how-it-works" class="section-card">
+      <div class="section-heading">
+        <p class="eyebrow">Workflow</p>
+        <h2>From intake to decision in one clean system.</h2>
+      </div>
+      <div class="steps-grid">
+        <article><span>01</span><h3>Client submits profile</h3><p>Business details, owner contact information, time in business, estimated sales, and supporting documents.</p></article>
+        <article><span>02</span><h3>AI reads documents</h3><p>The backend prepares statement text for extraction, summary, risk indicators, and underwriter notes.</p></article>
+        <article><span>03</span><h3>Rules calculate range</h3><p>Average deposits, credit score, negative events, and existing obligations generate a low/high offer range.</p></article>
+        <article><span>04</span><h3>Admin approves</h3><p>Your team reviews the result, enters final terms, and sends a client update from the dashboard.</p></article>
+      </div>
+    </section>
+
+    <section id="review" class="split-section">
+      <div class="section-card dark-card">
+        <p class="eyebrow">Premium Review</p>
+        <h2>Built for lenders, brokers, and business financing teams.</h2>
+        <p>Use this as a clean internal dashboard for MCA-style files. It is designed to support decisioning, not replace final human underwriting.</p>
+      </div>
+      <div class="feature-list">
+        <div><strong>Risk Grade</strong><span>A simple grade based on cash flow strength and risk indicators.</span></div>
+        <div><strong>Suggested Limits</strong><span>Low and high ranges based on average monthly deposits and risk multiplier.</span></div>
+        <div><strong>Underwriter Notes</strong><span>AI-generated summary that explains what looks strong, weak, or needs verification.</span></div>
+        <div><strong>Decision Buttons</strong><span>Approve, decline, request more documents, or send to lender.</span></div>
+      </div>
+    </section>
+
+    <section id="apply" class="section-card application-section">
+      <div class="section-heading">
+        <p class="eyebrow">Application Intake</p>
+        <h2>Submit a business financing file.</h2>
+        <p>This form is connected to the Apps Script backend for application intake and document upload.</p>
+      </div>
+
+      <form id="applicationForm" class="form-card inner-form">
+        <div class="grid">
+          <label>Business Name<input name="businessName" required /></label>
+          <label>Owner Name<input name="ownerName" required /></label>
+          <label>Email<input name="email" type="email" required /></label>
+          <label>Phone<input name="phone" required /></label>
+          <label>Industry<input name="industry" placeholder="Restaurant, trucking, retail..." /></label>
+          <label>Time in Business<input name="timeInBusiness" placeholder="Example: 3 years" required /></label>
+          <label>Credit Score<input name="creditScore" type="number" min="300" max="900" required /></label>
+          <label>Estimated Monthly Sales<input name="monthlySalesEstimate" type="number" min="0" required /></label>
+        </div>
+
+        <label class="full">Supporting Documents
+          <input name="documents" type="file" multiple required />
+        </label>
+
+        <label class="consent">
+          <input name="consent" type="checkbox" required />
+          I consent to this information being reviewed for business financing pre-screening.
+        </label>
+
+        <button type="submit">Submit Application</button>
+        <p id="statusMessage" class="status"></p>
+      </form>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <strong>Vancouver Finance Company Inc.</strong>
+    <span>AI-assisted underwriting support. Final decisions require human review.</span>
+  </footer>
+
+  <script src="script.js"></script>
+</body>
+</html>
