@@ -3,54 +3,77 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>VFC AI Underwriting Dashboard</title>
+  <title>VFC Admin Dashboard</title>
   <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="admin-dashboard.css" />
 </head>
 <body>
-  <main class="page-shell">
-    <section class="hero-card">
-      <p class="eyebrow">VFC AI Engine</p>
-      <h1>Underwriting Dashboard</h1>
-      <p class="subtitle">Review applications, AI analysis, suggested offers, and final decision actions.</p>
-    </section>
+  <header class="site-header">
+    <a class="brand" href="index.html">
+      <span class="brand-mark">VFC</span>
+      <span>
+        <strong>Vancouver Finance Company Inc.</strong>
+        <small>Admin Underwriting Dashboard</small>
+      </span>
+    </a>
+    <nav>
+      <a href="index.html">Client Page</a>
+      <a class="nav-button" href="dashboard.html">Admin Dashboard</a>
+    </nav>
+  </header>
 
-    <section class="dashboard-card">
-      <h2>ABC Business Ltd.</h2>
-      <p><strong>Status:</strong> Pending Review</p>
-      <div class="metric-grid">
-        <div class="metric"><span>Risk Grade</span><strong>B+</strong></div>
-        <div class="metric"><span>Avg Monthly Deposits</span><strong>$72,500</strong></div>
-        <div class="metric"><span>Suggested Low Offer</span><strong>$35,000</strong></div>
-        <div class="metric"><span>Suggested High Offer</span><strong>$62,000</strong></div>
+  <main class="admin-shell">
+    <section class="admin-hero">
+      <div>
+        <p class="eyebrow">VFC AI Engine</p>
+        <h1>Application Command Centre</h1>
+        <p class="subtitle">Review every client file, open documents, assess scenarios, and approve or decline from one premium dashboard.</p>
+      </div>
+      <div class="admin-actions">
+        <button id="refreshButton" type="button">Refresh Applications</button>
+        <a class="secondary-link" href="index.html">Open Client Intake</a>
       </div>
     </section>
 
-    <section class="dashboard-card">
-      <h3>AI Underwriter Notes</h3>
-      <p>Stable monthly deposit activity, moderate balance volatility, limited negative events, and acceptable time in business. Suggested action: approve with conditions and verify existing business obligations before final funding.</p>
+    <section class="admin-stats">
+      <div class="metric"><span>Total Applications</span><strong id="totalApplications">0</strong></div>
+      <div class="metric"><span>Pending Review</span><strong id="pendingApplications">0</strong></div>
+      <div class="metric"><span>Approved</span><strong id="approvedApplications">0</strong></div>
+      <div class="metric"><span>Declined</span><strong id="declinedApplications">0</strong></div>
     </section>
 
-    <section class="dashboard-card">
-      <h3>Final Decision</h3>
-      <label>Final Approved Amount<input id="finalAmount" type="number" placeholder="50000" /></label>
-      <label>Conditions<textarea id="conditions" rows="4" placeholder="Example: void cheque, ID, ownership docs, signed agreement"></textarea></label>
-      <div class="button-row">
-        <button onclick="decision('Approved')">Approve</button>
-        <button onclick="decision('Declined')">Decline</button>
-        <button onclick="decision('More Docs Required')">Request More Docs</button>
-        <button onclick="decision('Send to Lender')">Send to Lender</button>
-      </div>
-      <p id="decisionStatus" class="status"></p>
+    <section class="admin-toolbar">
+      <label>Search
+        <input id="searchInput" placeholder="Business, owner, email, application ID" />
+      </label>
+      <label>Status
+        <select id="statusFilter">
+          <option value="">All Statuses</option>
+          <option value="Submitted">Submitted</option>
+          <option value="Approved">Approved</option>
+          <option value="Conditionally Approved">Conditionally Approved</option>
+          <option value="Declined">Declined</option>
+          <option value="More Docs Required">More Docs Required</option>
+          <option value="Sent to Lender">Sent to Lender</option>
+        </select>
+      </label>
+      <label>Lender
+        <select id="lenderFilter">
+          <option value="">All Lenders</option>
+          <option>Journey Capital</option>
+          <option>Merchant Growth</option>
+          <option>iCapital</option>
+          <option>Canacap Funding</option>
+          <option>Sheaves Capital</option>
+          <option>VFC Internal</option>
+        </select>
+      </label>
     </section>
+
+    <p id="adminStatus" class="status">Loading applications...</p>
+    <section id="applicationsGrid" class="application-grid"></section>
   </main>
 
-  <script>
-    function decision(status) {
-      const amount = document.getElementById('finalAmount').value;
-      const conditions = document.getElementById('conditions').value;
-      document.getElementById('decisionStatus').textContent = `${status} selected. Final amount: ${amount || 'N/A'}. Backend connection pending.`;
-      console.log({ status, amount, conditions });
-    }
-  </script>
+  <script src="admin-dashboard.js"></script>
 </body>
 </html>
