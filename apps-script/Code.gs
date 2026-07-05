@@ -3,7 +3,10 @@ const CONFIG = {
   APPLICATIONS_TAB: 'Applications',
   ANALYSIS_TAB: 'Statement Analysis',
   RESULTS_TAB: 'Underwriting Results',
-  ADMIN_EMAIL: 'admin@vancouverfinancecompany.com'
+  ADMIN_EMAIL: 'admin@vancouverfinancecompany.com',
+  GCP_PROJECT_ID: 'project-a528a6b2-3583-415a-bba',
+  GCS_BUCKET_NAME: 'vfc-statement-uploads',
+  GCS_SERVICE_ACCOUNT_EMAIL: 'vfc-apps-script-storage-43@project-a528a6b2-3583-415a-bba.iam.gserviceaccount.com'
 };
 
 function doPost(e) {
