@@ -35,6 +35,10 @@ function doGet(e) {
 
 function submitApplication(payload) {
   const applicationId = payload.applicationId || ('APP-' + new Date().getTime());
+  payload.applicationId = applicationId;
+
+  const folderResult = createApplicationFolderForPayload(payload);
+
   const row = [
     applicationId,
     new Date(),
@@ -47,13 +51,13 @@ function submitApplication(payload) {
     payload.creditScore || '',
     payload.monthlySalesEstimate || '',
     'Submitted',
-    '',
+    'Application Folder: ' + folderResult.applicationFolderUrl,
     ''
   ];
 
   appendRow(CONFIG.APPLICATIONS_TAB, row);
   notifyAdminNewApplication(applicationId, payload);
-  return { ok: true, applicationId };
+  return { ok: true, applicationId, folder: folderResult };
 }
 
 function uploadDocumentForApplication(payload) {
