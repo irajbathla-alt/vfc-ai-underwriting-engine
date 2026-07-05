@@ -35,14 +35,49 @@ function setupDatabaseSheets() {
     'Recommended Action Or Notes', 'Conditions Or Audit Note'
   ];
 
+  const adminDecisionHeaders = [
+    'Decision ID', 'Application ID', 'Decision Date', 'Status',
+    'Final Amount', 'Final Lender', 'Scenario', 'Conditions', 'Notes', 'Reviewer'
+  ];
+
+  const historicalCaseHeaders = [
+    'Case ID', 'Lender Name', 'Decision', 'Funded', 'Approved Amount',
+    'Requested Amount', 'Industry', 'Time in Business', 'Credit Score',
+    'Average Monthly Deposits', 'NSF Count', 'Negative Days',
+    'Existing MCA Payments', 'Revenue Trend', 'Reason Approved',
+    'Reason Declined', 'Conditions', 'Statement Months Reviewed',
+    'Decision Date', 'Notes'
+  ];
+
+  const clientUserHeaders = [
+    'Client ID', 'Created Date', 'Owner Name', 'Business Name',
+    'Email', 'Phone', 'Latest Application ID', 'Account Status'
+  ];
+
+  const applicationStatusHeaders = [
+    'Application ID', 'Status Date', 'Status', 'Note'
+  ];
+
+  const lenderCriteriaHeaders = [
+    'Lender Name', 'Minimum Deposits', 'Minimum Time in Business',
+    'Minimum Credit Score', 'Preferred Industries', 'Risk Notes', 'Last Updated'
+  ];
+
   initializeSheet(CONFIG.APPLICATIONS_TAB, applicationHeaders);
   initializeSheet(CONFIG.ANALYSIS_TAB, analysisHeaders);
   initializeSheet(CONFIG.RESULTS_TAB, resultHeaders);
+  initializeSheet(CONFIG.ADMIN_DECISIONS_TAB, adminDecisionHeaders);
+  initializeSheet(CONFIG.HISTORICAL_CASES_TAB, historicalCaseHeaders);
+  initializeSheet(CONFIG.CLIENT_USERS_TAB, clientUserHeaders);
+  initializeSheet(CONFIG.APPLICATION_STATUS_TAB, applicationStatusHeaders);
+  initializeSheet(CONFIG.LENDER_CRITERIA_TAB, lenderCriteriaHeaders);
 }
 
 function initializeSheet(tabName, headers) {
   const sheet = getOrCreateSheet(tabName);
-  if (sheet.getLastRow() === 0) sheet.appendRow(headers);
+  if (sheet.getLastRow() === 0) {
+    sheet.appendRow(headers);
+  }
   sheet.setFrozenRows(1);
 }
 
