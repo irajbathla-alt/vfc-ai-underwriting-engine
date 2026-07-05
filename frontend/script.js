@@ -1,4 +1,5 @@
 const APPS_SCRIPT_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbxLCt_MKvRoiVGwB7CONfRVBauJ-dO79xK_J-LBI0FGdvc5fpWSO4t927oxLZ8xvig/exec";
+const MINIMUM_STATEMENT_FILES = 6;
 
 const form = document.getElementById("applicationForm");
 const statusMessage = document.getElementById("statusMessage");
@@ -8,18 +9,27 @@ form?.addEventListener("submit", async (event) => {
 
   const formData = new FormData(form);
   const files = Array.from(formData.getAll("documents") || []).filter(file => file && file.name);
+
+  if (files.length < MINIMUM_STATEMENT_FILES) {
+    setStatus(`Please upload at least ${MINIMUM_STATEMENT_FILES} months of bank statements before submitting.`);
+    return;
+  }
+
   const applicationId = generateApplicationId();
+  const businessName = String(formData.get("businessName") || "").trim();
+  const ownerName = String(formData.get("ownerName") || "").trim();
 
   const payload = {
     applicationId,
-    businessName: formData.get("businessName"),
-    ownerName: formData.get("ownerName"),
+    businessName,
+    ownerName,
     email: formData.get("email"),
     phone: formData.get("phone"),
     industry: formData.get("industry"),
     timeInBusiness: formData.get("timeInBusiness"),
     creditScore: Number(formData.get("creditScore")),
     monthlySalesEstimate: Number(formData.get("monthlySalesEstimate")),
+    statementFileCount: files.length,
     consent: formData.get("consent") === "on"
   };
 
@@ -27,20 +37,20 @@ form?.addEventListener("submit", async (event) => {
     setStatus("Creating application record...");
     await postToAppsScript({ action: "submitApplication", payload });
 
-    if (files.length) {
-      setStatus(`Uploading ${files.length} document${files.length > 1 ? "s" : ""}...`);
-      for (const file of files) {
-        const base64Data = await fileToBase64(file);
-        await postToAppsScript({
-          action: "uploadDocument",
-          payload: {
-            applicationId,
-            fileName: file.name,
-            mimeType: file.type || "application/octet-stream",
-            base64Data
-          }
-        });
-      }
+    setStatus(`Uploading ${files.length} statement file${files.length > 1 ? "s" : ""} into ${ownerName} - ${businessName} folder...`);
+    for (const file of files) {
+      const base64Data = await fileToBase64(file);
+      await postToAppsScript({
+        action: "uploadDocument",
+        payload: {
+          applicationId,
+          businessName,
+          ownerName,
+          fileName: file.name,
+          mimeType: file.type || "application/octet-stream",
+          base64Data
+        }
+      });
     }
 
     setStatus(`Application submitted successfully. Reference ID: ${applicationId}`);
@@ -52,8 +62,6 @@ form?.addEventListener("submit", async (event) => {
 });
 
 function postToAppsScript(body) {
-  // Apps Script web apps often require no-cors from static sites.
-  // Because no-cors responses are opaque, we generate the application ID in the frontend.
   return fetch(APPS_SCRIPT_WEB_APP_URL, {
     method: "POST",
     mode: "no-cors",
