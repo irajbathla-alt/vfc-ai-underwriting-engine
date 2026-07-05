@@ -34,6 +34,12 @@ function doPost(e) {
 
 function doGet(e) {
   try {
+    if (e.parameter.page === 'admin') {
+      return HtmlService.createHtmlOutputFromFile('AdminDashboard')
+        .setTitle('VFC Admin Dashboard')
+        .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+    }
+
     const action = e.parameter.action || '';
     let result;
 
