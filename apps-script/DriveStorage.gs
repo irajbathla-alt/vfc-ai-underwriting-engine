@@ -5,6 +5,19 @@ function getUploadFolder() {
   return DriveApp.getFolderById(CONFIG.DRIVE_UPLOAD_FOLDER_ID);
 }
 
+function getOrCreateApplicationFolder(payload) {
+  const parentFolder = getUploadFolder();
+  const applicationId = payload.applicationId || 'APP-UNKNOWN';
+  const businessName = payload.businessName || 'Unknown Business';
+  const ownerName = payload.ownerName || 'Unknown Applicant';
+  const folderName = sanitizeFolderName(ownerName + ' - ' + businessName + ' - ' + applicationId);
+
+  const existingFolders = parentFolder.getFoldersByName(folderName);
+  if (existingFolders.hasNext()) return existingFolders.next();
+
+  return parentFolder.createFolder(folderName);
+}
+
 function saveBase64FileToDrive(payload) {
   if (!payload || !payload.applicationId) {
     throw new Error('Missing applicationId');
@@ -16,10 +29,10 @@ function saveBase64FileToDrive(payload) {
     throw new Error('Missing base64Data');
   }
 
-  const folder = getUploadFolder();
+  const folder = getOrCreateApplicationFolder(payload);
   const bytes = Utilities.base64Decode(payload.base64Data);
   const mimeType = payload.mimeType || 'application/octet-stream';
-  const safeFileName = sanitizeFileName(payload.applicationId + '-' + payload.fileName);
+  const safeFileName = sanitizeFileName(payload.fileName);
   const blob = Utilities.newBlob(bytes, mimeType, safeFileName);
   const file = folder.createFile(blob);
 
@@ -27,13 +40,16 @@ function saveBase64FileToDrive(payload) {
   return {
     ok: true,
     applicationId: payload.applicationId,
+    applicationFolderId: folder.getId(),
+    applicationFolderName: folder.getName(),
+    applicationFolderUrl: folder.getUrl(),
     fileId: file.getId(),
     fileName: file.getName(),
     fileUrl: file.getUrl()
   };
 }
 
-function updateApplicationDocumentLinks(applicationId, fileUrl) {
+function updateApplicationDocumentLinks(applicationId, fileUrl, folderUrl) {
   const sheet = getOrCreateSheet(CONFIG.APPLICATIONS_TAB);
   const rows = sheet.getDataRange().getValues();
   if (!rows.length) throw new Error('Applications sheet is empty');
@@ -49,7 +65,10 @@ function updateApplicationDocumentLinks(applicationId, fileUrl) {
   for (let i = 1; i < rows.length; i++) {
     if (String(rows[i][applicationIdColumn]) === String(applicationId)) {
       const existing = String(rows[i][documentLinksColumn] || '').trim();
-      const updated = existing ? existing + '\n' + fileUrl : fileUrl;
+      const folderLine = folderUrl ? 'Application Folder: ' + folderUrl : '';
+      const fileLine = fileUrl ? 'Document: ' + fileUrl : '';
+      const newLines = [folderLine, fileLine].filter(Boolean).join('\n');
+      const updated = existing ? existing + '\n' + newLines : newLines;
       sheet.getRange(i + 1, documentLinksColumn + 1).setValue(updated);
       return { ok: true };
     }
@@ -59,7 +78,11 @@ function updateApplicationDocumentLinks(applicationId, fileUrl) {
 }
 
 function sanitizeFileName(value) {
-  return String(value).replace(/[^a-zA-Z0-9._-]/g, '_');
+  return String(value).replace(/[^a-zA-Z0-9._ -]/g, '_').trim();
+}
+
+function sanitizeFolderName(value) {
+  return String(value).replace(/[\\/:*?"<>|#%{}~&]/g, '_').replace(/\s+/g, ' ').trim();
 }
 
 function testDriveFolderConnection() {
@@ -68,6 +91,22 @@ function testDriveFolderConnection() {
     ok: true,
     folderId: folder.getId(),
     folderName: folder.getName()
+  };
+  Logger.log(JSON.stringify(result, null, 2));
+  return result;
+}
+
+function testCreateApplicationFolder() {
+  const folder = getOrCreateApplicationFolder({
+    applicationId: 'APP-TEST-123',
+    businessName: 'ABC Pizza Ltd',
+    ownerName: 'John Smith'
+  });
+  const result = {
+    ok: true,
+    folderId: folder.getId(),
+    folderName: folder.getName(),
+    folderUrl: folder.getUrl()
   };
   Logger.log(JSON.stringify(result, null, 2));
   return result;
