@@ -1,0 +1,155 @@
+<!doctype html>
+<html>
+<head>
+  <base target="_top">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body { font-family: Arial, sans-serif; margin: 0; background: #f5f4f0; color: #111827; }
+    .shell { max-width: 1180px; margin: 0 auto; padding: 28px; }
+    .hero, .card, .toolbar, .stats { background: white; border: 1px solid #e5e7eb; border-radius: 22px; padding: 24px; margin-bottom: 18px; box-shadow: 0 12px 40px rgba(15,23,42,.06); }
+    h1 { font-size: 44px; line-height: 1; margin: 0 0 12px; }
+    h2 { margin: 0 0 8px; }
+    .muted { color: #6b7280; }
+    .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+    .metric { border: 1px solid #e5e7eb; border-radius: 16px; padding: 16px; }
+    .metric span { color: #6b7280; font-size: 13px; }
+    .metric strong { display: block; font-size: 28px; margin-top: 8px; }
+    .toolbar { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 12px; }
+    label { display: flex; flex-direction: column; gap: 8px; font-weight: 700; }
+    input, select, textarea { border: 1px solid #d1d5db; border-radius: 12px; padding: 12px; font: inherit; width: 100%; box-sizing: border-box; }
+    button, .link-button { border: 0; border-radius: 999px; padding: 12px 18px; background: #111827; color: white; font-weight: 800; cursor: pointer; text-decoration: none; display: inline-block; }
+    .secondary { background: white; color: #111827; border: 1px solid #d1d5db; }
+    .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 16px 0; }
+    .box { border: 1px solid #e5e7eb; border-radius: 14px; padding: 12px; }
+    .box span { color: #6b7280; font-size: 12px; }
+    .box strong { display: block; margin-top: 6px; }
+    .decision { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 12px; }
+    .buttons { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+    .pill { display: inline-block; border-radius: 999px; padding: 6px 10px; background: #f3f4f6; font-size: 12px; font-weight: 700; }
+    .status { color: #2563eb; font-weight: 700; }
+    @media (max-width: 800px) { .stats, .toolbar, .grid, .decision { grid-template-columns: 1fr; } h1 { font-size: 34px; } }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <section class="hero">
+      <p class="muted">VFC AI Underwriting Engine</p>
+      <h1>Admin Dashboard</h1>
+      <p class="muted">Review applications, open Drive folders, save final lender decisions, and update client status without using Sheets directly.</p>
+      <button onclick="loadApplications()">Refresh Applications</button>
+    </section>
+
+    <section class="stats">
+      <div class="metric"><span>Total</span><strong id="total">0</strong></div>
+      <div class="metric"><span>Pending</span><strong id="pending">0</strong></div>
+      <div class="metric"><span>Approved</span><strong id="approved">0</strong></div>
+      <div class="metric"><span>Declined</span><strong id="declined">0</strong></div>
+    </section>
+
+    <section class="toolbar">
+      <label>Search<input id="search" oninput="render()" placeholder="Business, owner, email, application ID"></label>
+      <label>Status<select id="statusFilter" onchange="render()"><option value="">All</option><option>Submitted</option><option>Conditionally Approved</option><option>Declined</option><option>More Docs Required</option><option>Sent to Lender</option></select></label>
+      <label>Lender<select id="lenderFilter" onchange="render()"><option value="">All</option><option>Journey Capital</option><option>Merchant Growth</option><option>iCapital</option><option>Canacap Funding</option><option>Sheaves Capital</option><option>VFC Internal</option></select></label>
+    </section>
+
+    <p id="message" class="status">Loading...</p>
+    <section id="cards"></section>
+  </main>
+
+  <script>
+    let applications = [];
+
+    window.onload = loadApplications;
+
+    function loadApplications() {
+      setMessage('Loading applications...');
+      google.script.run.withSuccessHandler(function(data) {
+        applications = data.applications || [];
+        updateStats();
+        render();
+        setMessage(applications.length + ' application(s) loaded.');
+      }).withFailureHandler(function(error) {
+        setMessage('Could not load applications: ' + error.message);
+      }).listApplications();
+    }
+
+    function render() {
+      const search = document.getElementById('search').value.toLowerCase();
+      const status = document.getElementById('statusFilter').value;
+      const lender = document.getElementById('lenderFilter').value;
+      const cards = document.getElementById('cards');
+      cards.innerHTML = '';
+
+      const filtered = applications.filter(app => {
+        const text = [app.applicationId, app.businessName, app.ownerName, app.email, app.phone, app.industry].join(' ').toLowerCase();
+        return (!search || text.includes(search)) && (!status || app.status === status) && (!lender || app.assignedLender === lender);
+      });
+
+      if (!filtered.length) {
+        cards.innerHTML = '<div class="card">No applications found.</div>';
+        return;
+      }
+
+      filtered.forEach(app => cards.appendChild(card(app)));
+    }
+
+    function card(app) {
+      const wrap = document.createElement('article');
+      wrap.className = 'card';
+      wrap.innerHTML = '<h2>' + safe(app.businessName || 'Unknown Business') + '</h2>' +
+        '<p><span class="pill">' + safe(app.status || 'Submitted') + '</span> <span class="muted">' + safe(app.applicationId || '') + '</span></p>' +
+        '<p class="muted">Owner: ' + safe(app.ownerName || 'N/A') + ' | Email: ' + safe(app.email || 'N/A') + ' | Phone: ' + safe(app.phone || 'N/A') + '</p>' +
+        '<div class="grid"><div class="box"><span>Credit</span><strong>' + safe(app.creditScore || 'N/A') + '</strong></div><div class="box"><span>Time in Business</span><strong>' + safe(app.timeInBusiness || 'N/A') + '</strong></div><div class="box"><span>Sales Estimate</span><strong>' + money(app.monthlySalesEstimate) + '</strong></div><div class="box"><span>Industry</span><strong>' + safe(app.industry || 'N/A') + '</strong></div></div>' +
+        '<p><strong>Scenario:</strong> ' + safe(app.scenario || 'Manual review pending') + '</p>' +
+        (app.driveFolderUrl ? '<p><a class="link-button secondary" target="_blank" href="' + safeAttr(app.driveFolderUrl) + '">Open Drive Folder</a></p>' : '<p class="muted">No Drive folder link found.</p>') +
+        '<div class="decision"><label>Final Amount<input id="amount-' + safeAttr(app.applicationId) + '" type="number" value="' + safeAttr(app.finalAmount || '') + '"></label><label>Final Lender<select id="lender-' + safeAttr(app.applicationId) + '">' + lenderOptions(app.assignedLender) + '</select></label><label>Scenario Type<select id="scenario-' + safeAttr(app.applicationId) + '"><option>Strong file</option><option>Conditional approval</option><option>More documents required</option><option>Send to lender</option><option>Decline risk</option></select></label></div>' +
+        '<label>Conditions<textarea id="conditions-' + safeAttr(app.applicationId) + '" rows="3">' + safe(app.conditions || '') + '</textarea></label>' +
+        '<label>Internal Notes<textarea id="notes-' + safeAttr(app.applicationId) + '" rows="3">' + safe(app.notes || '') + '</textarea></label>' +
+        '<div class="buttons"><button onclick="decision(\'' + safeAttr(app.applicationId) + '\', \'Conditionally Approved\')">Approve</button><button onclick="decision(\'' + safeAttr(app.applicationId) + '\', \'Declined\')">Decline</button><button onclick="decision(\'' + safeAttr(app.applicationId) + '\', \'More Docs Required\')">Request Docs</button><button onclick="decision(\'' + safeAttr(app.applicationId) + '\', \'Sent to Lender\')">Send to Lender</button></div>' +
+        '<p class="status" id="decision-' + safeAttr(app.applicationId) + '"></p>';
+      return wrap;
+    }
+
+    function decision(applicationId, status) {
+      const payload = {
+        applicationId: applicationId,
+        status: status,
+        finalAmount: val('amount-' + applicationId),
+        finalLender: val('lender-' + applicationId),
+        scenario: val('scenario-' + applicationId),
+        conditions: val('conditions-' + applicationId),
+        notes: val('notes-' + applicationId),
+        reviewer: 'VFC Admin'
+      };
+      document.getElementById('decision-' + applicationId).textContent = 'Saving...';
+      google.script.run.withSuccessHandler(function() {
+        document.getElementById('decision-' + applicationId).textContent = status + ' saved.';
+        const app = applications.find(a => a.applicationId === applicationId);
+        if (app) app.status = status;
+        updateStats();
+      }).withFailureHandler(function(error) {
+        document.getElementById('decision-' + applicationId).textContent = 'Error: ' + error.message;
+      }).saveFinalDecision(payload);
+    }
+
+    function updateStats() {
+      const approved = applications.filter(a => a.status === 'Approved' || a.status === 'Conditionally Approved').length;
+      const declined = applications.filter(a => a.status === 'Declined').length;
+      document.getElementById('total').textContent = applications.length;
+      document.getElementById('approved').textContent = approved;
+      document.getElementById('declined').textContent = declined;
+      document.getElementById('pending').textContent = Math.max(0, applications.length - approved - declined);
+    }
+
+    function lenderOptions(selected) {
+      return ['', 'Journey Capital', 'Merchant Growth', 'iCapital', 'Canacap Funding', 'Sheaves Capital', 'VFC Internal'].map(name => '<option value="' + safeAttr(name) + '" ' + (name === selected ? 'selected' : '') + '>' + (name || 'Select lender') + '</option>').join('');
+    }
+
+    function val(id) { return document.getElementById(id).value || ''; }
+    function setMessage(text) { document.getElementById('message').textContent = text; }
+    function money(value) { const n = Number(value || 0); return n ? '$' + n.toLocaleString() : '$0'; }
+    function safe(value) { return String(value || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;'); }
+    function safeAttr(value) { return safe(value).replace(/`/g, '&#096;'); }
+  </script>
+</body>
+</html>
