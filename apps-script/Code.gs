@@ -160,7 +160,8 @@ function getApplicationDetail(applicationId) {
 }
 
 function buildApplicationCardData(app, latestDecision) {
-  const documentLinks = app.documentLinks || '';
+  const repairedLinks = ensureApplicationFolderLink(app);
+  const documentLinks = repairedLinks || app.documentLinks || '';
   const folderUrl = parseDriveFolderUrl(documentLinks);
   return {
     applicationId: app.applicationId || '',
@@ -182,6 +183,42 @@ function buildApplicationCardData(app, latestDecision) {
     notes: latestDecision.notes || '',
     scenario: latestDecision.scenario || buildScenarioSummary(app)
   };
+}
+
+function ensureApplicationFolderLink(app) {
+  const existingLinks = String(app.documentLinks || '').trim();
+  if (parseDriveFolderUrl(existingLinks)) return existingLinks;
+  if (!app.applicationId) return existingLinks;
+
+  const folderResult = createApplicationFolderForPayload({
+    applicationId: app.applicationId,
+    businessName: app.businessName || 'Unknown Business',
+    ownerName: app.ownerName || 'Unknown Applicant'
+  });
+
+  const folderLine = 'Application Folder: ' + folderResult.applicationFolderUrl;
+  const updatedLinks = existingLinks ? folderLine + '\n' + existingLinks : folderLine;
+  setApplicationDocumentLinks(app.applicationId, updatedLinks);
+  return updatedLinks;
+}
+
+function setApplicationDocumentLinks(applicationId, documentLinks) {
+  const sheet = getOrCreateSheet(CONFIG.APPLICATIONS_TAB);
+  const rows = sheet.getDataRange().getValues();
+  if (!rows.length) return;
+
+  const headers = rows[0];
+  const idColumn = headers.indexOf('Application ID');
+  const documentLinksColumn = headers.indexOf('Document Links');
+
+  if (idColumn === -1 || documentLinksColumn === -1) return;
+
+  for (let i = 1; i < rows.length; i++) {
+    if (String(rows[i][idColumn]) === String(applicationId)) {
+      sheet.getRange(i + 1, documentLinksColumn + 1).setValue(documentLinks);
+      return;
+    }
+  }
 }
 
 function saveFinalDecision(payload) {
