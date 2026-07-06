@@ -1,126 +1,177 @@
 body.landing-page {
-  background: radial-gradient(circle at top, #ffffff 0%, #fbfbfa 48%, #f6f5f2 100%);
-  color: #171717;
+  background: #ffffff;
+  color: #1d1d1f;
 }
 
 .landing-tabs-shell {
-  padding-top: 72px;
-  background: transparent;
+  min-height: auto;
+  display: grid;
+  align-items: start;
+  justify-items: center;
+  padding: 18px 16px 64px;
+  background: #ffffff;
 }
 
 .landing-tabs-card {
-  width: min(820px, 100%);
-  border: 1px solid rgba(17, 24, 39, 0.075);
-  border-radius: 38px;
-  background: rgba(255, 255, 255, 0.82);
-  backdrop-filter: blur(22px);
-  box-shadow: 0 24px 80px rgba(17, 24, 39, 0.065);
-  padding: clamp(42px, 8vw, 86px);
+  width: min(660px, 100%);
+  text-align: center;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  padding: 0 0 18px;
+  box-shadow: none;
 }
 
 .landing-logo {
-  width: 58px;
-  height: 58px;
-  border-radius: 18px;
-  margin-bottom: 32px;
-  background: #f8f8f7;
-  color: #111827;
-  border: 1px solid rgba(17, 24, 39, 0.09);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.9), 0 12px 30px rgba(17,24,39,.055);
-  font-size: 14px;
-  font-weight: 760;
-  letter-spacing: .08em;
+  display: none;
 }
 
 .landing-tabs-card h1 {
-  font-size: clamp(40px, 6.1vw, 68px);
-  line-height: 1.02;
-  letter-spacing: -0.055em;
-  font-weight: 640;
-  color: #161616;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: clamp(28px, 4vw, 38px);
+  line-height: 1.08;
+  margin: 0;
+  letter-spacing: -0.025em;
+  font-weight: 500;
+  color: #050505;
 }
 
 .landing-subtitle {
-  margin-top: 20px;
-  font-size: clamp(17px, 2.2vw, 24px);
-  font-weight: 470;
-  letter-spacing: .02em;
-  color: #525252;
+  margin: 4px 0 0;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 14px;
+  font-weight: 400;
+  letter-spacing: 0;
+  color: #9a9a9a;
 }
 
 .landing-tabs {
-  margin-top: 42px;
-  gap: 12px;
-  max-width: 540px;
+  margin: 16px auto 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0,1fr));
+  gap: 0;
+  max-width: 300px;
+  padding: 3px;
+  background: #eeeeef;
+  border-radius: 999px;
 }
 
 .landing-tab {
-  min-height: 64px;
-  border-radius: 18px;
-  border-color: rgba(17, 24, 39, 0.11);
-  background: rgba(255, 255, 255, 0.72);
-  color: #1f2937;
+  min-height: 34px;
+  border: 0;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  font-family: Georgia, 'Times New Roman', serif;
   font-size: 15px;
-  font-weight: 650;
-  letter-spacing: .01em;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.95);
+  font-weight: 400;
+  letter-spacing: 0;
+  background: transparent;
+  color: #222222;
+  box-shadow: none;
+  transition: all .16s ease;
 }
 
 .landing-tab:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 14px 34px rgba(17,24,39,.075);
+  transform: none;
+  box-shadow: none;
+  background: rgba(255,255,255,.65);
 }
 
 .primary-tab {
-  background: #171717;
+  background: #3b82f6;
   color: #ffffff;
-  border-color: #171717;
-  box-shadow: 0 14px 34px rgba(17,24,39,.12);
+  box-shadow: 0 3px 10px rgba(59, 130, 246, .25);
 }
 
 .landing-note {
-  margin-top: 24px;
-  color: #737373;
+  margin: 12px 0 0;
+  color: #9a9a9a;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 13px;
+}
+
+.portal-links {
+  margin: 10px auto 0;
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.portal-pill {
+  min-width: 104px;
+  padding: 8px 16px;
+  border-radius: 999px;
+  border: 1px solid #cfe0ff;
+  background: #eef5ff;
+  color: #2563eb;
+  font-family: Georgia, 'Times New Roman', serif;
   font-size: 14px;
+  line-height: 1;
+}
+
+.portal-pill.green {
+  border-color: #9ee7ca;
+  background: #ecfff6;
+  color: #059669;
 }
 
 .simple-application-card {
-  border-radius: 32px;
-  border-color: rgba(17, 24, 39, 0.075);
-  box-shadow: 0 24px 80px rgba(17,24,39,.055);
+  width: min(760px, calc(100% - 32px));
+  margin-top: 12px;
+  border-radius: 24px;
+  border: 1px solid #eeeeee;
+  box-shadow: 0 18px 50px rgba(15,23,42,.045);
+  padding: clamp(22px, 4vw, 36px);
+}
+
+.section-heading {
+  margin-bottom: 22px;
 }
 
 .section-heading h2 {
-  font-weight: 610;
-  letter-spacing: -0.04em;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  font-size: clamp(24px, 3vw, 34px);
+}
+
+.section-heading p:last-child {
+  color: #777777;
+  font-size: 15px;
 }
 
 .eyebrow {
-  color: #8a8a8a;
-  font-weight: 650;
-  letter-spacing: .18em;
+  color: #9a9a9a;
+  font-weight: 500;
+  letter-spacing: .12em;
+  font-size: 11px;
 }
 
 label {
-  font-weight: 600;
+  font-weight: 500;
   color: #3f3f46;
+  font-size: 14px;
 }
 
 input, select, textarea {
-  border-color: rgba(17, 24, 39, 0.12);
-  background: #fdfdfc;
-  border-radius: 16px;
+  border-color: #dddddd;
+  background: #ffffff;
+  border-radius: 12px;
+  padding: 12px 14px;
 }
 
 input:focus, textarea:focus {
-  outline: 1.5px solid #171717;
+  outline: 1.5px solid #3b82f6;
   outline-offset: 2px;
 }
 
 button {
-  background: #171717;
-  font-weight: 680;
-  letter-spacing: .01em;
+  background: #1f2937;
+  font-weight: 600;
+  letter-spacing: 0;
+  padding: 12px 20px;
 }
 
 .helper-text, .section-heading p:last-child {
@@ -129,10 +180,14 @@ button {
 
 @media (max-width: 640px) {
   .landing-tabs-card h1 {
-    font-size: 40px;
+    font-size: 30px;
+  }
+
+  .landing-tabs {
+    max-width: 100%;
   }
 
   .landing-tabs-shell {
-    padding-top: 34px;
+    padding-top: 18px;
   }
 }
