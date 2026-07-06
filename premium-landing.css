@@ -1,0 +1,138 @@
+body.landing-page {
+  background: radial-gradient(circle at top, #ffffff 0%, #fbfbfa 48%, #f6f5f2 100%);
+  color: #171717;
+}
+
+.landing-tabs-shell {
+  padding-top: 72px;
+  background: transparent;
+}
+
+.landing-tabs-card {
+  width: min(820px, 100%);
+  border: 1px solid rgba(17, 24, 39, 0.075);
+  border-radius: 38px;
+  background: rgba(255, 255, 255, 0.82);
+  backdrop-filter: blur(22px);
+  box-shadow: 0 24px 80px rgba(17, 24, 39, 0.065);
+  padding: clamp(42px, 8vw, 86px);
+}
+
+.landing-logo {
+  width: 58px;
+  height: 58px;
+  border-radius: 18px;
+  margin-bottom: 32px;
+  background: #f8f8f7;
+  color: #111827;
+  border: 1px solid rgba(17, 24, 39, 0.09);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.9), 0 12px 30px rgba(17,24,39,.055);
+  font-size: 14px;
+  font-weight: 760;
+  letter-spacing: .08em;
+}
+
+.landing-tabs-card h1 {
+  font-size: clamp(40px, 6.1vw, 68px);
+  line-height: 1.02;
+  letter-spacing: -0.055em;
+  font-weight: 640;
+  color: #161616;
+}
+
+.landing-subtitle {
+  margin-top: 20px;
+  font-size: clamp(17px, 2.2vw, 24px);
+  font-weight: 470;
+  letter-spacing: .02em;
+  color: #525252;
+}
+
+.landing-tabs {
+  margin-top: 42px;
+  gap: 12px;
+  max-width: 540px;
+}
+
+.landing-tab {
+  min-height: 64px;
+  border-radius: 18px;
+  border-color: rgba(17, 24, 39, 0.11);
+  background: rgba(255, 255, 255, 0.72);
+  color: #1f2937;
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: .01em;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.95);
+}
+
+.landing-tab:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 14px 34px rgba(17,24,39,.075);
+}
+
+.primary-tab {
+  background: #171717;
+  color: #ffffff;
+  border-color: #171717;
+  box-shadow: 0 14px 34px rgba(17,24,39,.12);
+}
+
+.landing-note {
+  margin-top: 24px;
+  color: #737373;
+  font-size: 14px;
+}
+
+.simple-application-card {
+  border-radius: 32px;
+  border-color: rgba(17, 24, 39, 0.075);
+  box-shadow: 0 24px 80px rgba(17,24,39,.055);
+}
+
+.section-heading h2 {
+  font-weight: 610;
+  letter-spacing: -0.04em;
+}
+
+.eyebrow {
+  color: #8a8a8a;
+  font-weight: 650;
+  letter-spacing: .18em;
+}
+
+label {
+  font-weight: 600;
+  color: #3f3f46;
+}
+
+input, select, textarea {
+  border-color: rgba(17, 24, 39, 0.12);
+  background: #fdfdfc;
+  border-radius: 16px;
+}
+
+input:focus, textarea:focus {
+  outline: 1.5px solid #171717;
+  outline-offset: 2px;
+}
+
+button {
+  background: #171717;
+  font-weight: 680;
+  letter-spacing: .01em;
+}
+
+.helper-text, .section-heading p:last-child {
+  color: #747474;
+}
+
+@media (max-width: 640px) {
+  .landing-tabs-card h1 {
+    font-size: 40px;
+  }
+
+  .landing-tabs-shell {
+    padding-top: 34px;
+  }
+}
