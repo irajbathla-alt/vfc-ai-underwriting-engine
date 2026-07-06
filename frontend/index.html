@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>VFC AI Underwriting Engine</title>
+  <title>VFC Business Financing Application</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -12,99 +12,42 @@
       <span class="brand-mark">VFC</span>
       <span>
         <strong>Vancouver Finance Company Inc.</strong>
-        <small>AI Underwriting Engine</small>
+        <small>Business Financing Application</small>
       </span>
     </a>
     <nav>
-      <a href="#how-it-works">How It Works</a>
-      <a href="#review">Review</a>
       <a href="#apply">Apply</a>
-      <a class="nav-button" href="dashboard.html">Dashboard</a>
+      <a href="https://script.google.com/macros/s/AKfycbzxUvQ5Og3VAO2Vfc28fFHWzFT9u0DwTlRADpKatyYxt9YnMBxuy13CGdclt7kRdAM/exec?page=client">Client Portal</a>
+      <a class="nav-button" href="https://script.google.com/macros/s/AKfycbzxUvQ5Og3VAO2Vfc28fFHWzFT9u0DwTlRADpKatyYxt9YnMBxuy13CGdclt7kRdAM/exec?page=admin">Admin</a>
     </nav>
   </header>
 
   <main id="top">
-    <section class="landing-hero">
-      <div class="hero-copy">
-        <p class="eyebrow">Merchant Cash Advance Pre-Screening</p>
-        <h1>Read business cash flow. Score risk. Suggest funding limits.</h1>
-        <p class="subtitle">A premium intake and underwriting workflow for business financing files — built for fast document review, AI-assisted notes, and human final approval.</p>
-        <div class="hero-actions">
-          <a class="primary-link" href="#apply">Start Application</a>
-          <a class="secondary-link" href="dashboard.html">View Dashboard</a>
-        </div>
-        <div class="trust-row">
-          <span>Bank statement review</span>
-          <span>Risk grading</span>
-          <span>Offer range</span>
-          <span>Client email updates</span>
-        </div>
-      </div>
-
-      <aside class="hero-panel" aria-label="Sample underwriting result">
-        <div class="panel-topline">
-          <span>Live File Preview</span>
-          <strong>Pending Review</strong>
-        </div>
-        <h2>ABC Business Ltd.</h2>
-        <div class="score-orb">B+</div>
-        <div class="metric-list">
-          <div><span>Average Deposits</span><strong>$72,500</strong></div>
-          <div><span>Low Offer</span><strong>$35,000</strong></div>
-          <div><span>High Offer</span><strong>$62,000</strong></div>
-        </div>
-        <p class="panel-note">AI notes and rule-based limits appear here before final human approval.</p>
-      </aside>
-    </section>
-
-    <section id="how-it-works" class="section-card">
-      <div class="section-heading">
-        <p class="eyebrow">Workflow</p>
-        <h2>From intake to decision in one clean system.</h2>
-      </div>
-      <div class="steps-grid">
-        <article>
-          <span>01</span>
-          <h3>Client submits profile</h3>
-          <p>Business details, owner contact information, time in business, estimated sales, and supporting documents.</p>
-        </article>
-        <article>
-          <span>02</span>
-          <h3>AI reads documents</h3>
-          <p>The backend prepares statement text for extraction, summary, risk indicators, and underwriter notes.</p>
-        </article>
-        <article>
-          <span>03</span>
-          <h3>Rules calculate range</h3>
-          <p>Average deposits, credit score, negative events, and existing obligations generate a low/high offer range.</p>
-        </article>
-        <article>
-          <span>04</span>
-          <h3>Admin approves</h3>
-          <p>Your team reviews the result, enters final terms, and sends a client update from the dashboard.</p>
-        </article>
+    <section class="simple-hero">
+      <p class="eyebrow">Business Financing</p>
+      <h1>Apply for funding.</h1>
+      <p class="subtitle">Submit your business details and upload at least 6 months of bank statements. VFC will review your file and update your status in the client portal.</p>
+      <div class="hero-actions">
+        <a class="primary-link" href="#apply">Start Application</a>
+        <a class="secondary-link" href="https://script.google.com/macros/s/AKfycbzxUvQ5Og3VAO2Vfc28fFHWzFT9u0DwTlRADpKatyYxt9YnMBxuy13CGdclt7kRdAM/exec?page=client">Check My Status</a>
       </div>
     </section>
 
-    <section id="review" class="split-section">
-      <div class="section-card dark-card">
-        <p class="eyebrow">Premium Review</p>
-        <h2>Built for lenders, brokers, and business financing teams.</h2>
-        <p>Use this as a clean internal dashboard for MCA-style files. It is designed to support decisioning, not replace final human underwriting.</p>
-      </div>
-      <div class="feature-list">
-        <div><strong>Risk Grade</strong><span>A simple grade based on cash flow strength and risk indicators.</span></div>
-        <div><strong>Suggested Limits</strong><span>Low and high ranges based on average monthly deposits and risk multiplier.</span></div>
-        <div><strong>Underwriter Notes</strong><span>AI-generated summary that explains what looks strong, weak, or needs verification.</span></div>
-        <div><strong>Decision Buttons</strong><span>Approve, decline, request more documents, or send to lender.</span></div>
+    <section class="simple-steps section-card">
+      <h2>How it works</h2>
+      <div class="steps-grid compact-steps">
+        <article><span>01</span><h3>Apply</h3><p>Complete the form below.</p></article>
+        <article><span>02</span><h3>Upload</h3><p>Add 6 months of bank statements.</p></article>
+        <article><span>03</span><h3>Review</h3><p>VFC reviews and updates your file.</p></article>
+        <article><span>04</span><h3>Status</h3><p>Login to the client portal for updates.</p></article>
       </div>
     </section>
 
     <section id="apply" class="section-card application-section">
       <div class="section-heading">
-        <p class="eyebrow">Application Intake</p>
-        <h2>Submit a business financing file.</h2>
-        <p>This form is ready for the Apps Script connection once your Google Sheet and storage setup are complete.</p>
+        <p class="eyebrow">Application</p>
+        <h2>Business financing application</h2>
+        <p>Please complete all required fields and upload at least 6 bank statement files.</p>
       </div>
 
       <form id="applicationForm" class="form-card inner-form">
@@ -119,9 +62,10 @@
           <label>Estimated Monthly Sales<input name="monthlySalesEstimate" type="number" min="0" required /></label>
         </div>
 
-        <label class="full">Supporting Documents
+        <label class="full">Bank Statements / Supporting Documents
           <input name="documents" type="file" multiple required />
         </label>
+        <p class="helper-text">Minimum requirement: 6 months of bank statements.</p>
 
         <label class="consent">
           <input name="consent" type="checkbox" required />
@@ -136,7 +80,7 @@
 
   <footer class="site-footer">
     <strong>Vancouver Finance Company Inc.</strong>
-    <span>AI-assisted underwriting support. Final decisions require human review.</span>
+    <span>Final approval is subject to manual review and lender criteria.</span>
   </footer>
 
   <script src="script.js"></script>
