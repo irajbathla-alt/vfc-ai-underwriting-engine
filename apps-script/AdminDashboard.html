@@ -4,39 +4,48 @@
   <base target="_top">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
-    body { font-family: Arial, sans-serif; margin: 0; background: #f5f4f0; color: #111827; }
-    .shell { max-width: 1180px; margin: 0 auto; padding: 28px; }
-    .hero, .card, .toolbar, .stats { background: white; border: 1px solid #e5e7eb; border-radius: 22px; padding: 24px; margin-bottom: 18px; box-shadow: 0 12px 40px rgba(15,23,42,.06); }
-    h1 { font-size: 44px; line-height: 1; margin: 0 0 12px; }
-    h2 { margin: 0 0 8px; }
-    .muted { color: #6b7280; }
-    .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
-    .metric { border: 1px solid #e5e7eb; border-radius: 16px; padding: 16px; }
-    .metric span { color: #6b7280; font-size: 13px; }
-    .metric strong { display: block; font-size: 28px; margin-top: 8px; }
-    .toolbar { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 12px; }
-    label { display: flex; flex-direction: column; gap: 8px; font-weight: 700; }
-    input, select, textarea { border: 1px solid #d1d5db; border-radius: 12px; padding: 12px; font: inherit; width: 100%; box-sizing: border-box; }
-    button, .link-button { border: 0; border-radius: 999px; padding: 12px 18px; background: #111827; color: white; font-weight: 800; cursor: pointer; text-decoration: none; display: inline-block; }
-    .secondary { background: white; color: #111827; border: 1px solid #d1d5db; }
-    .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 16px 0; }
-    .box { border: 1px solid #e5e7eb; border-radius: 14px; padding: 12px; }
-    .box span { color: #6b7280; font-size: 12px; }
-    .box strong { display: block; margin-top: 6px; }
-    .decision { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 12px; }
-    .buttons { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
-    .pill { display: inline-block; border-radius: 999px; padding: 6px 10px; background: #f3f4f6; font-size: 12px; font-weight: 700; }
-    .status { color: #2563eb; font-weight: 700; }
-    @media (max-width: 800px) { .stats, .toolbar, .grid, .decision { grid-template-columns: 1fr; } h1 { font-size: 34px; } }
+    * { box-sizing: border-box; }
+    body { font-family: Georgia, 'Times New Roman', serif; margin: 0; background: #ffffff; color: #1d1d1f; }
+    .shell { max-width: 980px; margin: 0 auto; padding: 18px 16px 56px; }
+    .hero { text-align: center; padding: 0 0 18px; }
+    .hero h1 { font-size: clamp(28px, 4vw, 38px); line-height: 1.08; margin: 0; font-weight: 500; letter-spacing: -0.025em; color: #050505; }
+    .subtitle { margin: 4px 0 0; color: #9a9a9a; font-size: 14px; }
+    .top-actions { margin: 16px auto 0; display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; }
+    .soft-pill, button, .link-button { border-radius: 999px; padding: 8px 16px; border: 1px solid #cfe0ff; background: #eef5ff; color: #2563eb; font-family: Georgia, 'Times New Roman', serif; font-size: 14px; cursor: pointer; text-decoration: none; display: inline-block; }
+    button.primary { background: #3b82f6; color: #ffffff; border-color: #3b82f6; box-shadow: 0 3px 10px rgba(59,130,246,.25); }
+    .green { border-color: #9ee7ca; background: #ecfff6; color: #059669; }
+    .card, .toolbar, .stats { background: #ffffff; border: 1px solid #eeeeee; border-radius: 24px; padding: 18px; margin-bottom: 14px; box-shadow: 0 18px 50px rgba(15,23,42,.045); }
+    .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+    .metric { border: 1px solid #eeeeee; border-radius: 18px; padding: 14px; background: #fff; }
+    .metric span { color: #8a8a8a; font-size: 12px; }
+    .metric strong { display: block; font-size: 24px; margin-top: 5px; font-weight: 500; }
+    .toolbar { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 10px; }
+    label { display: flex; flex-direction: column; gap: 7px; font-weight: 500; color: #3f3f46; font-size: 14px; }
+    input, select, textarea { border: 1px solid #dddddd; border-radius: 12px; padding: 11px 12px; font: inherit; width: 100%; background: #ffffff; }
+    input:focus, textarea:focus, select:focus { outline: 1.5px solid #3b82f6; outline-offset: 2px; }
+    h2 { font-size: 24px; line-height: 1.1; margin: 0 0 8px; font-weight: 500; letter-spacing: -0.02em; }
+    .muted { color: #747474; font-size: 14px; }
+    .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 14px 0; }
+    .box { border: 1px solid #eeeeee; border-radius: 16px; padding: 12px; background: #fff; }
+    .box span { color: #8a8a8a; font-size: 12px; }
+    .box strong { display: block; margin-top: 5px; font-weight: 500; }
+    .decision { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 12px; }
+    .buttons { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+    .pill { display: inline-block; border-radius: 999px; padding: 6px 11px; background: #eeeeef; color: #333; font-size: 12px; font-weight: 400; }
+    .status { color: #2563eb; font-weight: 500; font-size: 14px; text-align: center; }
+    .scenario-text { color: #333; font-size: 14px; }
+    @media (max-width: 800px) { .stats, .toolbar, .grid, .decision { grid-template-columns: 1fr; } .shell { padding-top: 16px; } }
   </style>
 </head>
 <body>
   <main class="shell">
     <section class="hero">
-      <p class="muted">VFC AI Underwriting Engine</p>
-      <h1>Admin Dashboard</h1>
-      <p class="muted">Review applications, open Drive folders, save final lender decisions, and update client status without using Sheets directly.</p>
-      <button onclick="loadApplications()">Refresh Applications</button>
+      <h1>Vancouver<br>Finance Company Inc.</h1>
+      <p class="subtitle">AI Underwriting Engine — Admin</p>
+      <div class="top-actions">
+        <button class="primary" onclick="loadApplications()">Refresh</button>
+        <a class="soft-pill green" target="_top" href="https://script.google.com/macros/s/AKfycbzxUvQ5Og3VAO2Vfc28fFHWzFT9u0DwTlRADpKatyYxt9YnMBxuy13CGdclt7kRdAM/exec?page=client">Client Portal</a>
+      </div>
     </section>
 
     <section class="stats">
@@ -86,7 +95,7 @@
       });
 
       if (!filtered.length) {
-        cards.innerHTML = '<div class="card">No applications found.</div>';
+        cards.innerHTML = '<div class="card muted">No applications found.</div>';
         return;
       }
 
@@ -100,12 +109,12 @@
         '<p><span class="pill">' + safe(app.status || 'Submitted') + '</span> <span class="muted">' + safe(app.applicationId || '') + '</span></p>' +
         '<p class="muted">Owner: ' + safe(app.ownerName || 'N/A') + ' | Email: ' + safe(app.email || 'N/A') + ' | Phone: ' + safe(app.phone || 'N/A') + '</p>' +
         '<div class="grid"><div class="box"><span>Credit</span><strong>' + safe(app.creditScore || 'N/A') + '</strong></div><div class="box"><span>Time in Business</span><strong>' + safe(app.timeInBusiness || 'N/A') + '</strong></div><div class="box"><span>Sales Estimate</span><strong>' + money(app.monthlySalesEstimate) + '</strong></div><div class="box"><span>Industry</span><strong>' + safe(app.industry || 'N/A') + '</strong></div></div>' +
-        '<p><strong>Scenario:</strong> ' + safe(app.scenario || 'Manual review pending') + '</p>' +
-        (app.driveFolderUrl ? '<p><a class="link-button secondary" target="_blank" href="' + safeAttr(app.driveFolderUrl) + '">Open Drive Folder</a></p>' : '<p class="muted">No Drive folder link found.</p>') +
+        '<p class="scenario-text"><strong>Scenario:</strong> ' + safe(app.scenario || 'Manual review pending') + '</p>' +
+        (app.driveFolderUrl ? '<p><a class="link-button" target="_blank" href="' + safeAttr(app.driveFolderUrl) + '">Open Drive Folder</a></p>' : '<p class="muted">No Drive folder link found.</p>') +
         '<div class="decision"><label>Final Amount<input id="amount-' + safeAttr(app.applicationId) + '" type="number" value="' + safeAttr(app.finalAmount || '') + '"></label><label>Final Lender<select id="lender-' + safeAttr(app.applicationId) + '">' + lenderOptions(app.assignedLender) + '</select></label><label>Scenario Type<select id="scenario-' + safeAttr(app.applicationId) + '"><option>Strong file</option><option>Conditional approval</option><option>More documents required</option><option>Send to lender</option><option>Decline risk</option></select></label></div>' +
         '<label>Conditions<textarea id="conditions-' + safeAttr(app.applicationId) + '" rows="3">' + safe(app.conditions || '') + '</textarea></label>' +
         '<label>Internal Notes<textarea id="notes-' + safeAttr(app.applicationId) + '" rows="3">' + safe(app.notes || '') + '</textarea></label>' +
-        '<div class="buttons"><button onclick="decision(\'' + safeAttr(app.applicationId) + '\', \'Conditionally Approved\')">Approve</button><button onclick="decision(\'' + safeAttr(app.applicationId) + '\', \'Declined\')">Decline</button><button onclick="decision(\'' + safeAttr(app.applicationId) + '\', \'More Docs Required\')">Request Docs</button><button onclick="decision(\'' + safeAttr(app.applicationId) + '\', \'Sent to Lender\')">Send to Lender</button></div>' +
+        '<div class="buttons"><button class="primary" onclick="decision(\'' + safeAttr(app.applicationId) + '\', \'Conditionally Approved\')">Approve</button><button onclick="decision(\'' + safeAttr(app.applicationId) + '\', \'Declined\')">Decline</button><button onclick="decision(\'' + safeAttr(app.applicationId) + '\', \'More Docs Required\')">Request Docs</button><button onclick="decision(\'' + safeAttr(app.applicationId) + '\', \'Sent to Lender\')">Send to Lender</button></div>' +
         '<p class="status" id="decision-' + safeAttr(app.applicationId) + '"></p>';
       return wrap;
     }
