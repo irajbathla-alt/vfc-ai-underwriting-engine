@@ -49,34 +49,7 @@ function hydrateApplicationFolderPayload(payload) {
 }
 
 function saveBase64FileToDrive(payload) {
-  if (!payload || !payload.applicationId) {
-    throw new Error('Missing applicationId');
-  }
-  if (!payload.fileName) {
-    throw new Error('Missing fileName');
-  }
-  if (!payload.base64Data) {
-    throw new Error('Missing base64Data');
-  }
-
-  const folder = getOrCreateApplicationFolder(payload);
-  const bytes = Utilities.base64Decode(payload.base64Data);
-  const mimeType = payload.mimeType || 'application/octet-stream';
-  const safeFileName = sanitizeFileName(payload.fileName);
-  const blob = Utilities.newBlob(bytes, mimeType, safeFileName);
-  const file = folder.createFile(blob);
-
-  // Keep uploaded files private. Do not set public sharing permissions here.
-  return {
-    ok: true,
-    applicationId: payload.applicationId,
-    applicationFolderId: folder.getId(),
-    applicationFolderName: folder.getName(),
-    applicationFolderUrl: folder.getUrl(),
-    fileId: file.getId(),
-    fileName: file.getName(),
-    fileUrl: file.getUrl()
-  };
+  return saveNumberedApplicationFile(payload);
 }
 
 function updateApplicationDocumentLinks(applicationId, fileUrl, folderUrl) {
@@ -120,7 +93,7 @@ function sanitizeFileName(value) {
 }
 
 function sanitizeFolderName(value) {
-  return String(value).replace(/[\\/:*?"<>|#%{}~&]/g, '_').replace(/\s+/g, ' ').trim();
+  return String(value).replace(/[\/:*?"<>|#%{}~&]/g, '_').replace(/\s+/g, ' ').trim();
 }
 
 function testDriveFolderConnection() {
