@@ -143,3 +143,88 @@ function testCreateApplicationFolder() {
   Logger.log(JSON.stringify(result, null, 2));
   return result;
 }
+
+function repairApplicationsFromDriveFolders() {
+  const parent = getUploadFolder();
+  const folders = parent.getFolders();
+  const existingIds = getExistingApplicationIds();
+  const repaired = [];
+  const skipped = [];
+
+  while (folders.hasNext()) {
+    const folder = folders.next();
+    const folderName = folder.getName();
+    const applicationId = extractApplicationIdFromFolderName(folderName);
+    if (!applicationId) {
+      skipped.push({ folderName: folderName, reason: 'No APP ID in folder name' });
+      continue;
+    }
+
+    if (existingIds[applicationId]) {
+      ensureExistingApplicationHasFolderLink(applicationId, folder.getUrl());
+      skipped.push({ applicationId: applicationId, folderName: folderName, reason: 'Application already exists' });
+      continue;
+    }
+
+    const parsed = parseApplicationFolderName(folderName, applicationId);
+    appendRow(CONFIG.APPLICATIONS_TAB, [
+      applicationId,
+      new Date(),
+      parsed.businessName,
+      parsed.ownerName,
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      'Submitted',
+      'Application Folder: ' + folder.getUrl(),
+      ''
+    ]);
+    appendStatusHistory(applicationId, 'Submitted', 'Application row repaired from existing Drive folder');
+    existingIds[applicationId] = true;
+    repaired.push({ applicationId: applicationId, folderName: folderName, folderUrl: folder.getUrl() });
+  }
+
+  return {
+    ok: true,
+    repairedCount: repaired.length,
+    skippedCount: skipped.length,
+    repaired: repaired,
+    skipped: skipped
+  };
+}
+
+function getExistingApplicationIds() {
+  const rows = getRows(CONFIG.APPLICATIONS_TAB);
+  const existing = {};
+  if (!rows || rows.length <= 1) return existing;
+
+  rowsToObjects(rows).forEach(function(app) {
+    if (app.applicationId) existing[String(app.applicationId)] = true;
+  });
+  return existing;
+}
+
+function ensureExistingApplicationHasFolderLink(applicationId, folderUrl) {
+  const application = getApplication(applicationId);
+  if (!application.ok) return;
+  const existingLinks = String(application.data.documentLinks || '');
+  if (parseDriveFolderUrl(existingLinks)) return;
+  setApplicationDocumentLinks(applicationId, existingLinks ? 'Application Folder: ' + folderUrl + '\n' + existingLinks : 'Application Folder: ' + folderUrl);
+}
+
+function extractApplicationIdFromFolderName(folderName) {
+  const match = String(folderName || '').match(/APP-[A-Z0-9-]+/i);
+  return match ? match[0].toUpperCase() : '';
+}
+
+function parseApplicationFolderName(folderName, applicationId) {
+  const withoutId = String(folderName || '').replace(applicationId, '').replace(/\s+-\s+$/, '').trim();
+  const parts = withoutId.split(' - ').map(function(part) { return part.trim(); }).filter(Boolean);
+  return {
+    ownerName: parts[0] || 'Unknown Applicant',
+    businessName: parts[1] || 'Unknown Business'
+  };
+}
