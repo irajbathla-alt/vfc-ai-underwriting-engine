@@ -36,8 +36,8 @@ function doPost(e) {
 function doGet(e) {
   try {
     if (e.parameter.page === 'admin') {
-      return HtmlService.createHtmlOutputFromFile('AdminDashboard')
-        .setTitle('VFC Admin Dashboard')
+      return HtmlService.createHtmlOutputFromFile('AdminPortal')
+        .setTitle('VFC Admin Portal')
         .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
     }
 
@@ -257,7 +257,7 @@ function saveFinalDecision(payload) {
     finalAmount,
     conditions,
     finalLender || scenario || notes,
-    'Manual decision saved from admin dashboard'
+    'Manual decision saved from admin portal'
   ]);
 
   appendStatusHistory(applicationId, status, notes || conditions || 'Manual decision saved');
