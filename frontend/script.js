@@ -1,4 +1,4 @@
-const APPS_SCRIPT_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbxR-Udt78_gn-_pJ6IpBcgYaKObbyBsUcivy7Kjctq8wU34dqMzFFs1kn3Fh4AjWr4/exec";
+const APPS_SCRIPT_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbx5idp5FzJ_nd42vwpSt7w98dFsQ2Fm2cRkMnAFDoNDYK1dzEOtABlz5PmzG3akInY/exec";
 const MINIMUM_STATEMENT_FILES = 6;
 
 const form = document.getElementById("applicationForm");

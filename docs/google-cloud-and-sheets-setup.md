@@ -187,7 +187,7 @@ Copy the Web App URL.
 It will look like:
 
 ```txt
-https://script.google.com/macros/s/AKfycbxxxxxxx/exec
+https://script.google.com/macros/s/AKfycbx5idp5FzJ_nd42vwpSt7w98dFsQ2Fm2cRkMnAFDoNDYK1dzEOtABlz5PmzG3akInY/exec
 ```
 
 Paste this URL into:
@@ -199,7 +199,7 @@ frontend/script.js
 Replace:
 
 ```js
-const APPS_SCRIPT_WEB_APP_URL = "PASTE_YOUR_APPS_SCRIPT_WEB_APP_URL_HERE";
+const APPS_SCRIPT_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbx5idp5FzJ_nd42vwpSt7w98dFsQ2Fm2cRkMnAFDoNDYK1dzEOtABlz5PmzG3akInY/exec";
 ```
 
 with your real Web App URL.
