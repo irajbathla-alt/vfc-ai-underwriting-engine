@@ -370,3 +370,37 @@ Personal documents
 ```
 
 Use application IDs instead of personal identifiers wherever possible.
+
+---
+
+## Continuous AI Training File Workflow
+
+The MVP training workflow is folder-driven:
+
+1. Create a Google Drive folder for AI training files.
+2. Put historical case summaries, lender decision notes, and bank-statement text exports into that folder.
+3. Set `CONFIG.AI_TRAINING_FOLDER_ID` in `apps-script/Code.gs` to that folder ID.
+4. Run `setupDatabaseSheets()` so the `AI Training Files` tracking tab exists.
+5. Run `syncAITrainingFiles()` manually or on a time-driven Apps Script trigger.
+6. The sync reads each unprocessed file, asks OpenAI to convert it into the structured historical-case schema, appends the result to `Historical Cases`, and logs the file in `AI Training Files`.
+7. Future underwriting runs automatically use the newly appended `Historical Cases` rows for lender-fit recommendations.
+
+Important: this does not permanently fine-tune the OpenAI base model. It continuously improves VFC's internal underwriting recommendation engine by converting uploaded files into structured case-study rows that the lender-fit model reads.
+
+Recommended training file formats for the first MVP:
+
+```txt
+Google Docs
+TXT
+CSV
+JSON
+Markdown
+```
+
+For scanned PDFs or image-only statements, convert/OCR them to readable text first or paste the statement summary into a Google Doc before syncing.
+
+### Admin Portal Multi-File Upload Workflow
+
+The admin portal AI Training Files tab supports selecting multiple historical bank-statement PDFs or case files at once. Each selected file is uploaded into the VFC AI Case Studies Drive folder, sent to OpenAI as an uploaded file, converted into one structured historical-case row, appended to `Historical Cases`, and logged in `AI Training Files`.
+
+Use this workflow when you already have historical bank statements and lender outcomes for old files. Add any known lender, decision, amount, industry, and notes in the form fields before upload; OpenAI uses those fields as hints and reads each uploaded file to complete the structured training row.
