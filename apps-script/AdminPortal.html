@@ -1,0 +1,127 @@
+<!doctype html>
+<html>
+<head>
+  <base target="_top">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: Georgia, 'Times New Roman', serif; margin: 0; background: #ffffff; color: #1d1d1f; }
+    .shell { max-width: 980px; margin: 0 auto; padding: 18px 16px 56px; }
+    .hero { text-align: center; padding: 0 0 18px; }
+    .hero h1 { font-size: clamp(28px, 4vw, 38px); line-height: 1.08; margin: 0; font-weight: 500; letter-spacing: -0.025em; color: #050505; }
+    .subtitle { margin: 4px 0 0; color: #9a9a9a; font-size: 14px; }
+    .top-actions { margin: 16px auto 0; display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; }
+    .soft-pill, button, .link-button { border-radius: 999px; padding: 8px 16px; border: 1px solid #cfe0ff; background: #eef5ff; color: #2563eb; font-family: Georgia, 'Times New Roman', serif; font-size: 14px; cursor: pointer; text-decoration: none; display: inline-block; }
+    button.primary { background: #3b82f6; color: #ffffff; border-color: #3b82f6; box-shadow: 0 3px 10px rgba(59,130,246,.25); }
+    .green { border-color: #9ee7ca; background: #ecfff6; color: #059669; }
+    .card, .toolbar, .stats, .login-card, .portal-section { background: #ffffff; border: 1px solid #eeeeee; border-radius: 24px; padding: 18px; margin-bottom: 14px; box-shadow: 0 18px 50px rgba(15,23,42,.045); }
+    .login-card { max-width: 420px; margin: 18px auto; text-align: left; }
+    .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+    .metric { border: 1px solid #eeeeee; border-radius: 18px; padding: 14px; background: #fff; }
+    .metric span { color: #8a8a8a; font-size: 12px; }
+    .metric strong { display: block; font-size: 24px; margin-top: 5px; font-weight: 500; }
+    .toolbar { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 10px; }
+    label { display: flex; flex-direction: column; gap: 7px; font-weight: 500; color: #3f3f46; font-size: 14px; }
+    input, select, textarea { border: 1px solid #dddddd; border-radius: 12px; padding: 11px 12px; font: inherit; width: 100%; background: #ffffff; }
+    h2 { font-size: 24px; line-height: 1.1; margin: 0 0 8px; font-weight: 500; letter-spacing: -0.02em; }
+    .muted { color: #747474; font-size: 14px; }
+    .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 14px 0; }
+    .box { border: 1px solid #eeeeee; border-radius: 16px; padding: 12px; background: #fff; }
+    .box span { color: #8a8a8a; font-size: 12px; }
+    .box strong { display: block; margin-top: 5px; font-weight: 500; }
+    .decision { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 12px; }
+    .upload-row { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: end; margin-top: 12px; }
+    .buttons { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+    .pill { display: inline-block; border-radius: 999px; padding: 6px 11px; background: #eeeeef; color: #333; font-size: 12px; font-weight: 400; }
+    .status { color: #2563eb; font-weight: 500; font-size: 14px; text-align: center; }
+    .scenario-text { color: #333; font-size: 14px; }
+    .hidden { display: none; }
+    .portal-tabs { display:flex; justify-content:center; gap:8px; flex-wrap:wrap; margin:12px 0 18px; }
+    .active-tab { background:#3b82f6; color:#fff; border-color:#3b82f6; }
+    @media (max-width: 800px) { .stats, .toolbar, .grid, .decision, .upload-row { grid-template-columns: 1fr; } .shell { padding-top: 16px; } }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <section class="hero">
+      <h1>Vancouver<br>Finance Company Inc.</h1>
+      <p class="subtitle">AI Underwriting Engine — Admin Portal</p>
+    </section>
+
+    <section id="loginCard" class="login-card">
+      <h2>Admin Portal Login</h2>
+      <p class="muted">Enter the admin password to access applications and AI training files.</p>
+      <label>Password<input id="adminPassword" type="password" autocomplete="current-password"></label>
+      <button class="primary" onclick="loginAdmin()">Login</button>
+      <p id="loginMessage" class="status"></p>
+    </section>
+
+    <section id="adminContent" class="hidden">
+      <div class="portal-tabs">
+        <button id="applicationsTab" class="active-tab" onclick="showPortalSection('applications')">Applications</button>
+        <button id="trainingTab" onclick="showPortalSection('training')">AI Training Files</button>
+        <button onclick="logoutAdmin()">Logout</button>
+      </div>
+
+      <section id="trainingSection" class="portal-section hidden">
+        <h2>AI Training / Case Studies</h2>
+        <p class="muted">Upload lender approvals or declines here. Files are stored separately from client applications in the VFC AI Case Studies folder.</p>
+        <div class="grid">
+          <label>Lender<input id="caseLender" placeholder="Journey Capital"></label>
+          <label>Decision<select id="caseDecision"><option>Approved</option><option>Declined</option></select></label>
+          <label>Approved Amount<input id="caseAmount" type="number"></label>
+          <label>Industry<input id="caseIndustry"></label>
+        </div>
+        <label>Case Notes<textarea id="caseNotes" rows="3" placeholder="Reason approved/declined, conditions, file notes"></textarea></label>
+        <div class="upload-row"><label>Case Study File<input id="caseFile" type="file"></label><button class="primary" onclick="saveCaseStudy()">Save Training File</button></div>
+        <p id="caseStatus" class="status"></p>
+      </section>
+
+      <section id="applicationsSection">
+        <div class="top-actions">
+          <button class="primary" onclick="loadApplications()">Refresh Applications</button>
+        </div>
+
+        <section class="stats">
+          <div class="metric"><span>Total</span><strong id="total">0</strong></div>
+          <div class="metric"><span>Pending</span><strong id="pending">0</strong></div>
+          <div class="metric"><span>Approved</span><strong id="approved">0</strong></div>
+          <div class="metric"><span>Declined</span><strong id="declined">0</strong></div>
+        </section>
+
+        <section class="toolbar">
+          <label>Search<input id="search" oninput="render()" placeholder="Business, owner, email, application ID"></label>
+          <label>Status<select id="statusFilter" onchange="render()"><option value="">All</option><option>Submitted</option><option>Conditionally Approved</option><option>Declined</option><option>More Docs Required</option><option>Sent to Lender</option></select></label>
+          <label>Lender<select id="lenderFilter" onchange="render()"><option value="">All</option><option>Journey Capital</option><option>Merchant Growth</option><option>iCapital</option><option>Canacap Funding</option><option>Sheaves Capital</option><option>VFC Internal</option></select></label>
+        </section>
+
+        <p id="message" class="status">Loading...</p>
+        <section id="cards"></section>
+      </section>
+    </section>
+  </main>
+
+  <script>
+    let applications = [];
+    let adminToken = sessionStorage.getItem('vfcAdminToken') || '';
+    window.onload = function(){ if(adminToken) showAdmin(); };
+    function loginAdmin(){ const password=document.getElementById('adminPassword').value; document.getElementById('loginMessage').textContent='Checking...'; google.script.run.withSuccessHandler(function(result){ if(!result.ok){document.getElementById('loginMessage').textContent=result.error||'Login failed.';return;} adminToken=result.token; sessionStorage.setItem('vfcAdminToken',adminToken); showAdmin(); }).withFailureHandler(function(error){document.getElementById('loginMessage').textContent=error.message;}).adminLogin({password:password}); }
+    function showAdmin(){ document.getElementById('loginCard').classList.add('hidden'); document.getElementById('adminContent').classList.remove('hidden'); loadApplications(); }
+    function logoutAdmin(){ adminToken=''; sessionStorage.removeItem('vfcAdminToken'); document.getElementById('adminContent').classList.add('hidden'); document.getElementById('loginCard').classList.remove('hidden'); }
+    function showPortalSection(name){ document.getElementById('applicationsSection').classList.toggle('hidden', name!=='applications'); document.getElementById('trainingSection').classList.toggle('hidden', name!=='training'); document.getElementById('applicationsTab').classList.toggle('active-tab', name==='applications'); document.getElementById('trainingTab').classList.toggle('active-tab', name==='training'); }
+    function loadApplications(){ setMessage('Loading applications...'); google.script.run.withSuccessHandler(function(data){ applications=data.applications||[]; updateStats(); render(); setMessage(applications.length+' application(s) loaded.'); }).withFailureHandler(function(error){ setMessage('Could not load applications: '+error.message); }).listApplicationsAdmin({adminToken:adminToken}); }
+    function render(){ const search=document.getElementById('search').value.toLowerCase(); const status=document.getElementById('statusFilter').value; const lender=document.getElementById('lenderFilter').value; const cards=document.getElementById('cards'); cards.innerHTML=''; const filtered=applications.filter(function(app){ const text=[app.applicationId,app.businessName,app.ownerName,app.email,app.phone,app.industry].join(' ').toLowerCase(); return(!search||text.includes(search))&&(!status||app.status===status)&&(!lender||app.assignedLender===lender); }); if(!filtered.length){cards.innerHTML='<div class="card muted">No applications found.</div>';return;} filtered.forEach(function(app){cards.appendChild(card(app));}); }
+    function card(app){ const wrap=document.createElement('article'); wrap.className='card'; wrap.innerHTML='<h2>'+safe(app.businessName||'Unknown Business')+'</h2>'+'<p><span class="pill">'+safe(app.status||'Submitted')+'</span> <span class="muted">'+safe(app.applicationId||'')+'</span></p>'+'<p class="muted">Owner: '+safe(app.ownerName||'N/A')+' | Email: '+safe(app.email||'N/A')+' | Phone: '+safe(app.phone||'N/A')+'</p>'+'<div class="grid"><div class="box"><span>Credit</span><strong>'+safe(app.creditScore||'N/A')+'</strong></div><div class="box"><span>Time in Business</span><strong>'+safe(app.timeInBusiness||'N/A')+'</strong></div><div class="box"><span>Sales Estimate</span><strong>'+money(app.monthlySalesEstimate)+'</strong></div><div class="box"><span>Industry</span><strong>'+safe(app.industry||'N/A')+'</strong></div></div>'+'<p class="scenario-text"><strong>Scenario:</strong> '+safe(app.scenario||'Manual review pending')+'</p>'+(app.driveFolderUrl?'<p><a class="link-button" target="_blank" href="'+safeAttr(app.driveFolderUrl)+'">Open Client Folder</a></p>':'<p class="muted">No Drive folder link found.</p>')+'<div class="upload-row"><label>Upload to Client Folder<input id="upload-'+safeAttr(app.applicationId)+'" type="file"></label><button onclick="uploadAdminFile(\''+safeAttr(app.applicationId)+'\')">Upload File</button></div>'+'<p class="status" id="upload-status-'+safeAttr(app.applicationId)+'"></p>'+'<div class="decision"><label>Final Amount<input id="amount-'+safeAttr(app.applicationId)+'" type="number" value="'+safeAttr(app.finalAmount||'')+'"></label><label>Final Lender<select id="lender-'+safeAttr(app.applicationId)+'">'+lenderOptions(app.assignedLender)+'</select></label><label>Scenario Type<select id="scenario-'+safeAttr(app.applicationId)+'"><option>Strong file</option><option>Conditional approval</option><option>More documents required</option><option>Send to lender</option><option>Decline risk</option></select></label></div>'+'<label>Conditions<textarea id="conditions-'+safeAttr(app.applicationId)+'" rows="3">'+safe(app.conditions||'')+'</textarea></label>'+'<label>Internal Notes<textarea id="notes-'+safeAttr(app.applicationId)+'" rows="3">'+safe(app.notes||'')+'</textarea></label>'+'<div class="buttons"><button class="primary" onclick="decision(\''+safeAttr(app.applicationId)+'\', \'Conditionally Approved\')">Approve</button><button onclick="decision(\''+safeAttr(app.applicationId)+'\', \'Declined\')">Decline</button><button onclick="decision(\''+safeAttr(app.applicationId)+'\', \'More Docs Required\')">Request Docs</button><button onclick="decision(\''+safeAttr(app.applicationId)+'\', \'Sent to Lender\')">Send to Lender</button></div>'+'<p class="status" id="decision-'+safeAttr(app.applicationId)+'"></p>'; return wrap; }
+    function decision(applicationId,status){ const payload={adminToken:adminToken,applicationId:applicationId,status:status,finalAmount:val('amount-'+applicationId),finalLender:val('lender-'+applicationId),scenario:val('scenario-'+applicationId),conditions:val('conditions-'+applicationId),notes:val('notes-'+applicationId),reviewer:'VFC Admin'}; document.getElementById('decision-'+applicationId).textContent='Saving...'; google.script.run.withSuccessHandler(function(){document.getElementById('decision-'+applicationId).textContent=status+' saved.'; loadApplications();}).withFailureHandler(function(error){document.getElementById('decision-'+applicationId).textContent='Error: '+error.message;}).saveFinalDecisionAdmin(payload); }
+    function uploadAdminFile(applicationId){ const input=document.getElementById('upload-'+applicationId); const file=input.files[0]; if(!file){document.getElementById('upload-status-'+applicationId).textContent='Choose a file first.';return;} document.getElementById('upload-status-'+applicationId).textContent='Uploading...'; const reader=new FileReader(); reader.onload=function(event){ const base64Data=String(event.target.result||'').split(',')[1]; google.script.run.withSuccessHandler(function(result){document.getElementById('upload-status-'+applicationId).textContent=result.ok?'File uploaded to client folder.':(result.error||'Upload failed.'); loadApplications();}).withFailureHandler(function(error){document.getElementById('upload-status-'+applicationId).textContent='Error: '+error.message;}).uploadAdminDocument({adminToken:adminToken,applicationId:applicationId,fileName:file.name,mimeType:file.type||'application/octet-stream',base64Data:base64Data}); }; reader.readAsDataURL(file); }
+    function saveCaseStudy(){ const file=document.getElementById('caseFile').files[0]; if(!file){document.getElementById('caseStatus').textContent='Choose a file first.';return;} document.getElementById('caseStatus').textContent='Saving training file...'; const reader=new FileReader(); reader.onload=function(event){ const base64Data=String(event.target.result||'').split(',')[1]; google.script.run.withSuccessHandler(function(result){document.getElementById('caseStatus').textContent=result.ok?'Saved to AI case studies. Case #'+result.caseNumber:(result.error||'Save failed.');}).withFailureHandler(function(error){document.getElementById('caseStatus').textContent='Error: '+error.message;}).uploadCaseStudyForAi({adminToken:adminToken,lenderName:val('caseLender'),decision:val('caseDecision'),approvedAmount:val('caseAmount'),industry:val('caseIndustry'),reasonApproved:val('caseNotes'),reasonDeclined:val('caseNotes'),fileName:file.name,mimeType:file.type||'application/octet-stream',base64Data:base64Data}); }; reader.readAsDataURL(file); }
+    function updateStats(){ const approved=applications.filter(function(a){return a.status==='Approved'||a.status==='Conditionally Approved';}).length; const declined=applications.filter(function(a){return a.status==='Declined';}).length; document.getElementById('total').textContent=applications.length; document.getElementById('approved').textContent=approved; document.getElementById('declined').textContent=declined; document.getElementById('pending').textContent=Math.max(0,applications.length-approved-declined); }
+    function lenderOptions(selected){ return ['', 'Journey Capital', 'Merchant Growth', 'iCapital', 'Canacap Funding', 'Sheaves Capital', 'VFC Internal'].map(function(name){return '<option value="'+safeAttr(name)+'" '+(name===selected?'selected':'')+'>'+(name||'Select lender')+'</option>';}).join(''); }
+    function val(id){ return document.getElementById(id).value||''; }
+    function setMessage(text){ document.getElementById('message').textContent=text; }
+    function money(value){ const n=Number(value||0); return n?'$'+n.toLocaleString():'$0'; }
+    function safe(value){ return String(value||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;'); }
+    function safeAttr(value){ return safe(value).replace(/`/g,'&#096;'); }
+  </script>
+</body>
+</html>
