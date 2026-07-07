@@ -1,5 +1,5 @@
 const CONFIG = {
-  SHEET_ID: 'PASTE_GOOGLE_SHEET_ID_HERE',
+  SHEET_ID: '1WOUtede4sE7TvsxrCJqArsT1OHLuFT4dV6b61bX1448',
   APPLICATIONS_TAB: 'Applications',
   ANALYSIS_TAB: 'Statement Analysis',
   RESULTS_TAB: 'Underwriting Results',
