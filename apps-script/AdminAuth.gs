@@ -62,6 +62,12 @@ function saveFinalDecisionAdmin(payload) {
 }
 
 
+
+function repairApplicationsFromDriveAdmin(payload) {
+  validateAdminToken(payload && payload.adminToken);
+  return repairApplicationsFromDriveFolders();
+}
+
 function runAnalysisAdmin(payload) {
   validateAdminToken(payload && payload.adminToken);
   if (!payload || !String(payload.applicationId || '').trim()) {
