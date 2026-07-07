@@ -60,6 +60,12 @@ function saveFinalDecisionAdmin(payload) {
   return saveFinalDecision(payload);
 }
 
+
+function runAnalysisAdmin(payload) {
+  validateAdminToken(payload && payload.adminToken);
+  return runApplicationAnalysis(payload.applicationId);
+}
+
 function uploadAdminDocument(payload) {
   validateAdminToken(payload && payload.adminToken);
 

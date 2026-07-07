@@ -25,8 +25,10 @@ function setupDatabaseSheets() {
 
   const analysisHeaders = [
     'Application ID', 'Analysis Date', 'Average Monthly Deposits',
-    'NSF Count', 'Negative Days', 'Existing MCA Payments',
-    'Revenue Trend', 'Risk Grade', 'Underwriter Notes'
+    'Average Monthly Withdrawals', 'Total Deposits', 'Total Withdrawals',
+    'Statement Months Reviewed', 'NSF Count', 'Negative Days',
+    'Existing MCA Payments', 'Average Daily Balance', 'Lowest Balance',
+    'Revenue Trend', 'Cash Flow Strength', 'Risk Grade', 'Underwriter Notes'
   ];
 
   const resultHeaders = [

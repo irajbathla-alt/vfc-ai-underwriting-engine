@@ -7,6 +7,8 @@ function calculateOfferRange(aiResult, application) {
   const nsf = Number(aiResult.nsf_count || 0);
   const negativeDays = Number(aiResult.negative_days || 0);
   const existingMca = Number(aiResult.existing_mca_payments || 0);
+  const withdrawals = Number(aiResult.average_monthly_withdrawals || 0);
+  const netMonthlyCashFlow = deposits > 0 ? deposits - withdrawals - existingMca : 0;
 
   let multiplier = 0.45;
   let riskGrade = 'C';
@@ -41,6 +43,15 @@ function calculateOfferRange(aiResult, application) {
     conditions.push('Review declining revenue trend');
   }
 
+  if (withdrawals > 0 && netMonthlyCashFlow < deposits * 0.10) {
+    multiplier = Math.max(0.15, multiplier - 0.10);
+    conditions.push('Tight monthly cash flow after withdrawals and MCA payments');
+  }
+
+  const affordableMonthlyPayment = Math.max(0, Math.round(Math.min(deposits * 0.10, Math.max(netMonthlyCashFlow, deposits * 0.05))));
+  const affordableDailyPayment = Math.round(affordableMonthlyPayment / 21);
+  const affordableWeeklyPayment = Math.round(affordableMonthlyPayment / 4.33);
+
   const midpoint = deposits * multiplier;
   const lowOffer = Math.round(midpoint * 0.75 / 1000) * 1000;
   const highOffer = Math.round(midpoint * 1.10 / 1000) * 1000;
@@ -50,6 +61,10 @@ function calculateOfferRange(aiResult, application) {
     lowOffer: Math.max(0, lowOffer),
     highOffer: Math.max(0, highOffer),
     recommendedAction: riskGrade === 'D' ? 'Manual Review' : 'Review for Conditional Approval',
+    estimatedAffordableMonthlyPayment: affordableMonthlyPayment,
+    estimatedAffordableDailyPayment: affordableDailyPayment,
+    estimatedAffordableWeeklyPayment: affordableWeeklyPayment,
+    netMonthlyCashFlow,
     conditions
   };
 }
