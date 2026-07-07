@@ -51,12 +51,6 @@ function setupDatabaseSheets() {
     'Decision Date', 'Notes'
   ];
 
-  const aiTrainingFileHeaders = [
-    'Training File ID', 'Processed Date', 'File ID', 'File Name',
-    'File URL', 'Status', 'Case ID', 'Lender Name', 'Decision',
-    'Error', 'Notes'
-  ];
-
   const clientUserHeaders = [
     'Client ID', 'Created Date', 'Owner Name', 'Business Name',
     'Email', 'Phone', 'Latest Application ID', 'Account Status'
@@ -76,7 +70,6 @@ function setupDatabaseSheets() {
   initializeSheet(CONFIG.RESULTS_TAB, resultHeaders);
   initializeSheet(CONFIG.ADMIN_DECISIONS_TAB, adminDecisionHeaders);
   initializeSheet(CONFIG.HISTORICAL_CASES_TAB, historicalCaseHeaders);
-  initializeSheet(CONFIG.AI_TRAINING_FILES_TAB, aiTrainingFileHeaders);
   initializeSheet(CONFIG.CLIENT_USERS_TAB, clientUserHeaders);
   initializeSheet(CONFIG.APPLICATION_STATUS_TAB, applicationStatusHeaders);
   initializeSheet(CONFIG.LENDER_CRITERIA_TAB, lenderCriteriaHeaders);
