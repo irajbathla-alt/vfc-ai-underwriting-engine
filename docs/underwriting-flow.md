@@ -97,3 +97,13 @@ Later capture outcomes:
 - Renewal
 
 These labeled outcomes can eventually support a custom predictive model.
+
+## Current AI Statement Analysis Flow
+
+1. Client submits an application and uploads bank statements through the Client Portal.
+2. Uploaded files are stored in that application's Google Drive folder.
+3. In the Admin Portal, the underwriter clicks **Run AI Statement Analysis**.
+4. Apps Script reads the uploaded statement files from the application's Drive folder and sends them to OpenAI.
+5. OpenAI extracts average deposits, withdrawals, NSF count, negative days, MCA payments, cash-flow strength, revenue trend, and underwriter notes.
+6. Apps Script appends the extracted data to `Statement Analysis` and writes the offer estimate to `Underwriting Results`.
+7. The Admin Portal shows the AI results, suggested offer range, and notes so the admin can approve, decline, request documents, or send to lender.
