@@ -21,6 +21,33 @@ function createFineTuneJobFromHistoricalCasesAdmin(payload) {
   };
 }
 
+function createFineTuneJobFromHistoricalCasesManual() {
+  const result = createFineTuneJobFromHistoricalCasesNoToken({});
+  Logger.log(JSON.stringify(result, null, 2));
+  return result;
+}
+
+function createFineTuneJobFromHistoricalCasesNoToken(options) {
+  const exportResult = exportFineTuneJsonlFromHistoricalCases(options || {});
+  if (!exportResult.ok) return exportResult;
+
+  const fileIdMatch = String(exportResult.fileUrl || '').match(/[-\w]{25,}/);
+  if (!fileIdMatch) return { ok: false, error: 'Could not read exported Drive file ID.' };
+
+  const uploadResult = uploadDriveJsonlToOpenAI(fileIdMatch[0]);
+  if (!uploadResult.ok) return uploadResult;
+
+  const jobResult = createOpenAIFineTuneJob(uploadResult.openaiFileId, options && options.model);
+  return {
+    ok: jobResult.ok,
+    jsonlDriveFileUrl: exportResult.fileUrl,
+    openaiFileId: uploadResult.openaiFileId,
+    fineTuneJobId: jobResult.fineTuneJobId,
+    status: jobResult.status,
+    raw: jobResult.raw
+  };
+}
+
 function uploadDriveJsonlToOpenAI(driveFileId) {
   const apiKey = PropertiesService.getScriptProperties().getProperty('OPENAI_API_KEY');
   if (!apiKey) return { ok: false, error: 'Missing OPENAI_API_KEY.' };
@@ -80,6 +107,12 @@ function getFineTuneJobStatusAdmin(payload) {
   const jobId = payload && payload.jobId;
   if (!jobId) return { ok: false, error: 'Missing fine-tune job ID.' };
   return getOpenAIFineTuneJobStatus(jobId);
+}
+
+function getFineTuneJobStatusManual(jobId) {
+  const result = getOpenAIFineTuneJobStatus(jobId);
+  Logger.log(JSON.stringify(result, null, 2));
+  return result;
 }
 
 function getOpenAIFineTuneJobStatus(jobId) {
