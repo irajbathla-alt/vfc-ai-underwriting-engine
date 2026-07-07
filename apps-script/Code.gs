@@ -5,11 +5,13 @@ const CONFIG = {
   RESULTS_TAB: 'Underwriting Results',
   ADMIN_DECISIONS_TAB: 'Admin Decisions',
   HISTORICAL_CASES_TAB: 'Historical Cases',
+  AI_TRAINING_FILES_TAB: 'AI Training Files',
   CLIENT_USERS_TAB: 'Client Users',
   APPLICATION_STATUS_TAB: 'Application Status',
   LENDER_CRITERIA_TAB: 'Lender Criteria',
   ADMIN_EMAIL: 'admin@vancouverfinancecompany.com',
   DRIVE_UPLOAD_FOLDER_ID: '1OuMVNc5RnLzCPWb5h0dWdsCsHbQNICA1',
+  AI_TRAINING_FOLDER_ID: 'PASTE_AI_TRAINING_FOLDER_ID_HERE',
   GCP_PROJECT_ID: 'project-a528a6b2-3583-415a-bba',
   GCS_BUCKET_NAME: 'vfc-statement-uploads',
   GCS_SERVICE_ACCOUNT_EMAIL: 'vfc-apps-script-storage-43@project-a528a6b2-3583-415a-bba.iam.gserviceaccount.com'
@@ -25,6 +27,7 @@ function doPost(e) {
     if (action === 'uploadDocument') return jsonResponse(uploadDocumentForApplication(payload));
     if (action === 'uploadClientDocument') return jsonResponse(uploadClientDocument(payload));
     if (action === 'runAnalysis') return jsonResponse(runApplicationAnalysis(payload.applicationId));
+    if (action === 'syncAITrainingFiles') return jsonResponse(syncAITrainingFiles(payload || {}));
     if (action === 'finalDecision' || action === 'saveFinalDecision') return jsonResponse(saveFinalDecision(payload));
 
     return jsonResponse({ ok: false, error: 'Unknown action' });
@@ -50,7 +53,9 @@ function doGet(e) {
     const action = e.parameter.action || '';
     let result;
 
-    if (action === 'listApplications') {
+    if (action === 'syncAITrainingFiles') {
+      result = syncAITrainingFiles({ limit: Number(e.parameter.limit || 25) });
+    } else if (action === 'listApplications') {
       result = listApplications();
     } else if (action === 'getApplicationDetail') {
       result = getApplicationDetail(e.parameter.applicationId);
@@ -124,14 +129,14 @@ function runApplicationAnalysis(applicationId) {
     aiResult.underwriter_notes
   ]);
 
-  const offer = calculateOfferRange(aiResult, application.data);
+  const offer = buildUnderwritingRecommendation(aiResult, application.data);
   appendRow(CONFIG.RESULTS_TAB, [
     applicationId,
     new Date(),
     offer.riskGrade,
     offer.lowOffer,
     offer.highOffer,
-    offer.recommendedAction,
+    offer.recommendedAction + (offer.recommendedLender ? ' | Lender fit: ' + offer.recommendedLender : ''),
     offer.conditions.join(', ')
   ]);
 
