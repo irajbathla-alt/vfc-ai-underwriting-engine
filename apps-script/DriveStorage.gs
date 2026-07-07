@@ -47,7 +47,8 @@ function saveBase64FileToDrive(payload) {
   const folder = getOrCreateApplicationFolder(payload);
   const bytes = Utilities.base64Decode(rawData);
   const mimeType = payload.mimeType || 'application/octet-stream';
-  const safeFileName = sanitizeFileName(payload.fileName);
+  const fileNumber = getNextDocumentNumber(folder);
+  const safeFileName = makeNumberedFileName(fileNumber, payload.fileName);
   const blob = Utilities.newBlob(bytes, mimeType, safeFileName);
   const file = folder.createFile(blob);
   return {
@@ -56,6 +57,7 @@ function saveBase64FileToDrive(payload) {
     applicationFolderId: folder.getId(),
     applicationFolderName: folder.getName(),
     applicationFolderUrl: folder.getUrl(),
+    fileNumber: fileNumber,
     fileId: file.getId(),
     fileName: file.getName(),
     fileUrl: file.getUrl()
