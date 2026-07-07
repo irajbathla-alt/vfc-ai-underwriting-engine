@@ -1,84 +1,104 @@
 function repairDriveLinksFromAppsScript() {
+  return repairDriveLinksSimple();
+}
+
+function repairDriveLinksSimple() {
+  const sheet = getOrCreateSheet(CONFIG.APPLICATIONS_TAB || 'Applications');
   const parent = getUploadFolder();
-  const folders = parent.getFolders();
-  const sheet = getOrCreateSheet(CONFIG.APPLICATIONS_TAB);
+  const folderMap = buildApplicationFolderMapSimple(parent);
 
   if (sheet.getLastRow() === 0) {
-    setupDatabaseSheets();
+    sheet.appendRow(['Application ID', 'Date Submitted', 'Business Name', 'Owner Name', 'Email', 'Phone', 'Industry', 'Time In Business', 'Credit Score', 'Monthly Sales Estimate', 'Status', 'Document Links', 'Assigned Lender']);
   }
 
   let rows = sheet.getDataRange().getValues();
   if (!rows || rows.length <= 1) {
-    setupDatabaseSheets();
-    rows = sheet.getDataRange().getValues();
+    return { ok: true, repaired: 0, message: 'Applications sheet has no application rows yet.' };
   }
 
   const headers = rows[0] || [];
-  const idColumn = findHeaderColumn(headers, ['Application ID', 'Application Id', 'App ID', 'App Id', 'ApplicationID', 'applicationId']);
-  let documentLinksColumn = findHeaderColumn(headers, ['Document Links', 'Document Link', 'Documents', 'Drive Link', 'Drive Folder', 'Folder Link']);
+  let appIdCol = getColumnByHeaderSimple(headers, ['Application ID', 'Application Id', 'App ID', 'App Id', 'ApplicationID']);
+  if (appIdCol === -1) appIdCol = scanForAppIdColumnSimple(rows);
 
-  if (idColumn === -1) {
-    return {
-      ok: false,
-      error: 'Application ID column missing. Please make sure the Applications tab has an Application ID header.',
-      headersFound: headers
-    };
+  if (appIdCol === -1) {
+    return { ok: false, error: 'Could not find any APP ID in the Applications sheet. Please confirm the sheet has submitted applications.', headersFound: headers };
   }
 
-  if (documentLinksColumn === -1) {
-    documentLinksColumn = headers.length;
-    sheet.getRange(1, documentLinksColumn + 1).setValue('Document Links');
+  let linksCol = getColumnByHeaderSimple(headers, ['Document Links', 'Document Link', 'Drive Link', 'Drive Folder', 'Folder Link']);
+  if (linksCol === -1) {
+    linksCol = headers.length;
+    sheet.getRange(1, linksCol + 1).setValue('Document Links');
     rows = sheet.getDataRange().getValues();
-  }
-
-  const folderMap = {};
-  while (folders.hasNext()) {
-    const folder = folders.next();
-    const folderName = folder.getName();
-    const applicationId = extractApplicationIdFromFolderName(folderName);
-    if (applicationId) folderMap[applicationId] = folder.getUrl();
   }
 
   let repaired = 0;
   const missing = [];
 
-  for (let i = 1; i < rows.length; i++) {
-    const applicationId = String(rows[i][idColumn] || '').trim().toUpperCase();
-    if (!applicationId) continue;
+  for (let r = 1; r < rows.length; r++) {
+    const appId = getAppIdFromTextSimple(rows[r][appIdCol]);
+    if (!appId) continue;
 
-    const existingLinks = String(rows[i][documentLinksColumn] || '').trim();
-    const existingFolder = parseDriveFolderUrl(existingLinks);
-    if (existingFolder) continue;
+    const existing = String(rows[r][linksCol] || '').trim();
+    if (existing.indexOf('Application Folder:') !== -1) continue;
 
-    const folderUrl = folderMap[applicationId];
-    if (!folderUrl) {
-      missing.push(applicationId);
+    const url = folderMap[appId];
+    if (!url) {
+      missing.push(appId);
       continue;
     }
 
-    const updatedLinks = existingLinks ? 'Application Folder: ' + folderUrl + '\n' + existingLinks : 'Application Folder: ' + folderUrl;
-    sheet.getRange(i + 1, documentLinksColumn + 1).setValue(updatedLinks);
+    const updated = existing ? 'Application Folder: ' + url + '\n' + existing : 'Application Folder: ' + url;
+    sheet.getRange(r + 1, linksCol + 1).setValue(updated);
     repaired++;
   }
 
-  return { ok: true, repaired: repaired, missing: missing, message: 'Drive folder links repaired where folder names contained matching APP IDs.' };
+  return { ok: true, repaired: repaired, missing: missing, message: 'Drive links repaired.' };
 }
 
-function findHeaderColumn(headers, possibleNames) {
-  const normalizedHeaders = headers.map(function(header) { return normalizeHeaderName(header); });
-  for (let i = 0; i < possibleNames.length; i++) {
-    const target = normalizeHeaderName(possibleNames[i]);
-    const index = normalizedHeaders.indexOf(target);
-    if (index !== -1) return index;
+function buildApplicationFolderMapSimple(parent) {
+  const folders = parent.getFolders();
+  const map = {};
+  while (folders.hasNext()) {
+    const folder = folders.next();
+    const appId = getAppIdFromTextSimple(folder.getName());
+    if (appId) map[appId] = folder.getUrl();
+  }
+  return map;
+}
+
+function getColumnByHeaderSimple(headers, names) {
+  const normalized = headers.map(function(h) { return normalizeSimple(h); });
+  for (let i = 0; i < names.length; i++) {
+    const idx = normalized.indexOf(normalizeSimple(names[i]));
+    if (idx !== -1) return idx;
   }
   return -1;
 }
 
-function normalizeHeaderName(value) {
-  return String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+function scanForAppIdColumnSimple(rows) {
+  const width = rows[0] ? rows[0].length : 0;
+  const height = Math.min(rows.length, 25);
+  for (let c = 0; c < width; c++) {
+    for (let r = 1; r < height; r++) {
+      if (getAppIdFromTextSimple(rows[r][c])) return c;
+    }
+  }
+  return -1;
 }
 
-function extractApplicationIdFromFolderName(folderName) {
-  const match = String(folderName || '').match(/APP-[A-Z0-9-]+/i);
-  return match ? match[0].toUpperCase() : '';
+function getAppIdFromTextSimple(value) {
+  const text = String(value || '').toUpperCase();
+  const start = text.indexOf('APP-');
+  if (start === -1) return '';
+  let end = start + 4;
+  while (end < text.length) {
+    const ch = text.charAt(end);
+    if (!((ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch === '-')) break;
+    end++;
+  }
+  return text.substring(start, end);
+}
+
+function normalizeSimple(value) {
+  return String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 }
