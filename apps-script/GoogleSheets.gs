@@ -42,37 +42,43 @@ function setupDatabaseSheets() {
     'Final Amount', 'Final Lender', 'Scenario', 'Conditions', 'Notes', 'Reviewer'
   ];
 
-  const historicalCaseHeaders = [
-    'Case ID', 'Lender Name', 'Decision', 'Funded', 'Approved Amount',
-    'Requested Amount', 'Industry', 'Time in Business', 'Credit Score',
-    'Average Monthly Deposits', 'NSF Count', 'Negative Days',
-    'Existing MCA Payments', 'Revenue Trend', 'Reason Approved',
-    'Reason Declined', 'Conditions', 'Statement Months Reviewed',
-    'Decision Date', 'Notes'
-  ];
-
-  const clientUserHeaders = [
-    'Client ID', 'Created Date', 'Owner Name', 'Business Name',
-    'Email', 'Phone', 'Latest Application ID', 'Account Status'
-  ];
-
   const applicationStatusHeaders = [
     'Application ID', 'Status Date', 'Status', 'Note'
-  ];
-
-  const lenderCriteriaHeaders = [
-    'Lender Name', 'Minimum Deposits', 'Minimum Time in Business',
-    'Minimum Credit Score', 'Preferred Industries', 'Risk Notes', 'Last Updated'
   ];
 
   initializeSheet(CONFIG.APPLICATIONS_TAB, applicationHeaders);
   initializeSheet(CONFIG.ANALYSIS_TAB, analysisHeaders);
   initializeSheet(CONFIG.RESULTS_TAB, resultHeaders);
   initializeSheet(CONFIG.ADMIN_DECISIONS_TAB, adminDecisionHeaders);
-  initializeSheet(CONFIG.HISTORICAL_CASES_TAB, historicalCaseHeaders);
-  initializeSheet(CONFIG.CLIENT_USERS_TAB, clientUserHeaders);
   initializeSheet(CONFIG.APPLICATION_STATUS_TAB, applicationStatusHeaders);
-  initializeSheet(CONFIG.LENDER_CRITERIA_TAB, lenderCriteriaHeaders);
+}
+
+function cleanupV1Sheets() {
+  const spreadsheet = getSpreadsheet();
+  const keep = [
+    CONFIG.APPLICATIONS_TAB,
+    CONFIG.ANALYSIS_TAB,
+    CONFIG.RESULTS_TAB,
+    CONFIG.ADMIN_DECISIONS_TAB,
+    CONFIG.APPLICATION_STATUS_TAB
+  ];
+
+  const remove = [
+    'Historical Cases',
+    'AI Training Files',
+    'Client Users',
+    'Lender Criteria'
+  ];
+
+  remove.forEach(function(tabName) {
+    const sheet = spreadsheet.getSheetByName(tabName);
+    if (sheet && keep.indexOf(tabName) === -1 && spreadsheet.getSheets().length > 1) {
+      spreadsheet.deleteSheet(sheet);
+    }
+  });
+
+  setupDatabaseSheets();
+  return { ok: true, keptTabs: keep, removedTabs: remove };
 }
 
 function initializeSheet(tabName, headers) {
