@@ -107,6 +107,7 @@ function uploadDocumentForApplication(payload) {
 }
 
 function runApplicationAnalysis(applicationId) {
+  if (!String(applicationId || '').trim()) return { ok: false, error: 'Missing application ID. Refresh applications and select a valid submitted application.' };
   const application = getApplication(applicationId);
   if (!application.ok) return application;
 
@@ -167,11 +168,13 @@ function listApplications() {
   const decisions = getLatestDecisionMap();
   const analyses = getLatestAnalysisMap();
   const results = getLatestResultMap();
-  const applications = rowsToObjects(rows).map(app => {
-    const applicationId = app.applicationId;
-    const latestDecision = decisions[applicationId] || {};
-    return buildApplicationCardData(app, latestDecision, analyses[applicationId] || {}, results[applicationId] || {});
-  }).reverse();
+  const applications = rowsToObjects(rows)
+    .filter(app => String(app.applicationId || '').trim())
+    .map(app => {
+      const applicationId = app.applicationId;
+      const latestDecision = decisions[applicationId] || {};
+      return buildApplicationCardData(app, latestDecision, analyses[applicationId] || {}, results[applicationId] || {});
+    }).reverse();
 
   return { ok: true, applications };
 }

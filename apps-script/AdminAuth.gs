@@ -63,6 +63,9 @@ function saveFinalDecisionAdmin(payload) {
 
 function runAnalysisAdmin(payload) {
   validateAdminToken(payload && payload.adminToken);
+  if (!payload || !String(payload.applicationId || '').trim()) {
+    return { ok: false, error: 'Missing application ID. Refresh applications and choose a valid submitted application.' };
+  }
   return runApplicationAnalysis(payload.applicationId);
 }
 
