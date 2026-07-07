@@ -124,14 +124,14 @@ function runApplicationAnalysis(applicationId) {
     aiResult.underwriter_notes
   ]);
 
-  const offer = calculateOfferRange(aiResult, application.data);
+  const offer = buildUnderwritingRecommendation(aiResult, application.data);
   appendRow(CONFIG.RESULTS_TAB, [
     applicationId,
     new Date(),
     offer.riskGrade,
     offer.lowOffer,
     offer.highOffer,
-    offer.recommendedAction,
+    offer.recommendedAction + (offer.recommendedLender ? ' | Lender fit: ' + offer.recommendedLender : ''),
     offer.conditions.join(', ')
   ]);
 
