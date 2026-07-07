@@ -1,4 +1,5 @@
 function adminLogin(payload) {
+  payload = payload || {};
   const password = String(payload.password || '');
   const expectedPassword = PropertiesService.getScriptProperties().getProperty('ADMIN_PASSWORD');
 
