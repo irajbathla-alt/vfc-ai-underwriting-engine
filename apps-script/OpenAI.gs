@@ -111,3 +111,141 @@ function testOpenAIUnderwritingPromptShape() {
   Logger.log(prompt);
   return prompt;
 }
+
+
+function analyzeTrainingFileWithOpenAI(input) {
+  const apiKey = PropertiesService.getScriptProperties().getProperty('OPENAI_API_KEY');
+  if (!apiKey) throw new Error('Missing OPENAI_API_KEY in Apps Script Properties');
+
+  const prompt = buildTrainingFilePrompt(input || {});
+  const payload = {
+    model: 'gpt-4.1-mini',
+    input: prompt,
+    temperature: 0.1
+  };
+
+  const response = UrlFetchApp.fetch('https://api.openai.com/v1/responses', {
+    method: 'post',
+    contentType: 'application/json',
+    headers: { Authorization: 'Bearer ' + apiKey },
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true
+  });
+
+  const status = response.getResponseCode();
+  const body = JSON.parse(response.getContentText());
+  if (status < 200 || status >= 300) {
+    throw new Error('OpenAI training-file request failed: ' + response.getContentText());
+  }
+
+  const text = extractResponseText(body);
+  return JSON.parse(stripCodeFences(text));
+}
+
+function buildTrainingFilePrompt(input) {
+  return [
+    'You convert historical MCA underwriting files into one structured training row for Vancouver Finance Company Inc.',
+    'Use only the supplied file text. Do not invent missing values.',
+    'If a value cannot be determined, use 0, unknown, or an empty string.',
+    'Return valid JSON only. No markdown. No extra commentary.',
+    '',
+    'Required JSON schema:',
+    '{',
+    '  "case_id": "string",',
+    '  "lender_name": "Journey Capital|Merchant Growth|iCapital|Canacap Funding|Sheaves Capital|unknown",',
+    '  "decision": "Approved|Declined|Unknown",',
+    '  "funded": "Yes|No",',
+    '  "approved_amount": number,',
+    '  "requested_amount": number,',
+    '  "industry": "string",',
+    '  "time_in_business": "string",',
+    '  "credit_score": number,',
+    '  "average_monthly_deposits": number,',
+    '  "nsf_count": number,',
+    '  "negative_days": number,',
+    '  "existing_mca_payments": number,',
+    '  "revenue_trend": "increasing|stable|declining|unknown",',
+    '  "reason_approved": "string",',
+    '  "reason_declined": "string",',
+    '  "conditions": ["string"],',
+    '  "statement_months_reviewed": number,',
+    '  "decision_date": "YYYY-MM-DD or empty string",',
+    '  "notes": "string"',
+    '}',
+    '',
+    'File name: ' + (input.fileName || 'unknown'),
+    'File URL: ' + (input.fileUrl || 'unknown'),
+    '',
+    'Training file text:',
+    input.trainingText || ''
+  ].join('\n');
+}
+
+
+function analyzeTrainingFileUploadWithOpenAI(input) {
+  const apiKey = PropertiesService.getScriptProperties().getProperty('OPENAI_API_KEY');
+  if (!apiKey) throw new Error('Missing OPENAI_API_KEY in Apps Script Properties');
+  if (!input || !input.base64Data) throw new Error('Missing uploaded file data for OpenAI training parse');
+
+  const prompt = buildTrainingFilePrompt({
+    fileName: input.fileName,
+    fileUrl: 'uploaded from admin portal',
+    trainingText: buildTrainingMetadataText(input.metadata || {})
+  });
+  const mimeType = input.mimeType || 'application/pdf';
+  const payload = {
+    model: 'gpt-4.1-mini',
+    input: [{
+      role: 'user',
+      content: [{
+        type: 'input_text',
+        text: prompt
+      }, {
+        type: 'input_file',
+        filename: input.fileName || 'historical-bank-statement.pdf',
+        file_data: 'data:' + mimeType + ';base64,' + input.base64Data
+      }]
+    }],
+    temperature: 0.1
+  };
+
+  const response = UrlFetchApp.fetch('https://api.openai.com/v1/responses', {
+    method: 'post',
+    contentType: 'application/json',
+    headers: { Authorization: 'Bearer ' + apiKey },
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true
+  });
+
+  const status = response.getResponseCode();
+  const body = JSON.parse(response.getContentText());
+  if (status < 200 || status >= 300) {
+    throw new Error('OpenAI uploaded-file request failed: ' + response.getContentText());
+  }
+
+  const text = extractResponseText(body);
+  return JSON.parse(stripCodeFences(text));
+}
+
+function buildTrainingMetadataText(metadata) {
+  metadata = metadata || {};
+  return [
+    'Admin-entered case metadata, if provided:',
+    'Lender: ' + (metadata.lenderName || 'unknown'),
+    'Decision: ' + (metadata.decision || 'unknown'),
+    'Approved amount: ' + (metadata.approvedAmount || 'unknown'),
+    'Requested amount: ' + (metadata.requestedAmount || 'unknown'),
+    'Industry: ' + (metadata.industry || 'unknown'),
+    'Time in business: ' + (metadata.timeInBusiness || 'unknown'),
+    'Credit score: ' + (metadata.creditScore || 'unknown'),
+    'Average monthly deposits: ' + (metadata.averageMonthlyDeposits || 'unknown'),
+    'NSF count: ' + (metadata.nsfCount || 'unknown'),
+    'Negative days: ' + (metadata.negativeDays || 'unknown'),
+    'Existing MCA payments: ' + (metadata.existingMcaPayments || 'unknown'),
+    'Revenue trend: ' + (metadata.revenueTrend || 'unknown'),
+    'Reason approved: ' + (metadata.reasonApproved || ''),
+    'Reason declined: ' + (metadata.reasonDeclined || ''),
+    'Conditions: ' + (metadata.conditions || ''),
+    'Statement months reviewed: ' + (metadata.statementMonthsReviewed || 'unknown')
+  ].join('\n');
+}
