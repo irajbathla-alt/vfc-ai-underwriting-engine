@@ -1,92 +1,192 @@
 <!DOCTYPE html>
 <html>
-  <head>
-    <base target="_top">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <style>
-      body { font-family: Arial, sans-serif; margin: 0; padding: 24px; background: #f6f6f6; color: #111; }
-      .card { max-width: 820px; margin: 0 auto; background: #fff; padding: 24px; border-radius: 14px; box-shadow: 0 10px 30px rgba(0,0,0,0.08); }
-      h1 { margin: 0 0 8px; font-size: 26px; }
-      p { color: #555; }
-      label { display: block; font-weight: bold; margin-top: 16px; }
-      input, button { width: 100%; box-sizing: border-box; padding: 13px; margin-top: 8px; border-radius: 10px; border: 1px solid #ddd; font-size: 15px; }
-      button { background: #111; color: #fff; border: none; cursor: pointer; font-weight: bold; margin-top: 20px; }
-      button:disabled { background: #777; }
-      .note { font-size: 13px; color: #666; margin-top: 8px; }
-      #result { white-space: pre-wrap; background: #f1f1f1; padding: 16px; margin-top: 20px; border-radius: 10px; min-height: 80px; font-size: 14px; }
-    </style>
-  </head>
-  <body>
+<head>
+  <base target="_top">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body { font-family: Arial, sans-serif; margin: 0; padding: 24px; background: #f6f6f6; color: #111; }
+    .wrap { max-width: 1050px; margin: 0 auto; }
+    .card { background: #fff; padding: 22px; border-radius: 14px; margin-bottom: 18px; box-shadow: 0 8px 24px rgba(0,0,0,0.07); }
+    h1 { margin: 0 0 8px; }
+    h2 { margin-top: 0; }
+    label { display:block; font-weight:700; margin-top:12px; }
+    input, select, textarea, button { width:100%; box-sizing:border-box; padding:11px; margin-top:6px; border-radius:9px; border:1px solid #ddd; font-size:14px; }
+    textarea { min-height: 80px; }
+    button { background:#111; color:#fff; border:none; cursor:pointer; font-weight:700; margin-top:16px; }
+    button:disabled { background:#777; }
+    .grid { display:grid; grid-template-columns: 1fr 1fr; gap:14px; }
+    .note { color:#666; font-size:13px; margin-top:7px; }
+    pre { white-space:pre-wrap; background:#f1f1f1; padding:14px; border-radius:10px; min-height:60px; }
+    @media (max-width: 760px) { .grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card">
+    <h1>VFC AI Underwriting Engine</h1>
+    <p>Upload bank statements, save lender criteria, enter approvals/declines, and generate lender-fit recommendations.</p>
+    <button onclick="loadData()">Refresh Data</button>
+  </div>
+
+  <div class="card">
+    <h2>1. Upload Bank Statements</h2>
+    <label>Company / Individual Name</label>
+    <input id="companyName" placeholder="Example: ABC Pizza Ltd">
+    <label>Upload Bank Statement PDFs</label>
+    <input id="files" type="file" accept="application/pdf" multiple>
+    <div class="note">Use 1–3 PDFs per upload for best performance.</div>
+    <button id="uploadButton" onclick="uploadStatements()">Upload & Read Bank Statements</button>
+    <pre id="uploadResult">Ready.</pre>
+  </div>
+
+  <div class="grid">
     <div class="card">
-      <h1>VFC AI Admin Upload</h1>
-      <p>Upload bank statement PDFs. The system reads the statement dates and creates the period from earliest to latest.</p>
-
-      <label>Company / Individual Name</label>
-      <input id="companyName" placeholder="Example: ABC Pizza Ltd">
-
-      <label>Upload Bank Statement PDFs</label>
-      <input id="files" type="file" accept="application/pdf" multiple>
-      <div class="note">V1 reads bank statements only. Leave tax documents out for now.</div>
-
-      <button id="uploadButton" onclick="uploadStatements()">Upload & Read Bank Statements</button>
-      <div id="result">Ready.</div>
+      <h2>2. Add Lender</h2>
+      <label>Lender Name</label><input id="lenderName" placeholder="Journey Capital">
+      <label>Product Type</label><input id="productType" value="Merchant Cash Advance">
+      <label>Contact Name</label><input id="contactName">
+      <label>Contact Email</label><input id="contactEmail">
+      <label>Notes</label><textarea id="lenderNotes"></textarea>
+      <button onclick="saveLenderUi()">Save Lender</button>
+      <pre id="lenderResult"></pre>
     </div>
 
-    <script>
-      async function uploadStatements() {
-        const companyName = document.getElementById('companyName').value.trim();
-        const fileInput = document.getElementById('files');
-        const result = document.getElementById('result');
-        const button = document.getElementById('uploadButton');
+    <div class="card">
+      <h2>3. Add Lender Criteria</h2>
+      <label>Lender Name</label><input id="criteriaLenderName" placeholder="Journey Capital">
+      <label>Minimum Monthly Revenue</label><input id="minimumMonthlyRevenue" placeholder="15000">
+      <label>Minimum Time In Business Months</label><input id="minimumTimeInBusinessMonths" placeholder="12">
+      <label>Province Accepted</label><input id="provinceAccepted" placeholder="BC, AB, ON">
+      <label>Industry Restrictions</label><textarea id="industryRestrictions"></textarea>
+      <label>NSF Tolerance</label><input id="nsfTolerance" placeholder="Example: Max 3 in 90 days">
+      <label>Existing MCA Tolerance</label><input id="existingMcaTolerance" placeholder="Example: 1 position acceptable">
+      <label>Required Documents</label><textarea id="requiredDocuments" placeholder="6 months statements, application, void cheque"></textarea>
+      <label>Notes</label><textarea id="criteriaNotes"></textarea>
+      <button onclick="saveCriteriaUi()">Save Criteria</button>
+      <pre id="criteriaResult"></pre>
+    </div>
+  </div>
 
-        if (!companyName) {
-          alert('Enter company or individual name.');
-          return;
-        }
+  <div class="grid">
+    <div class="card">
+      <h2>4. Save Lender Decision</h2>
+      <label>Company Name</label><input id="decisionCompanyName">
+      <label>Period</label><input id="decisionPeriod" placeholder="Jul 2025 to Aug 2025">
+      <label>Lender Name</label><input id="decisionLenderName">
+      <label>Decision</label>
+      <select id="decision"><option>Approved</option><option>Declined</option><option>Conditional</option><option>Withdrawn</option></select>
+      <label>Approved Amount</label><input id="approvedAmount">
+      <label>Decline Reason</label><textarea id="declineReason"></textarea>
+      <label>Conditions</label><textarea id="conditions"></textarea>
+      <label>Payment Frequency</label><input id="paymentFrequency" placeholder="Daily / Weekly / Monthly">
+      <label>Payment Amount</label><input id="paymentAmount">
+      <label>Factor Rate / Interest</label><input id="factorRateOrInterest">
+      <label>Term</label><input id="term">
+      <label>Date Submitted</label><input id="dateSubmitted" type="date">
+      <label>Date Decision Received</label><input id="dateDecisionReceived" type="date">
+      <label>Notes</label><textarea id="decisionNotes"></textarea>
+      <button onclick="saveDecisionUi()">Save Decision</button>
+      <pre id="decisionResult"></pre>
+    </div>
 
-        if (!fileInput.files.length) {
-          alert('Select at least one PDF bank statement.');
-          return;
-        }
+    <div class="card">
+      <h2>5. Generate AI Recommendation</h2>
+      <label>Company Name</label><input id="recCompanyName">
+      <label>Detected Period</label><input id="recPeriod" placeholder="Jul 2025 to Aug 2025">
+      <button onclick="generateRecommendationUi()">Generate Recommendation</button>
+      <pre id="recommendationResult"></pre>
 
-        button.disabled = true;
-        result.innerText = 'Uploading PDFs, reading statements, and creating summary...';
+      <h2>6. Save Final Outcome</h2>
+      <label>Selected Lender</label><input id="selectedLender">
+      <label>AI Recommended Lender</label><input id="aiRecommendedLender">
+      <label>Final Result</label><select id="finalResult"><option>Funded</option><option>Approved Not Funded</option><option>Declined</option><option>Withdrawn</option></select>
+      <label>Funded Amount</label><input id="fundedAmount">
+      <label>Funded Date</label><input id="fundedDate" type="date">
+      <label>Why This Lender Won</label><textarea id="whyThisLenderWon"></textarea>
+      <label>Admin Notes</label><textarea id="adminNotes"></textarea>
+      <button onclick="saveOutcomeUi()">Save Outcome</button>
+      <pre id="outcomeResult"></pre>
+    </div>
+  </div>
 
-        try {
-          const files = [];
-          for (const file of fileInput.files) {
-            const base64 = await toBase64(file);
-            files.push({
-              name: file.name,
-              mimeType: file.type || 'application/pdf',
-              base64: base64.split(',')[1]
-            });
-          }
+  <div class="card">
+    <h2>Recent Data</h2>
+    <pre id="dataResult">Click Refresh Data.</pre>
+  </div>
+</div>
 
-          google.script.run
-            .withSuccessHandler(function(response) {
-              button.disabled = false;
-              result.innerText = JSON.stringify(response, null, 2);
-            })
-            .withFailureHandler(function(error) {
-              button.disabled = false;
-              result.innerText = 'Error: ' + error.message;
-            })
-            .uploadStatementBatch(companyName, files);
-        } catch (error) {
-          button.disabled = false;
-          result.innerText = 'Error: ' + error.message;
-        }
-      }
+<script>
+function runServer(fn, args, resultId, buttonId) {
+  const result = document.getElementById(resultId);
+  if (buttonId) document.getElementById(buttonId).disabled = true;
+  result.innerText = 'Working...';
+  google.script.run
+    .withSuccessHandler(function(response) {
+      if (buttonId) document.getElementById(buttonId).disabled = false;
+      result.innerText = JSON.stringify(response, null, 2);
+    })
+    .withFailureHandler(function(error) {
+      if (buttonId) document.getElementById(buttonId).disabled = false;
+      result.innerText = 'Error: ' + error.message;
+    })[fn].apply(null, args || []);
+}
 
-      function toBase64(file) {
-        return new Promise(function(resolve, reject) {
-          const reader = new FileReader();
-          reader.readAsDataURL(file);
-          reader.onload = function() { resolve(reader.result); };
-          reader.onerror = function(error) { reject(error); };
-        });
-      }
-    </script>
-  </body>
+async function uploadStatements() {
+  const companyName = document.getElementById('companyName').value.trim();
+  const fileInput = document.getElementById('files');
+  if (!companyName) return alert('Enter company name.');
+  if (!fileInput.files.length) return alert('Select at least one PDF.');
+  document.getElementById('uploadButton').disabled = true;
+  document.getElementById('uploadResult').innerText = 'Uploading and reading...';
+  try {
+    const files = [];
+    for (const file of fileInput.files) {
+      const base64 = await toBase64(file);
+      files.push({ name: file.name, mimeType: file.type || 'application/pdf', base64: base64.split(',')[1] });
+    }
+    google.script.run
+      .withSuccessHandler(function(response) {
+        document.getElementById('uploadButton').disabled = false;
+        document.getElementById('uploadResult').innerText = JSON.stringify(response, null, 2);
+        document.getElementById('recCompanyName').value = response.companyName || '';
+        document.getElementById('recPeriod').value = response.detectedPeriod || '';
+        document.getElementById('decisionCompanyName').value = response.companyName || '';
+        document.getElementById('decisionPeriod').value = response.detectedPeriod || '';
+      })
+      .withFailureHandler(function(error) {
+        document.getElementById('uploadButton').disabled = false;
+        document.getElementById('uploadResult').innerText = 'Error: ' + error.message;
+      })
+      .uploadStatementBatch(companyName, files);
+  } catch (e) {
+    document.getElementById('uploadButton').disabled = false;
+    document.getElementById('uploadResult').innerText = 'Error: ' + e.message;
+  }
+}
+
+function saveLenderUi() {
+  runServer('saveLender', [{ lenderName: val('lenderName'), productType: val('productType'), contactName: val('contactName'), contactEmail: val('contactEmail'), notes: val('lenderNotes'), status: 'Active' }], 'lenderResult');
+}
+
+function saveCriteriaUi() {
+  runServer('saveLenderCriteria', [{ lenderName: val('criteriaLenderName'), minimumMonthlyRevenue: val('minimumMonthlyRevenue'), minimumTimeInBusinessMonths: val('minimumTimeInBusinessMonths'), provinceAccepted: val('provinceAccepted'), industryRestrictions: val('industryRestrictions'), nsfTolerance: val('nsfTolerance'), existingMcaTolerance: val('existingMcaTolerance'), requiredDocuments: val('requiredDocuments'), notes: val('criteriaNotes') }], 'criteriaResult');
+}
+
+function saveDecisionUi() {
+  runServer('saveLenderDecision', [{ companyName: val('decisionCompanyName'), period: val('decisionPeriod'), lenderName: val('decisionLenderName'), decision: val('decision'), approvedAmount: val('approvedAmount'), declineReason: val('declineReason'), conditions: val('conditions'), paymentFrequency: val('paymentFrequency'), paymentAmount: val('paymentAmount'), factorRateOrInterest: val('factorRateOrInterest'), term: val('term'), dateSubmitted: val('dateSubmitted'), dateDecisionReceived: val('dateDecisionReceived'), notes: val('decisionNotes') }], 'decisionResult');
+}
+
+function generateRecommendationUi() {
+  runServer('generateLenderRecommendation', [val('recCompanyName'), val('recPeriod')], 'recommendationResult');
+}
+
+function saveOutcomeUi() {
+  runServer('saveDealOutcome', [{ companyName: val('recCompanyName'), period: val('recPeriod'), selectedLender: val('selectedLender'), aiRecommendedLender: val('aiRecommendedLender'), finalResult: val('finalResult'), fundedAmount: val('fundedAmount'), fundedDate: val('fundedDate'), whyThisLenderWon: val('whyThisLenderWon'), adminNotes: val('adminNotes') }], 'outcomeResult');
+}
+
+function loadData() { runServer('getAppData', [], 'dataResult'); }
+function val(id) { return document.getElementById(id).value; }
+function toBase64(file) { return new Promise((resolve, reject) => { const reader = new FileReader(); reader.readAsDataURL(file); reader.onload = () => resolve(reader.result); reader.onerror = reject; }); }
+</script>
+</body>
 </html>
