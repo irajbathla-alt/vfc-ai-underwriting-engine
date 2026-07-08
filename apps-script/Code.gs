@@ -60,7 +60,7 @@ function uploadStatementBatch(companyName, files) {
     const fileName = file.name || 'statement.pdf';
     const blob = Utilities.newBlob(
       Utilities.base64Decode(file.base64),
-      MimeType.PDF,
+      'application/pdf',
       fileName.toLowerCase().endsWith('.pdf') ? fileName : fileName + '.pdf'
     );
 
@@ -133,10 +133,19 @@ function uploadStatementBatch(companyName, files) {
 }
 
 function extractTextFromPdf_(fileId) {
-  const file = DriveApp.getFileById(fileId);
-  const pdfBlob = file.getBlob().setContentType(MimeType.PDF).setName(file.getName());
-  const resource = { title: 'OCR_' + file.getName(), mimeType: MimeType.GOOGLE_DOCS };
-  const converted = Drive.Files.insert(resource, pdfBlob, { ocr: true, ocrLanguage: 'en' });
+  const sourceFile = DriveApp.getFileById(fileId);
+  const pdfBlob = sourceFile.getBlob().setContentType('application/pdf').setName(sourceFile.getName());
+
+  const resource = {
+    title: 'OCR_' + sourceFile.getName()
+  };
+
+  const converted = Drive.Files.insert(resource, pdfBlob, {
+    convert: true,
+    ocr: true,
+    ocrLanguage: 'en'
+  });
+
   const doc = DocumentApp.openById(converted.id);
   const text = doc.getBody().getText();
   DriveApp.getFileById(converted.id).setTrashed(true);
