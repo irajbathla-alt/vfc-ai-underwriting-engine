@@ -57,15 +57,16 @@ function uploadStatementBatch(companyName, files) {
   const endDates = [];
 
   files.forEach(function(file) {
+    const fileName = file.name || 'statement.pdf';
     const blob = Utilities.newBlob(
       Utilities.base64Decode(file.base64),
-      file.mimeType || MimeType.PDF,
-      file.name
+      MimeType.PDF,
+      fileName.toLowerCase().endsWith('.pdf') ? fileName : fileName + '.pdf'
     );
 
     const tempFile = tempFolder.createFile(blob);
     const text = extractTextFromPdf_(tempFile.getId());
-    const summary = summarizeSingleBankStatement_(text, companyName, file.name);
+    const summary = summarizeSingleBankStatement_(text, companyName, fileName);
 
     const startDate = parseDateSafe_(summary.statement_start_date);
     const endDate = parseDateSafe_(summary.statement_end_date);
@@ -75,7 +76,7 @@ function uploadStatementBatch(companyName, files) {
 
     processedFiles.push({
       uploadId: Utilities.getUuid(),
-      fileName: file.name,
+      fileName: fileName,
       fileId: tempFile.getId(),
       fileUrl: tempFile.getUrl(),
       summary: summary
@@ -133,9 +134,9 @@ function uploadStatementBatch(companyName, files) {
 
 function extractTextFromPdf_(fileId) {
   const file = DriveApp.getFileById(fileId);
-  const blob = file.getBlob();
+  const pdfBlob = file.getBlob().setContentType(MimeType.PDF).setName(file.getName());
   const resource = { title: 'OCR_' + file.getName(), mimeType: MimeType.GOOGLE_DOCS };
-  const converted = Drive.Files.insert(resource, blob, { ocr: true, ocrLanguage: 'en' });
+  const converted = Drive.Files.insert(resource, pdfBlob, { ocr: true, ocrLanguage: 'en' });
   const doc = DocumentApp.openById(converted.id);
   const text = doc.getBody().getText();
   DriveApp.getFileById(converted.id).setTrashed(true);
