@@ -4,118 +4,480 @@
   <base target="_top">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
-    body { font-family: Arial, sans-serif; margin: 0; padding: 24px; background: #f6f6f6; color: #111; }
-    .wrap { max-width: 1050px; margin: 0 auto; }
-    .card { background: #fff; padding: 22px; border-radius: 14px; margin-bottom: 18px; box-shadow: 0 8px 24px rgba(0,0,0,0.07); }
-    h1 { margin: 0 0 8px; }
-    h2 { margin-top: 0; }
-    label { display:block; font-weight:700; margin-top:12px; }
-    input, select, textarea, button { width:100%; box-sizing:border-box; padding:11px; margin-top:6px; border-radius:9px; border:1px solid #ddd; font-size:14px; }
+    :root {
+      --blue: #1686f7;
+      --blue-soft: #eaf3ff;
+      --green: #056a55;
+      --green-soft: #eafff6;
+      --ink: #151515;
+      --muted: #9d9d9d;
+      --panel: #f1f1f1;
+      --line: #e2e2e2;
+    }
+
+    body {
+      margin: 0;
+      padding: 26px 18px 60px;
+      background: #ffffff;
+      color: var(--ink);
+      font-family: Georgia, 'Times New Roman', serif;
+    }
+
+    .wrap {
+      max-width: 1120px;
+      margin: 0 auto;
+    }
+
+    .hero {
+      text-align: center;
+      padding: 18px 0 22px;
+    }
+
+    .hero h1 {
+      margin: 0;
+      font-size: clamp(38px, 6vw, 70px);
+      font-weight: 500;
+      letter-spacing: -1.4px;
+      line-height: 1.04;
+    }
+
+    .hero .subtitle {
+      margin: 10px 0 34px;
+      font-size: clamp(22px, 3vw, 36px);
+      color: #aaa;
+      font-weight: 400;
+    }
+
+    .segment {
+      width: min(780px, 92vw);
+      margin: 0 auto 28px;
+      background: var(--panel);
+      border-radius: 52px;
+      padding: 8px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.8);
+    }
+
+    .seg-item {
+      border-radius: 44px;
+      padding: 18px 16px;
+      font-size: clamp(28px, 4vw, 43px);
+      color: #555;
+      text-align: center;
+      line-height: 1;
+    }
+
+    .seg-item.active {
+      background: var(--blue);
+      color: #fff;
+      box-shadow: 0 12px 25px rgba(22,134,247,0.28);
+    }
+
+    .seg-count {
+      font-size: .55em;
+      opacity: .58;
+      margin-left: 14px;
+      vertical-align: middle;
+    }
+
+    .province-bar {
+      width: min(960px, 94vw);
+      margin: 0 auto 30px;
+      background: var(--panel);
+      border-radius: 42px;
+      display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      gap: 4px;
+      padding: 14px 22px;
+      box-sizing: border-box;
+    }
+
+    .province {
+      text-align: center;
+      font-size: clamp(22px, 3vw, 37px);
+      color: #4f4f4f;
+      padding: 10px 4px;
+    }
+
+    .action-row {
+      display: flex;
+      justify-content: center;
+      gap: 24px;
+      margin: 14px 0 30px;
+      flex-wrap: wrap;
+    }
+
+    .pill-action {
+      border-radius: 34px;
+      padding: 17px 42px;
+      border: 2px solid transparent;
+      font-size: clamp(24px, 3vw, 34px);
+      background: var(--blue-soft);
+      color: #1669aa;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+      cursor: pointer;
+      width: auto;
+      margin: 0;
+      font-family: Georgia, 'Times New Roman', serif;
+    }
+
+    .pill-action.green {
+      background: var(--green-soft);
+      color: var(--green);
+      border-color: #b9f0dc;
+    }
+
+    .search-row {
+      display: flex;
+      align-items: center;
+      gap: 22px;
+      width: min(1040px, 96vw);
+      margin: 0 auto 34px;
+    }
+
+    .search-box {
+      flex: 1;
+      border: 2px solid var(--line);
+      border-radius: 24px;
+      height: 86px;
+      display: flex;
+      align-items: center;
+      padding: 0 26px;
+      color: #bdbdbd;
+      box-sizing: border-box;
+      background: #fff;
+    }
+
+    .search-icon {
+      font-size: 42px;
+      margin-right: 18px;
+      color: #c9c9c9;
+      line-height: 1;
+    }
+
+    .search-box input {
+      border: none;
+      outline: none;
+      font-family: Georgia, 'Times New Roman', serif;
+      font-size: clamp(28px, 4vw, 42px);
+      color: #555;
+      width: 100%;
+      padding: 0;
+      margin: 0;
+      background: transparent;
+    }
+
+    .search-box input::placeholder {
+      color: #c9c9c9;
+    }
+
+    .search-count,
+    .clear-link {
+      font-size: clamp(25px, 3vw, 34px);
+      color: #111;
+      white-space: nowrap;
+    }
+
+    .clear-link {
+      color: #bdbdbd;
+      cursor: pointer;
+    }
+
+    .section-tabs {
+      display: flex;
+      justify-content: center;
+      gap: 16px;
+      margin: 10px 0 22px;
+      flex-wrap: wrap;
+    }
+
+    .small-tab {
+      width: auto;
+      border: 1px solid #dde8f7;
+      background: #f4f8ff;
+      color: #1669aa;
+      padding: 12px 24px;
+      border-radius: 28px;
+      font-size: 18px;
+      margin: 0;
+      cursor: pointer;
+      font-family: Georgia, 'Times New Roman', serif;
+    }
+
+    .small-tab.active {
+      background: #111;
+      color: #fff;
+      border-color: #111;
+    }
+
+    .panel {
+      display: none;
+    }
+
+    .panel.active {
+      display: block;
+    }
+
+    .card {
+      background: #fff;
+      padding: 24px;
+      border-radius: 24px;
+      border: 1px solid #e6e6e6;
+      margin-bottom: 18px;
+      box-shadow: 0 10px 24px rgba(0,0,0,0.04);
+      font-family: Arial, sans-serif;
+    }
+
+    .card h2 {
+      margin: 0 0 14px;
+      font-family: Georgia, 'Times New Roman', serif;
+      font-weight: 500;
+      font-size: 28px;
+    }
+
+    label {
+      display: block;
+      font-weight: 700;
+      margin-top: 12px;
+      color: #333;
+    }
+
+    input, select, textarea, button {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 12px;
+      margin-top: 6px;
+      border-radius: 12px;
+      border: 1px solid #ddd;
+      font-size: 14px;
+      font-family: Arial, sans-serif;
+    }
+
     textarea { min-height: 80px; }
-    button { background:#111; color:#fff; border:none; cursor:pointer; font-weight:700; margin-top:16px; }
-    button:disabled { background:#777; }
-    .grid { display:grid; grid-template-columns: 1fr 1fr; gap:14px; }
-    .note { color:#666; font-size:13px; margin-top:7px; }
-    pre { white-space:pre-wrap; background:#f1f1f1; padding:14px; border-radius:10px; min-height:60px; }
-    @media (max-width: 760px) { .grid { grid-template-columns: 1fr; } }
+
+    .card button {
+      background: #111;
+      color: #fff;
+      border: none;
+      cursor: pointer;
+      font-weight: 700;
+      margin-top: 16px;
+    }
+
+    .card button:disabled { background:#777; }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 18px;
+    }
+
+    .note {
+      color: #666;
+      font-size: 13px;
+      margin-top: 7px;
+    }
+
+    pre {
+      white-space: pre-wrap;
+      background: #f6f6f6;
+      padding: 14px;
+      border-radius: 14px;
+      min-height: 60px;
+      font-size: 13px;
+      overflow-x: auto;
+    }
+
+    @media (max-width: 760px) {
+      .grid { grid-template-columns: 1fr; }
+      .province-bar { grid-template-columns: repeat(4, 1fr); }
+      .search-row { gap: 10px; }
+      .search-box { height: 70px; padding: 0 18px; }
+      .search-icon { font-size: 30px; margin-right: 10px; }
+      .pill-action { padding: 14px 26px; }
+    }
   </style>
 </head>
 <body>
 <div class="wrap">
-  <div class="card">
-    <h1>VFC AI Underwriting Engine</h1>
-    <p>Upload bank statements, save lender criteria, enter approvals/declines, and generate lender-fit recommendations.</p>
-    <button onclick="loadData()">Refresh Data</button>
-  </div>
+  <div class="hero">
+    <h1>Vancouver Finance Company Inc.</h1>
+    <div class="subtitle">AI Underwriting Engine (2025–2026)</div>
 
-  <div class="card">
-    <h2>1. Upload Bank Statements</h2>
-    <label>Company / Individual Name</label>
-    <input id="companyName" placeholder="Example: ABC Pizza Ltd">
-    <label>Upload Bank Statement PDFs</label>
-    <input id="files" type="file" accept="application/pdf" multiple>
-    <div class="note">Use 1–3 PDFs per upload for best performance.</div>
-    <button id="uploadButton" onclick="uploadStatements()">Upload & Read Bank Statements</button>
-    <pre id="uploadResult">Ready.</pre>
-  </div>
-
-  <div class="grid">
-    <div class="card">
-      <h2>2. Add Lender</h2>
-      <label>Lender Name</label><input id="lenderName" placeholder="Journey Capital">
-      <label>Product Type</label><input id="productType" value="Merchant Cash Advance">
-      <label>Contact Name</label><input id="contactName">
-      <label>Contact Email</label><input id="contactEmail">
-      <label>Notes</label><textarea id="lenderNotes"></textarea>
-      <button onclick="saveLenderUi()">Save Lender</button>
-      <pre id="lenderResult"></pre>
+    <div class="segment">
+      <div class="seg-item active">MCA <span class="seg-count">AI</span></div>
+      <div class="seg-item">Lenders <span class="seg-count">V2</span></div>
     </div>
 
-    <div class="card">
-      <h2>3. Add Lender Criteria</h2>
-      <label>Lender Name</label><input id="criteriaLenderName" placeholder="Journey Capital">
-      <label>Minimum Monthly Revenue</label><input id="minimumMonthlyRevenue" placeholder="15000">
-      <label>Minimum Time In Business Months</label><input id="minimumTimeInBusinessMonths" placeholder="12">
-      <label>Province Accepted</label><input id="provinceAccepted" placeholder="BC, AB, ON">
-      <label>Industry Restrictions</label><textarea id="industryRestrictions"></textarea>
-      <label>NSF Tolerance</label><input id="nsfTolerance" placeholder="Example: Max 3 in 90 days">
-      <label>Existing MCA Tolerance</label><input id="existingMcaTolerance" placeholder="Example: 1 position acceptable">
-      <label>Required Documents</label><textarea id="requiredDocuments" placeholder="6 months statements, application, void cheque"></textarea>
-      <label>Notes</label><textarea id="criteriaNotes"></textarea>
-      <button onclick="saveCriteriaUi()">Save Criteria</button>
-      <pre id="criteriaResult"></pre>
+    <div class="province-bar">
+      <div class="province">BC</div>
+      <div class="province">AB</div>
+      <div class="province">SK</div>
+      <div class="province">MB</div>
+      <div class="province">ON</div>
+      <div class="province">QC</div>
+      <div class="province">ATL</div>
+    </div>
+
+    <div class="action-row">
+      <button class="pill-action" onclick="showPanel('admin')">Admin Portal</button>
+      <button class="pill-action green" onclick="showPanel('threads')">Deal Threads</button>
+    </div>
+
+    <div class="search-row">
+      <div class="search-box">
+        <span class="search-icon">⌕</span>
+        <input id="lenderSearch" placeholder="Search lender..." oninput="fakeSearchCount()">
+      </div>
+      <div class="search-count" id="searchCount">4</div>
+      <div class="clear-link" onclick="clearSearch()">Clear</div>
     </div>
   </div>
 
-  <div class="grid">
-    <div class="card">
-      <h2>4. Save Lender Decision</h2>
-      <label>Company Name</label><input id="decisionCompanyName">
-      <label>Period</label><input id="decisionPeriod" placeholder="Jul 2025 to Aug 2025">
-      <label>Lender Name</label><input id="decisionLenderName">
-      <label>Decision</label>
-      <select id="decision"><option>Approved</option><option>Declined</option><option>Conditional</option><option>Withdrawn</option></select>
-      <label>Approved Amount</label><input id="approvedAmount">
-      <label>Decline Reason</label><textarea id="declineReason"></textarea>
-      <label>Conditions</label><textarea id="conditions"></textarea>
-      <label>Payment Frequency</label><input id="paymentFrequency" placeholder="Daily / Weekly / Monthly">
-      <label>Payment Amount</label><input id="paymentAmount">
-      <label>Factor Rate / Interest</label><input id="factorRateOrInterest">
-      <label>Term</label><input id="term">
-      <label>Date Submitted</label><input id="dateSubmitted" type="date">
-      <label>Date Decision Received</label><input id="dateDecisionReceived" type="date">
-      <label>Notes</label><textarea id="decisionNotes"></textarea>
-      <button onclick="saveDecisionUi()">Save Decision</button>
-      <pre id="decisionResult"></pre>
-    </div>
+  <div class="section-tabs">
+    <button class="small-tab active" onclick="showPanel('upload')">Upload</button>
+    <button class="small-tab" onclick="showPanel('lenders')">Lenders</button>
+    <button class="small-tab" onclick="showPanel('decisions')">Decisions</button>
+    <button class="small-tab" onclick="showPanel('recommend')">AI Recommend</button>
+    <button class="small-tab" onclick="loadData();showPanel('data')">Recent Data</button>
+  </div>
 
+  <div id="upload" class="panel active">
     <div class="card">
-      <h2>5. Generate AI Recommendation</h2>
+      <h2>Upload Bank Statements</h2>
+      <label>Company / Individual Name</label>
+      <input id="companyName" placeholder="Example: ABC Pizza Ltd">
+      <label>Upload Bank Statement PDFs</label>
+      <input id="files" type="file" accept="application/pdf" multiple>
+      <div class="note">Use 1–3 PDFs per upload for best performance.</div>
+      <button id="uploadButton" onclick="uploadStatements()">Upload & Read Bank Statements</button>
+      <pre id="uploadResult">Ready.</pre>
+    </div>
+  </div>
+
+  <div id="lenders" class="panel">
+    <div class="grid">
+      <div class="card">
+        <h2>Add Lender</h2>
+        <label>Lender Name</label><input id="lenderName" placeholder="Journey Capital">
+        <label>Product Type</label><input id="productType" value="Merchant Cash Advance">
+        <label>Contact Name</label><input id="contactName">
+        <label>Contact Email</label><input id="contactEmail">
+        <label>Notes</label><textarea id="lenderNotes"></textarea>
+        <button onclick="saveLenderUi()">Save Lender</button>
+        <pre id="lenderResult"></pre>
+      </div>
+
+      <div class="card">
+        <h2>Add Lender Criteria</h2>
+        <label>Lender Name</label><input id="criteriaLenderName" placeholder="Journey Capital">
+        <label>Minimum Monthly Revenue</label><input id="minimumMonthlyRevenue" placeholder="15000">
+        <label>Minimum Time In Business Months</label><input id="minimumTimeInBusinessMonths" placeholder="12">
+        <label>Province Accepted</label><input id="provinceAccepted" placeholder="BC, AB, ON">
+        <label>Industry Restrictions</label><textarea id="industryRestrictions"></textarea>
+        <label>NSF Tolerance</label><input id="nsfTolerance" placeholder="Example: Max 3 in 90 days">
+        <label>Existing MCA Tolerance</label><input id="existingMcaTolerance" placeholder="Example: 1 position acceptable">
+        <label>Required Documents</label><textarea id="requiredDocuments" placeholder="6 months statements, application, void cheque"></textarea>
+        <label>Notes</label><textarea id="criteriaNotes"></textarea>
+        <button onclick="saveCriteriaUi()">Save Criteria</button>
+        <pre id="criteriaResult"></pre>
+      </div>
+    </div>
+  </div>
+
+  <div id="decisions" class="panel">
+    <div class="grid">
+      <div class="card">
+        <h2>Save Lender Decision</h2>
+        <label>Company Name</label><input id="decisionCompanyName">
+        <label>Period</label><input id="decisionPeriod" placeholder="Jul 2025 to Aug 2025">
+        <label>Lender Name</label><input id="decisionLenderName">
+        <label>Decision</label>
+        <select id="decision"><option>Approved</option><option>Declined</option><option>Conditional</option><option>Withdrawn</option></select>
+        <label>Approved Amount</label><input id="approvedAmount">
+        <label>Decline Reason</label><textarea id="declineReason"></textarea>
+        <label>Conditions</label><textarea id="conditions"></textarea>
+        <label>Payment Frequency</label><input id="paymentFrequency" placeholder="Daily / Weekly / Monthly">
+        <label>Payment Amount</label><input id="paymentAmount">
+        <label>Factor Rate / Interest</label><input id="factorRateOrInterest">
+        <label>Term</label><input id="term">
+        <label>Date Submitted</label><input id="dateSubmitted" type="date">
+        <label>Date Decision Received</label><input id="dateDecisionReceived" type="date">
+        <label>Notes</label><textarea id="decisionNotes"></textarea>
+        <button onclick="saveDecisionUi()">Save Decision</button>
+        <pre id="decisionResult"></pre>
+      </div>
+
+      <div class="card">
+        <h2>Save Final Outcome</h2>
+        <label>Company Name</label><input id="outcomeCompanyName">
+        <label>Period</label><input id="outcomePeriod">
+        <label>Selected Lender</label><input id="selectedLender">
+        <label>AI Recommended Lender</label><input id="aiRecommendedLender">
+        <label>Final Result</label><select id="finalResult"><option>Funded</option><option>Approved Not Funded</option><option>Declined</option><option>Withdrawn</option></select>
+        <label>Funded Amount</label><input id="fundedAmount">
+        <label>Funded Date</label><input id="fundedDate" type="date">
+        <label>Why This Lender Won</label><textarea id="whyThisLenderWon"></textarea>
+        <label>Admin Notes</label><textarea id="adminNotes"></textarea>
+        <button onclick="saveOutcomeUi()">Save Outcome</button>
+        <pre id="outcomeResult"></pre>
+      </div>
+    </div>
+  </div>
+
+  <div id="recommend" class="panel">
+    <div class="card">
+      <h2>Generate AI Recommendation</h2>
       <label>Company Name</label><input id="recCompanyName">
       <label>Detected Period</label><input id="recPeriod" placeholder="Jul 2025 to Aug 2025">
       <button onclick="generateRecommendationUi()">Generate Recommendation</button>
       <pre id="recommendationResult"></pre>
-
-      <h2>6. Save Final Outcome</h2>
-      <label>Selected Lender</label><input id="selectedLender">
-      <label>AI Recommended Lender</label><input id="aiRecommendedLender">
-      <label>Final Result</label><select id="finalResult"><option>Funded</option><option>Approved Not Funded</option><option>Declined</option><option>Withdrawn</option></select>
-      <label>Funded Amount</label><input id="fundedAmount">
-      <label>Funded Date</label><input id="fundedDate" type="date">
-      <label>Why This Lender Won</label><textarea id="whyThisLenderWon"></textarea>
-      <label>Admin Notes</label><textarea id="adminNotes"></textarea>
-      <button onclick="saveOutcomeUi()">Save Outcome</button>
-      <pre id="outcomeResult"></pre>
     </div>
   </div>
 
-  <div class="card">
-    <h2>Recent Data</h2>
-    <pre id="dataResult">Click Refresh Data.</pre>
+  <div id="data" class="panel">
+    <div class="card">
+      <h2>Recent Data</h2>
+      <button onclick="loadData()">Refresh Data</button>
+      <pre id="dataResult">Click Refresh Data.</pre>
+    </div>
+  </div>
+
+  <div id="admin" class="panel">
+    <div class="card">
+      <h2>Admin Portal</h2>
+      <p>Use the tabs above to upload statements, save lender criteria, enter lender decisions, and build your proprietary underwriting database.</p>
+    </div>
+  </div>
+
+  <div id="threads" class="panel">
+    <div class="card">
+      <h2>Deal Threads</h2>
+      <p>Deal-thread views can be added next: one timeline per company showing upload summary, lender submissions, approvals, declines, and final outcome.</p>
+    </div>
   </div>
 </div>
 
 <script>
+function showPanel(id) {
+  document.querySelectorAll('.panel').forEach(panel => panel.classList.remove('active'));
+  const panel = document.getElementById(id);
+  if (panel) panel.classList.add('active');
+  document.querySelectorAll('.small-tab').forEach(tab => tab.classList.remove('active'));
+  event && event.target && event.target.classList && event.target.classList.add('active');
+}
+
+function fakeSearchCount() {
+  const q = document.getElementById('lenderSearch').value.trim();
+  document.getElementById('searchCount').innerText = q ? '1' : '4';
+}
+
+function clearSearch() {
+  document.getElementById('lenderSearch').value = '';
+  document.getElementById('searchCount').innerText = '4';
+}
+
 function runServer(fn, args, resultId, buttonId) {
   const result = document.getElementById(resultId);
   if (buttonId) document.getElementById(buttonId).disabled = true;
@@ -152,6 +514,8 @@ async function uploadStatements() {
         document.getElementById('recPeriod').value = response.detectedPeriod || '';
         document.getElementById('decisionCompanyName').value = response.companyName || '';
         document.getElementById('decisionPeriod').value = response.detectedPeriod || '';
+        document.getElementById('outcomeCompanyName').value = response.companyName || '';
+        document.getElementById('outcomePeriod').value = response.detectedPeriod || '';
       })
       .withFailureHandler(function(error) {
         document.getElementById('uploadButton').disabled = false;
@@ -181,7 +545,7 @@ function generateRecommendationUi() {
 }
 
 function saveOutcomeUi() {
-  runServer('saveDealOutcome', [{ companyName: val('recCompanyName'), period: val('recPeriod'), selectedLender: val('selectedLender'), aiRecommendedLender: val('aiRecommendedLender'), finalResult: val('finalResult'), fundedAmount: val('fundedAmount'), fundedDate: val('fundedDate'), whyThisLenderWon: val('whyThisLenderWon'), adminNotes: val('adminNotes') }], 'outcomeResult');
+  runServer('saveDealOutcome', [{ companyName: val('outcomeCompanyName'), period: val('outcomePeriod'), selectedLender: val('selectedLender'), aiRecommendedLender: val('aiRecommendedLender'), finalResult: val('finalResult'), fundedAmount: val('fundedAmount'), fundedDate: val('fundedDate'), whyThisLenderWon: val('whyThisLenderWon'), adminNotes: val('adminNotes') }], 'outcomeResult');
 }
 
 function loadData() { runServer('getAppData', [], 'dataResult'); }
