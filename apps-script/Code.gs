@@ -4,7 +4,7 @@ const VFC_CONFIG = {
 };
 
 function doGet() {
-  return HtmlService.createHtmlOutputFromFile('Index')
+  return HtmlService.createHtmlOutputFromFile('index')
     .setTitle('VFC AI Admin Upload')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
