@@ -12,8 +12,16 @@ function doGet() {
 function setupVFC() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const tabs = [
-    'Companies', 'Uploads', 'PDF Summaries', 'Batch Summaries', 'Settings',
-    'Lenders', 'Lender Criteria', 'Lender Decisions', 'AI Recommendations', 'Deal Outcomes'
+    'Companies',
+    'Uploads',
+    'PDF Summaries',
+    'Batch Summaries',
+    'Settings',
+    'Lenders',
+    'Observed Lender Behaviour',
+    'Training Records',
+    'AI Recommendations',
+    'Deal Outcomes'
   ];
 
   tabs.forEach(name => {
@@ -25,15 +33,15 @@ function setupVFC() {
   setHeaders_('PDF Summaries', ['Upload ID', 'Company Name', 'Detected Period', 'File Name', 'Document Type', 'Bank Name', 'Account Holder', 'Statement Start Date', 'Statement End Date', 'Opening Balance', 'Closing Balance', 'Total Deposits', 'Total Withdrawals', 'NSF Count', 'Negative Balance Detected', 'Possible MCA Or Loan Payments', 'Summary', 'Risks', 'Missing Info', 'Created At']);
   setHeaders_('Batch Summaries', ['Batch ID', 'Company Name', 'Detected Period', 'Files Read', 'Earliest Statement Date', 'Latest Statement Date', 'Combined Summary', 'Key Findings', 'Risks', 'Missing Info', 'Created At']);
   setHeaders_('Settings', ['Key', 'Value']);
-  setHeaders_('Lenders', ['Lender ID', 'Lender Name', 'Product Type', 'Contact Name', 'Contact Email', 'Notes', 'Status', 'Created At']);
-  setHeaders_('Lender Criteria', ['Criteria ID', 'Lender Name', 'Minimum Monthly Revenue', 'Minimum Time In Business Months', 'Province Accepted', 'Industry Restrictions', 'NSF Tolerance', 'Existing MCA Tolerance', 'Required Documents', 'Notes', 'Last Updated']);
-  setHeaders_('Lender Decisions', ['Decision ID', 'Company Name', 'Period', 'Lender Name', 'Decision', 'Approved Amount', 'Decline Reason', 'Conditions', 'Payment Frequency', 'Payment Amount', 'Factor Rate Or Interest', 'Term', 'Date Submitted', 'Date Decision Received', 'Notes', 'Created At']);
+  setHeaders_('Lenders', ['Lender ID', 'Lender Name', 'Product Type', 'Notes', 'Status', 'Created At']);
+  setHeaders_('Observed Lender Behaviour', ['Behaviour ID', 'Lender Name', 'Company Name', 'Period', 'Decision', 'Approved Amount', 'Decline Reason', 'Observed Pattern Note', 'Created At']);
+  setHeaders_('Training Records', ['Training ID', 'Company Name', 'Period', 'Lender Name', 'Decision', 'Approved Amount', 'Decline Reason', 'Bank Summary', 'Key Findings', 'Risks', 'Missing Info', 'Created At']);
   setHeaders_('AI Recommendations', ['Recommendation ID', 'Company Name', 'Period', 'Recommended Lender', 'Fit Level', 'Reasoning', 'Risks', 'Missing Info', 'Created At']);
   setHeaders_('Deal Outcomes', ['Outcome ID', 'Company Name', 'Period', 'Selected Lender', 'AI Recommended Lender', 'Final Result', 'Funded Amount', 'Funded Date', 'Why This Lender Won', 'Admin Notes', 'Created At']);
 
   getOrCreateRootFolder_();
   seedDefaultLenders_();
-  return { ok: true, message: 'VFC setup complete with lender engine tabs.' };
+  return { ok: true, message: 'VFC setup complete with observed lender behaviour and training records.' };
 }
 
 function uploadStatementBatch(companyName, files) {
@@ -101,57 +109,55 @@ function uploadStatementBatch(companyName, files) {
   };
 }
 
+function saveLenderDecision(payload) {
+  const companyName = payload.companyName || '';
+  const period = payload.period || '';
+  const lenderName = payload.lenderName || '';
+  const decision = payload.decision || '';
+  const approvedAmount = payload.approvedAmount || '';
+  const declineReason = payload.declineReason || '';
+  const batch = getLatestBatchSummary_(companyName, period) || {};
+
+  appendRow_('Observed Lender Behaviour', [
+    Utilities.getUuid(),
+    lenderName,
+    companyName,
+    period,
+    decision,
+    approvedAmount,
+    declineReason,
+    payload.notes || 'Saved from VFC intake page.',
+    new Date()
+  ]);
+
+  appendRow_('Training Records', [
+    Utilities.getUuid(),
+    companyName,
+    period,
+    lenderName,
+    decision,
+    approvedAmount,
+    declineReason,
+    batch.combinedSummary || batch.combined_summary || '',
+    batch.keyFindings || batch.key_findings || '',
+    batch.risks || '',
+    batch.missingInfo || batch.missing_info || '',
+    new Date()
+  ]);
+
+  return { ok: true, message: 'Observed lender behaviour and training record saved.' };
+}
+
 function saveLender(payload) {
   appendRow_('Lenders', [
     Utilities.getUuid(),
     payload.lenderName || '',
     payload.productType || 'Merchant Cash Advance',
-    payload.contactName || '',
-    payload.contactEmail || '',
     payload.notes || '',
     payload.status || 'Active',
     new Date()
   ]);
   return { ok: true, message: 'Lender saved.' };
-}
-
-function saveLenderCriteria(payload) {
-  appendRow_('Lender Criteria', [
-    Utilities.getUuid(),
-    payload.lenderName || '',
-    payload.minimumMonthlyRevenue || '',
-    payload.minimumTimeInBusinessMonths || '',
-    payload.provinceAccepted || '',
-    payload.industryRestrictions || '',
-    payload.nsfTolerance || '',
-    payload.existingMcaTolerance || '',
-    payload.requiredDocuments || '',
-    payload.notes || '',
-    new Date()
-  ]);
-  return { ok: true, message: 'Lender criteria saved.' };
-}
-
-function saveLenderDecision(payload) {
-  appendRow_('Lender Decisions', [
-    Utilities.getUuid(),
-    payload.companyName || '',
-    payload.period || '',
-    payload.lenderName || '',
-    payload.decision || '',
-    payload.approvedAmount || '',
-    payload.declineReason || '',
-    payload.conditions || '',
-    payload.paymentFrequency || '',
-    payload.paymentAmount || '',
-    payload.factorRateOrInterest || '',
-    payload.term || '',
-    payload.dateSubmitted || '',
-    payload.dateDecisionReceived || '',
-    payload.notes || '',
-    new Date()
-  ]);
-  return { ok: true, message: 'Lender decision saved.' };
 }
 
 function saveDealOutcome(payload) {
@@ -173,19 +179,19 @@ function saveDealOutcome(payload) {
 
 function generateLenderRecommendation(companyName, period) {
   const batch = getLatestBatchSummary_(companyName, period);
-  const criteria = getSheetObjects_('Lender Criteria');
-  const decisions = getSheetObjects_('Lender Decisions');
+  const observed = getSheetObjects_('Observed Lender Behaviour');
+  const training = getSheetObjects_('Training Records');
 
   if (!batch) throw new Error('No batch summary found for this company/period. Upload bank statements first.');
 
   const prompt =
     'You are the VFC AI Lender Fit Engine. Return JSON only with recommendations array. ' +
     'Each recommendation must include recommended_lender, fit_level, reasoning, risks, missing_info. ' +
-    'Do not say approved. Do not invent lender criteria. Separate actual criteria from observed decisions.\n\n' +
+    'Do not say approved. Do not invent official lender criteria. Use only observed VFC lender behaviour and historical training records.\n\n' +
     'Company: ' + companyName + '\nPeriod: ' + period + '\n\n' +
     'Bank statement batch summary:\n' + JSON.stringify(batch) + '\n\n' +
-    'Lender criteria:\n' + JSON.stringify(criteria) + '\n\n' +
-    'Historical lender decisions:\n' + JSON.stringify(decisions.slice(-100));
+    'Observed lender behaviour:\n' + JSON.stringify(observed.slice(-150)) + '\n\n' +
+    'Training records:\n' + JSON.stringify(training.slice(-150));
 
   const ai = callOpenAIJson_(prompt);
   const recs = ai.recommendations || [];
@@ -211,9 +217,9 @@ function getAppData() {
   return {
     ok: true,
     lenders: getSheetObjects_('Lenders'),
-    criteria: getSheetObjects_('Lender Criteria'),
+    observedBehaviour: getSheetObjects_('Observed Lender Behaviour').slice(-50),
+    trainingRecords: getSheetObjects_('Training Records').slice(-50),
     batchSummaries: getSheetObjects_('Batch Summaries').slice(-50),
-    decisions: getSheetObjects_('Lender Decisions').slice(-50),
     recommendations: getSheetObjects_('AI Recommendations').slice(-50)
   };
 }
@@ -348,7 +354,7 @@ function seedDefaultLenders_() {
   const existing = getSheetObjects_('Lenders').map(l => String(l.lenderName || '').toLowerCase());
   ['Journey Capital', 'Merchant Growth', 'iCapital Financing', 'Canacap Funding'].forEach(name => {
     if (!existing.includes(name.toLowerCase())) {
-      sheet.appendRow([Utilities.getUuid(), name, 'Merchant Cash Advance', '', '', '', 'Active', new Date()]);
+      sheet.appendRow([Utilities.getUuid(), name, 'Merchant Cash Advance', '', 'Active', new Date()]);
     }
   });
 }
