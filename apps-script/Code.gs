@@ -251,6 +251,7 @@ function summarizeBatch_(items, companyName, detectedPeriod) {
     '\nCompany: ' + companyName +
     '\nDetected period: ' + detectedPeriod +
     '\nSummarize bank-statement information only. Do not say approved or declined. Do not invent figures.' +
+    '\nIf key_findings, risks, or missing_info have multiple points, return them as a single readable string, not an array.' +
     '\nPDF summaries:\n' + combined;
   return callOpenAIJson_(prompt);
 }
@@ -379,9 +380,25 @@ function cleanFolderName_(name) {
 function setHeaders_(sheetName, headers) {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
   sheet.clear();
-  sheet.appendRow(headers);
+  sheet.appendRow(headers.map(cleanCell_));
 }
 
 function appendRow_(sheetName, row) {
-  SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName).appendRow(row);
+  SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName).appendRow(row.map(cleanCell_));
+}
+
+function cleanCell_(value) {
+  if (value === null || value === undefined) return '';
+  if (Object.prototype.toString.call(value) === '[object Date]') return value;
+  if (Array.isArray(value)) {
+    return value.map(item => cleanCell_(item)).filter(String).join('\n');
+  }
+  if (typeof value === 'object') {
+    try {
+      return Object.keys(value).map(key => key + ': ' + cleanCell_(value[key])).join('\n');
+    } catch (e) {
+      return JSON.stringify(value);
+    }
+  }
+  return String(value);
 }
