@@ -1,6 +1,8 @@
 const VFC_CONFIG = {
   ROOT_FOLDER_NAME: 'VFC AI Engine',
-  OPENAI_MODEL: 'gpt-4.1-mini'
+  OPENAI_MODEL: 'gpt-4.1-mini',
+  OCR_RETRY_ATTEMPTS: 5,
+  OCR_DELAY_MS: 1800
 };
 
 function doGet() {
@@ -55,7 +57,9 @@ function uploadStatementBatch(companyName, files) {
   const startDates = [];
   const endDates = [];
 
-  files.forEach(file => {
+  files.forEach((file, index) => {
+    if (index > 0) Utilities.sleep(VFC_CONFIG.OCR_DELAY_MS);
+
     const fileName = file.name || 'statement.pdf';
     const blob = Utilities.newBlob(
       Utilities.base64Decode(file.base64),
@@ -228,11 +232,46 @@ function extractTextFromPdf_(fileId) {
   const sourceFile = DriveApp.getFileById(fileId);
   const pdfBlob = sourceFile.getBlob().setContentType('application/pdf').setName(sourceFile.getName());
   const resource = { title: 'OCR_' + sourceFile.getName() };
-  const converted = Drive.Files.insert(resource, pdfBlob, { convert: true, ocr: true, ocrLanguage: 'en' });
+  const converted = driveOcrWithRetry_(resource, pdfBlob);
   const doc = DocumentApp.openById(converted.id);
   const text = doc.getBody().getText();
   DriveApp.getFileById(converted.id).setTrashed(true);
   return text || '';
+}
+
+function driveOcrWithRetry_(resource, pdfBlob) {
+  let lastError;
+
+  for (let attempt = 0; attempt < VFC_CONFIG.OCR_RETRY_ATTEMPTS; attempt++) {
+    try {
+      return Drive.Files.insert(resource, pdfBlob, {
+        convert: true,
+        ocr: true,
+        ocrLanguage: 'en'
+      });
+    } catch (error) {
+      lastError = error;
+      const message = String(error && error.message ? error.message : error).toLowerCase();
+      const retryable =
+        message.indexOf('rate limit') !== -1 ||
+        message.indexOf('ratelimit') !== -1 ||
+        message.indexOf('user rate limit exceeded') !== -1 ||
+        message.indexOf('quota') !== -1 ||
+        message.indexOf('429') !== -1;
+
+      if (!retryable || attempt === VFC_CONFIG.OCR_RETRY_ATTEMPTS - 1) {
+        break;
+      }
+
+      const waitMs = Math.pow(2, attempt + 1) * 1500 + Math.floor(Math.random() * 1000);
+      Utilities.sleep(waitMs);
+    }
+  }
+
+  throw new Error(
+    'Google Drive OCR is temporarily rate-limited. Please wait and retry with 1–2 statements. Original error: ' +
+    (lastError && lastError.message ? lastError.message : lastError)
+  );
 }
 
 function summarizeSingleBankStatement_(text, companyName, fileName) {
