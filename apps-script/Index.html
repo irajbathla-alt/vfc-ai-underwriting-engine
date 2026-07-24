@@ -4,217 +4,209 @@
   <base target="_top">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
-    :root{--blue:#1686f7;--green:#066b56;--soft:#f4f4f4;--line:#e4e4e4;--muted:#8d8d8d;--ink:#1f1f1f;--amber:#9a6510;--red:#a33b3b}
-    body{margin:0;padding:24px 16px 48px;background:#fff;color:var(--ink);font-family:Georgia,'Times New Roman',serif}
-    .wrap{max-width:860px;margin:0 auto;text-align:center}
-    h1{margin:12px 0 4px;font-size:clamp(30px,4.5vw,46px);font-weight:500;letter-spacing:-.5px;line-height:1.08}
-    .subtitle{font-size:clamp(16px,2.2vw,22px);color:var(--muted);margin-bottom:22px}
-    .segment{width:min(560px,94vw);margin:0 auto 18px;background:var(--soft);border-radius:36px;padding:6px;display:grid;grid-template-columns:1fr 1fr;box-sizing:border-box}
-    .seg-active,.seg-inactive{border-radius:30px;padding:12px 10px;font-size:clamp(18px,2.7vw,25px);line-height:1}
-    .seg-active{background:var(--blue);color:#fff;box-shadow:0 7px 16px rgba(22,134,247,.18)}
-    .seg-inactive{color:#555}
-    .province-bar{width:min(680px,96vw);margin:0 auto 18px;background:var(--soft);border-radius:28px;display:grid;grid-template-columns:repeat(7,1fr);padding:8px 14px;box-sizing:border-box}
-    .province{font-size:clamp(14px,2vw,20px);color:#555;padding:6px 2px}
-    .action-row{display:flex;justify-content:center;gap:14px;margin:4px 0 22px;flex-wrap:wrap}
-    .pill{border-radius:24px;padding:10px 22px;border:1px solid #d8e8fb;font-size:17px;background:#f4f8ff;color:#1769aa}
-    .pill.green{background:#f1fff8;border-color:#c8efdf;color:var(--green)}
-    .card{width:min(740px,96vw);margin:0 auto 18px;text-align:left;border:1px solid var(--line);border-radius:22px;padding:22px;box-sizing:border-box;background:#fff;box-shadow:0 8px 20px rgba(0,0,0,.035);font-family:Arial,sans-serif}
-    .card h2{font-family:Georgia,'Times New Roman',serif;font-size:24px;font-weight:500;margin:0 0 16px}
-    .field{margin-bottom:15px}
-    label{display:block;font-size:14px;font-weight:700;color:#333;margin-bottom:6px}
-    input,select,textarea{width:100%;box-sizing:border-box;border:1px solid #ddd;border-radius:13px;padding:12px 14px;font-size:15px;outline:none;background:#fff}
-    input:focus,select:focus,textarea:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(22,134,247,.08)}
-    textarea{min-height:76px;resize:vertical}
-    .grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
-    .submit,.secondary{width:100%;border:none;border-radius:18px;padding:15px;font-size:17px;font-weight:700;cursor:pointer;margin-top:4px}
-    .submit{background:var(--blue);color:#fff}.secondary{background:#f0f0f0;color:#333;margin-top:10px}
-    button:disabled{opacity:.55;cursor:wait}
-    .note{text-align:center;color:#777;font-size:12px;margin-top:10px}
-    .status{white-space:pre-wrap;background:#f8f8f8;border:1px solid #eee;border-radius:14px;padding:12px;min-height:42px;font-size:12px;overflow-x:auto;margin-top:16px}
+    :root{--blue:#1877d2;--green:#176b55;--soft:#f6f7f8;--line:#e5e7eb;--muted:#747b84;--ink:#25282d;--amber:#8a6418;--red:#9a3e3e}
+    *{box-sizing:border-box}
+    body{margin:0;padding:18px 12px 36px;background:#fff;color:var(--ink);font-family:Arial,sans-serif}
+    .wrap{max-width:760px;margin:0 auto}
+    .header{text-align:center;margin:2px 0 14px}
+    h1{margin:0 0 3px;font-family:Georgia,'Times New Roman',serif;font-size:clamp(25px,4vw,36px);font-weight:400;letter-spacing:-.3px}
+    .subtitle{font-size:14px;color:var(--muted)}
+    .tabs{display:grid;grid-template-columns:1fr 1fr;gap:4px;width:min(430px,100%);margin:14px auto 16px;padding:4px;background:var(--soft);border:1px solid var(--line);border-radius:12px}
+    .tab{border:0;background:transparent;border-radius:9px;padding:9px 12px;font-size:14px;font-weight:500;color:#616872;cursor:pointer}
+    .tab.active{background:#fff;color:var(--blue);box-shadow:0 1px 5px rgba(0,0,0,.08)}
+    .panel{display:none}.panel.active{display:block}
+    .card{background:#fff;border:1px solid var(--line);border-radius:15px;padding:17px;margin-bottom:14px;box-shadow:0 3px 12px rgba(0,0,0,.025)}
+    .card h2{margin:0 0 4px;font-family:Georgia,'Times New Roman',serif;font-size:20px;font-weight:400}
+    .intro{font-size:12px;line-height:1.45;color:var(--muted);margin-bottom:14px}
+    .field{margin-bottom:12px}
+    label{display:block;font-size:12px;font-weight:600;color:#41464d;margin-bottom:5px}
+    input,select,textarea{width:100%;border:1px solid #d9dde2;border-radius:9px;padding:10px 11px;font-size:13px;outline:none;background:#fff;color:var(--ink)}
+    input:focus,select:focus,textarea:focus{border-color:#7bb5eb;box-shadow:0 0 0 2px rgba(24,119,210,.08)}
+    textarea{min-height:68px;resize:vertical}
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:11px}
+    .button{width:100%;border:0;border-radius:10px;padding:11px 14px;font-size:13px;font-weight:600;cursor:pointer}
+    .primary{background:var(--blue);color:#fff}.secondary{margin-top:8px;background:#f1f3f5;color:#41464d;border:1px solid var(--line)}
+    .button:disabled{opacity:.55;cursor:wait}
+    .note{font-size:11px;color:var(--muted);text-align:center;margin-top:8px}
+    .status{white-space:pre-wrap;background:#fafafa;border:1px solid #eceef0;border-radius:10px;padding:10px;min-height:38px;font-size:11px;line-height:1.45;margin-top:12px;color:#555}
     #assessmentSection{display:none}
-    .summary-box{background:#f7fbff;border:1px solid #dbeeff;border-radius:16px;padding:16px;margin-bottom:14px;line-height:1.5}
-    .ranking{border:1px solid #e6e6e6;border-radius:16px;padding:16px;margin:12px 0;background:#fff}
-    .ranking-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
-    .lender{font-family:Georgia,'Times New Roman',serif;font-size:22px}
-    .score{font-size:23px;font-weight:700;color:var(--blue);white-space:nowrap}
-    .badges{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}
-    .badge{display:inline-block;padding:6px 10px;border-radius:999px;background:#f1f1f1;font-size:12px}
-    .badge.strong{background:#eaf9f2;color:var(--green)}
-    .badge.moderate{background:#fff6df;color:var(--amber)}
-    .badge.weak{background:#fff0f0;color:var(--red)}
-    .metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:12px 0}
-    .metric{background:#f7f7f7;border-radius:12px;padding:10px;text-align:center}
-    .metric strong{display:block;font-size:17px;margin-bottom:3px}.metric span{font-size:11px;color:#777}
-    .reason{font-size:13px;line-height:1.5;color:#444}.risk{font-size:12px;color:#7a3333;white-space:pre-wrap;margin-top:8px}
-    .disclaimer{font-size:11px;color:#777;text-align:center;margin-top:14px}
-    @media(max-width:720px){.grid,.metrics{grid-template-columns:1fr}.province-bar{grid-template-columns:repeat(4,1fr)}.card{padding:18px}.ranking-head{display:block}.score{margin-top:6px}}
+    .summary-box{background:#f7fbff;border:1px solid #dcecf9;border-radius:11px;padding:12px;margin-bottom:11px;font-size:12px;line-height:1.5}
+    .ranking{border:1px solid var(--line);border-radius:11px;padding:12px;margin:9px 0}
+    .ranking-head{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}
+    .lender{font-family:Georgia,'Times New Roman',serif;font-size:17px}
+    .score{font-size:18px;font-weight:600;color:var(--blue);white-space:nowrap}
+    .badges{display:flex;gap:6px;flex-wrap:wrap;margin:7px 0}
+    .badge{display:inline-block;padding:4px 8px;border-radius:999px;background:#f1f2f3;font-size:10px}
+    .badge.strong{background:#eaf7f1;color:var(--green)}.badge.moderate{background:#fff5dc;color:var(--amber)}.badge.weak{background:#fff0f0;color:var(--red)}
+    .metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin:9px 0}
+    .metric{background:#f7f7f7;border-radius:8px;padding:8px;text-align:center}
+    .metric strong{display:block;font-size:13px;margin-bottom:2px}.metric span{font-size:9px;color:var(--muted)}
+    .reason{font-size:11px;line-height:1.5;color:#4a4f55}.risk{font-size:10px;color:#7a3333;white-space:pre-wrap;margin-top:6px}
+    .disclaimer{font-size:10px;color:var(--muted);text-align:center;margin-top:10px}
+    @media(max-width:620px){.grid,.metrics{grid-template-columns:1fr}.card{padding:14px}.ranking-head{display:block}.score{margin-top:5px}}
   </style>
 </head>
 <body>
 <div class="wrap">
-  <h1>Vancouver Finance Company Inc.</h1>
-  <div class="subtitle">VFC AI Underwriting Engine</div>
-
-  <div class="segment">
-    <div class="seg-active">New Deal</div>
-    <div class="seg-inactive">VFC V1</div>
+  <div class="header">
+    <h1>Vancouver Finance Company Inc.</h1>
+    <div class="subtitle">VFC AI Underwriting Engine</div>
   </div>
 
-  <div class="province-bar">
-    <div class="province">BC</div><div class="province">AB</div><div class="province">SK</div>
-    <div class="province">MB</div><div class="province">ON</div><div class="province">QC</div><div class="province">ATL</div>
+  <div class="tabs">
+    <button id="trainingTab" class="tab active" onclick="showTab('training')">Training Data</button>
+    <button id="assessmentTab" class="tab" onclick="showTab('assessment')">Assessment</button>
   </div>
 
-  <div class="action-row">
-    <div class="pill">Historical Comparison</div>
-    <div class="pill green">Observed Lender Behaviour</div>
-  </div>
-
-  <div class="card">
-    <h2>Upload and Analyze</h2>
-    <div class="field">
-      <label>Company Name</label>
-      <input id="companyName" placeholder="Example: ABC Pizza Ltd" autocomplete="off">
-    </div>
-    <div class="field">
-      <label>Bank Statements</label>
-      <input id="files" type="file" accept="application/pdf" multiple>
-    </div>
-
-    <div class="grid">
-      <div class="field">
-        <label>Actual Decision — optional for historical files</label>
-        <select id="decision" onchange="toggleDecisionFields(true)">
-          <option value="">Not known yet</option>
-          <option value="Approved">Approved</option>
-          <option value="Declined">Declined</option>
-          <option value="Conditional">Conditional</option>
-        </select>
+  <section id="trainingPanel" class="panel active">
+    <div class="card">
+      <h2>Add Historical Outcome</h2>
+      <div class="intro">Upload a previously reviewed file and record the lender's actual approval, decline, or conditional decision.</div>
+      <div class="field"><label>Company Name</label><input id="trainCompanyName" placeholder="Example: ABC Pizza Ltd" autocomplete="off"></div>
+      <div class="field"><label>Bank Statements</label><input id="trainFiles" type="file" accept="application/pdf" multiple></div>
+      <div class="grid">
+        <div class="field"><label>Decision</label><select id="trainDecision" onchange="toggleTrainingFields(true)"><option value="">Select decision</option><option value="Approved">Approved</option><option value="Declined">Declined</option><option value="Conditional">Conditional</option></select></div>
+        <div class="field"><label>Lender</label><input id="trainLenderName" placeholder="Example: Journey Capital" autocomplete="off"></div>
       </div>
-      <div class="field">
-        <label>Lender — optional for historical files</label>
-        <input id="lenderName" placeholder="Example: Journey Capital" autocomplete="off">
-      </div>
+      <div class="field" id="trainApprovedBox"><label>Approved Amount</label><input id="trainApprovedAmount" placeholder="Example: 25000" autocomplete="off"></div>
+      <div class="field" id="trainDeclineBox"><label>Decline / Conditional Reason</label><textarea id="trainDeclineReason" placeholder="Example: Low deposits, NSF activity, existing MCA stacking..."></textarea></div>
+      <button id="trainButton" class="button primary" onclick="submitTraining()">Upload & Save Training Record</button>
+      <button id="rebuildButton" class="button secondary" onclick="rebuildHistory()">Rebuild Historical Features</button>
+      <div class="note">Use this tab only when the lender's actual outcome is known.</div>
+      <div id="trainStatus" class="status">Ready.</div>
+    </div>
+  </section>
+
+  <section id="assessmentPanel" class="panel">
+    <div class="card">
+      <h2>Run New Assessment</h2>
+      <div class="intro">Upload a new applicant's statements. The engine will compare the file against your historical lender outcomes without adding a training decision.</div>
+      <div class="field"><label>Company Name</label><input id="assessCompanyName" placeholder="Example: New Business Ltd" autocomplete="off"></div>
+      <div class="field"><label>Bank Statements</label><input id="assessFiles" type="file" accept="application/pdf" multiple></div>
+      <button id="assessButton" class="button primary" onclick="submitAssessment()">Upload & Run VFC Assessment</button>
+      <div class="note">The assessment is decision support only and does not guarantee lender approval.</div>
+      <div id="assessStatus" class="status">Ready.</div>
     </div>
 
-    <div class="field" id="approvedAmountBox">
-      <label>If Approved — Amount</label>
-      <input id="approvedAmount" placeholder="Example: 25000" autocomplete="off">
+    <div class="card" id="assessmentSection">
+      <h2>VFC Underwriting Assessment</h2>
+      <div id="summaryBox" class="summary-box"></div>
+      <div id="rankings"></div>
+      <div id="disclaimer" class="disclaimer"></div>
     </div>
-    <div class="field" id="declineReasonBox">
-      <label>If Declined — Reason</label>
-      <textarea id="declineReason" placeholder="Example: Too many NSF, low deposits, existing MCA stacking..."></textarea>
-    </div>
-
-    <button class="submit" id="submitButton" onclick="submitAndAnalyze()">Upload & Run VFC Assessment</button>
-    <button class="secondary" id="rebuildButton" onclick="rebuildHistory()">Rebuild Historical Features</button>
-    <div class="note">Run “Rebuild Historical Features” once after installing V1 so your existing 45 files are prepared.</div>
-    <div class="status" id="result">Ready.</div>
-  </div>
-
-  <div class="card" id="assessmentSection">
-    <h2>VFC Underwriting Assessment</h2>
-    <div id="summaryBox" class="summary-box"></div>
-    <div id="rankings"></div>
-    <div id="disclaimer" class="disclaimer"></div>
-  </div>
+  </section>
 </div>
 
 <script>
-function toggleDecisionFields(clearOppositeField){
-  const decision=document.getElementById('decision').value;
-  const approvedBox=document.getElementById('approvedAmountBox');
-  const declineBox=document.getElementById('declineReasonBox');
-  approvedBox.style.display=decision==='Declined'?'none':'block';
-  declineBox.style.display=decision==='Approved'?'none':'block';
-  if(clearOppositeField){
-    if(decision==='Approved')document.getElementById('declineReason').value='';
-    if(decision==='Declined')document.getElementById('approvedAmount').value='';
+function showTab(name){
+  const training=name==='training';
+  document.getElementById('trainingPanel').classList.toggle('active',training);
+  document.getElementById('assessmentPanel').classList.toggle('active',!training);
+  document.getElementById('trainingTab').classList.toggle('active',training);
+  document.getElementById('assessmentTab').classList.toggle('active',!training);
+}
+
+function toggleTrainingFields(clearOpposite){
+  const decision=document.getElementById('trainDecision').value;
+  document.getElementById('trainApprovedBox').style.display=decision==='Declined'?'none':'block';
+  document.getElementById('trainDeclineBox').style.display=decision==='Approved'?'none':'block';
+  if(clearOpposite){
+    if(decision==='Approved')document.getElementById('trainDeclineReason').value='';
+    if(decision==='Declined')document.getElementById('trainApprovedAmount').value='';
   }
 }
-toggleDecisionFields(false);
+toggleTrainingFields(false);
 
 function rebuildHistory(){
   const button=document.getElementById('rebuildButton');
-  const result=document.getElementById('result');
-  button.disabled=true;result.innerText='Rebuilding structured features from existing Sheets data...';
+  const status=document.getElementById('trainStatus');
+  button.disabled=true;status.innerText='Rebuilding structured features from existing Sheets data...';
   google.script.run
-    .withSuccessHandler(function(response){button.disabled=false;result.innerText=response.message+' Records updated: '+response.recordsUpdated;})
-    .withFailureHandler(function(error){button.disabled=false;result.innerText='Error: '+error.message;})
+    .withSuccessHandler(function(r){button.disabled=false;status.innerText=(r.message||'Rebuild complete.')+' Records updated: '+(r.recordsUpdated||0);})
+    .withFailureHandler(function(e){button.disabled=false;status.innerText='Error: '+e.message;})
     .rebuildStructuredFeatures();
 }
 
-async function submitAndAnalyze(){
-  const companyName=document.getElementById('companyName').value.trim();
-  const fileInput=document.getElementById('files');
-  const decision=document.getElementById('decision').value;
-  const lenderName=document.getElementById('lenderName').value.trim();
-  if(!companyName)return alert('Please enter company name.');
-  if(!fileInput.files.length)return alert('Please upload bank statement PDFs.');
-
-  const approvedAmount=(decision==='Approved'||decision==='Conditional')?document.getElementById('approvedAmount').value.trim():'';
-  const declineReason=(decision==='Declined'||decision==='Conditional')?document.getElementById('declineReason').value.trim():'';
-  const button=document.getElementById('submitButton');
-  const result=document.getElementById('result');
-  button.disabled=true;result.innerText='Uploading statements and extracting banking data...';
-
+async function submitTraining(){
+  const company=document.getElementById('trainCompanyName').value.trim();
+  const filesInput=document.getElementById('trainFiles');
+  const decision=document.getElementById('trainDecision').value;
+  const lender=document.getElementById('trainLenderName').value.trim();
+  if(!company)return alert('Please enter company name.');
+  if(!filesInput.files.length)return alert('Please upload bank statement PDFs.');
+  if(!decision)return alert('Please select the actual lender decision.');
+  if(!lender)return alert('Please enter the lender name.');
+  const amount=(decision==='Approved'||decision==='Conditional')?document.getElementById('trainApprovedAmount').value.trim():'';
+  const reason=(decision==='Declined'||decision==='Conditional')?document.getElementById('trainDeclineReason').value.trim():'';
+  const button=document.getElementById('trainButton');
+  const status=document.getElementById('trainStatus');
+  button.disabled=true;status.innerText='Uploading statements and extracting banking data...';
   try{
-    const files=[];
-    for(const file of fileInput.files){
-      const base64=await toBase64(file);
-      files.push({name:file.name,mimeType:file.type||'application/pdf',base64:base64.split(',')[1]});
-    }
-
+    const files=await prepareFiles(filesInput.files);
     google.script.run
-      .withSuccessHandler(function(uploadResponse){
-        result.innerText='Statements read. Comparing against historical VFC outcomes...';
+      .withSuccessHandler(function(upload){
+        status.innerText='Statements read. Saving actual lender outcome...';
+        const payload={companyName:company,period:upload.detectedPeriod||'',lenderName:lender,decision:decision,approvedAmount:amount,declineReason:reason,notes:'Actual historical outcome saved from Training Data tab.'};
         google.script.run
-          .withSuccessHandler(function(assessment){
-            renderAssessment(assessment);
-            if(decision&&lenderName){
-              const payload={companyName:companyName,period:uploadResponse.detectedPeriod||'',lenderName:lenderName,decision:decision,approvedAmount:approvedAmount,declineReason:declineReason,notes:'Actual historical outcome saved after VFC assessment.'};
-              google.script.run
-                .withSuccessHandler(function(saveResponse){button.disabled=false;result.innerText='Assessment complete. '+saveResponse.message;resetOutcomeFields();})
-                .withFailureHandler(function(error){button.disabled=false;result.innerText='Assessment complete, but outcome save failed: '+error.message;})
-                .saveLenderDecision(payload);
-            }else{
-              button.disabled=false;result.innerText='Assessment complete. No actual lender outcome was added.';
-            }
-          })
-          .withFailureHandler(function(error){button.disabled=false;result.innerText='Statements uploaded, but assessment failed: '+error.message;})
-          .generateVfcAssessment(companyName,uploadResponse.detectedPeriod||'');
+          .withSuccessHandler(function(r){button.disabled=false;status.innerText=r.message||'Training record saved.';resetTraining();})
+          .withFailureHandler(function(e){button.disabled=false;status.innerText='Statements uploaded, but training record save failed: '+e.message;})
+          .saveLenderDecision(payload);
       })
-      .withFailureHandler(function(error){button.disabled=false;result.innerText='Error: '+error.message;})
-      .uploadStatementBatch(companyName,files);
-  }catch(e){button.disabled=false;result.innerText='Error: '+e.message;}
+      .withFailureHandler(function(e){button.disabled=false;status.innerText='Error: '+e.message;})
+      .uploadStatementBatch(company,files);
+  }catch(e){button.disabled=false;status.innerText='Error: '+e.message;}
+}
+
+async function submitAssessment(){
+  const company=document.getElementById('assessCompanyName').value.trim();
+  const filesInput=document.getElementById('assessFiles');
+  if(!company)return alert('Please enter company name.');
+  if(!filesInput.files.length)return alert('Please upload bank statement PDFs.');
+  const button=document.getElementById('assessButton');
+  const status=document.getElementById('assessStatus');
+  button.disabled=true;status.innerText='Uploading statements and extracting banking data...';
+  try{
+    const files=await prepareFiles(filesInput.files);
+    google.script.run
+      .withSuccessHandler(function(upload){
+        status.innerText='Statements read. Comparing against historical VFC outcomes...';
+        google.script.run
+          .withSuccessHandler(function(assessment){button.disabled=false;status.innerText='Assessment complete.';renderAssessment(assessment);})
+          .withFailureHandler(function(e){button.disabled=false;status.innerText='Statements uploaded, but assessment failed: '+e.message;})
+          .generateVfcAssessment(company,upload.detectedPeriod||'');
+      })
+      .withFailureHandler(function(e){button.disabled=false;status.innerText='Error: '+e.message;})
+      .uploadStatementBatch(company,files);
+  }catch(e){button.disabled=false;status.innerText='Error: '+e.message;}
 }
 
 function renderAssessment(data){
   document.getElementById('assessmentSection').style.display='block';
   const summary=data.underwritingSummary||{};
   document.getElementById('summaryBox').innerHTML='<strong>'+escapeHtml(summary.summary||'Historical comparison completed.')+'</strong><br>'+escapeHtml(summary.explanation||'')+(summary.strongest_lender?'<br><br><strong>Strongest observed match:</strong> '+escapeHtml(summary.strongest_lender):'');
-  const rankings=document.getElementById('rankings');
-  rankings.innerHTML='';
+  const rankings=document.getElementById('rankings');rankings.innerHTML='';
   (data.lenderRankings||[]).forEach(function(item,index){
-    const fitClass=item.observedFit.indexOf('Strong')>=0?'strong':item.observedFit.indexOf('Moderate')>=0?'moderate':'weak';
+    const observedFit=String(item.observedFit||'');
+    const fitClass=observedFit.indexOf('Strong')>=0?'strong':observedFit.indexOf('Moderate')>=0?'moderate':'weak';
     const range=item.lowApprovedAmount?money(item.lowApprovedAmount)+' – '+money(item.highApprovedAmount):'Not enough approved amounts';
-    const div=document.createElement('div');
-    div.className='ranking';
-    div.innerHTML='<div class="ranking-head"><div><div class="lender">'+(index+1)+'. '+escapeHtml(item.lenderName)+'</div><div class="badges"><span class="badge '+fitClass+'">'+escapeHtml(item.observedFit)+'</span><span class="badge">Confidence: '+escapeHtml(item.confidence)+'</span></div></div><div class="score">'+escapeHtml(item.observedScore)+'/100</div></div>'+ 
-      '<div class="metrics"><div class="metric"><strong>'+escapeHtml(item.similarApprovals)+' / '+escapeHtml(item.similarCases)+'</strong><span>Similar approvals</span></div><div class="metric"><strong>'+escapeHtml(item.observedApprovalRate)+'</strong><span>Observed approval rate</span></div><div class="metric"><strong>'+escapeHtml(range)+'</strong><span>Observed amount range</span></div></div>'+ 
-      '<div class="reason">'+escapeHtml(item.reasoning)+'</div>'+(item.risks?'<div class="risk"><strong>Common decline reasons:</strong><br>'+escapeHtml(item.risks)+'</div>':'');
+    const div=document.createElement('div');div.className='ranking';
+    div.innerHTML='<div class="ranking-head"><div><div class="lender">'+(index+1)+'. '+escapeHtml(item.lenderName)+'</div><div class="badges"><span class="badge '+fitClass+'">'+escapeHtml(observedFit)+'</span><span class="badge">Confidence: '+escapeHtml(item.confidence)+'</span></div></div><div class="score">'+escapeHtml(item.observedScore)+'/100</div></div>'+
+      '<div class="metrics"><div class="metric"><strong>'+escapeHtml(item.similarApprovals)+' / '+escapeHtml(item.similarCases)+'</strong><span>Similar approvals</span></div><div class="metric"><strong>'+escapeHtml(item.observedApprovalRate)+'</strong><span>Observed approval rate</span></div><div class="metric"><strong>'+escapeHtml(range)+'</strong><span>Observed amount range</span></div></div>'+
+      '<div class="reason">'+escapeHtml(item.reasoning||'')+'</div>'+(item.commonDeclineReasons?'<div class="risk"><strong>Observed decline themes:</strong> '+escapeHtml(item.commonDeclineReasons)+'</div>':'');
     rankings.appendChild(div);
   });
-  document.getElementById('disclaimer').innerText=data.disclaimer||'';
+  document.getElementById('disclaimer').innerText=data.disclaimer||'VFC observed-fit results are based on historical internal outcomes and are not official lender criteria or a guarantee of approval.';
   document.getElementById('assessmentSection').scrollIntoView({behavior:'smooth',block:'start'});
 }
 
-function resetOutcomeFields(){
-  document.getElementById('decision').value='';document.getElementById('lenderName').value='';document.getElementById('approvedAmount').value='';document.getElementById('declineReason').value='';toggleDecisionFields(false);
+function resetTraining(){
+  ['trainCompanyName','trainLenderName','trainApprovedAmount','trainDeclineReason'].forEach(id=>document.getElementById(id).value='');
+  document.getElementById('trainFiles').value='';document.getElementById('trainDecision').value='';toggleTrainingFields(false);
 }
-function money(value){const n=Number(value);return isFinite(n)&&n>0?n.toLocaleString('en-US',{style:'currency',currency:'CAD',maximumFractionDigits:0}):'';}
-function escapeHtml(value){return String(value===undefined||value===null?'':value).replace(/[&<>'"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c];});}
+function prepareFiles(fileList){return Promise.all(Array.from(fileList).map(async file=>{const b=await toBase64(file);return{name:file.name,mimeType:file.type||'application/pdf',base64:b.split(',')[1]};}));}
 function toBase64(file){return new Promise((resolve,reject)=>{const reader=new FileReader();reader.readAsDataURL(file);reader.onload=()=>resolve(reader.result);reader.onerror=reject;});}
+function money(value){const n=Number(String(value).replace(/[^0-9.-]/g,''));return isNaN(n)?String(value):n.toLocaleString('en-US',{style:'currency',currency:'USD',maximumFractionDigits:0});}
+function escapeHtml(value){return String(value==null?'':value).replace(/[&<>'"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c];});}
 </script>
 </body>
 </html>
