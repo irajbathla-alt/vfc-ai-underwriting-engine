@@ -1,5 +1,5 @@
 const VFC_INSTITUTIONAL_CONFIG = {
-  MODEL_VERSION: 'VFC-INSTITUTIONAL-3.1-DEBT-SERVICE',
+  MODEL_VERSION: 'VFC-INSTITUTIONAL-3.2-PROPOSED-OFFER',
   FACTOR_RATE: 1.25,
   TARGET_COVERAGE: 1.35,
   STRETCH_COVERAGE: 1.20,
@@ -13,21 +13,20 @@ function generateInstitutionalAssessmentSafe(companyOrRequest, requestedPeriod) 
   saveInstitutionalAssessment_(base, institutional);
   base.institutionalAssessment = institutional;
   base.modelVersion = VFC_INSTITUTIONAL_CONFIG.MODEL_VERSION;
-  base.disclaimer = 'VFC internal decision support only. Business health and debt-service capacity are estimates based on uploaded business bank statements, stated assumptions and extracted banking behaviour. They are not guarantees or official lender decisions.';
+  base.disclaimer = 'VFC internal decision support only. The Proposed Funding Offer is an independent VFC capacity estimate based on uploaded business bank statements, business health, stated assumptions and extracted banking behaviour. Existing lender analysis remains separate and is not an official lender decision or guarantee.';
   return base;
 }
 
 function buildInstitutionalAssessment_(base) {
   const f = base.currentFeatures || {};
   const fundamental = base.fundamentalScorecard || {};
-  const capacity = base.lendingCapacity || {};
   const rankings = base.lenderRankings || [];
   const ai = base.expertReview || {};
   const top = rankings[0] || {};
 
   const hardStops = evaluateInstitutionalHardStops_(f, fundamental);
   const cashFlow = calculateDebtServiceCashFlow_(f);
-  const scenarios = calculateDebtServiceScenarios_(cashFlow, capacity, hardStops);
+  const scenarios = calculateDebtServiceScenarios_(cashFlow, hardStops);
   const businessHealth = calculateBusinessHealth_(f, fundamental, cashFlow);
   const confidence = calculateInstitutionalConfidence_(f, fundamental, top);
   const reasons = buildDebtServiceReasonCodes_(f, fundamental, cashFlow, scenarios, hardStops);
@@ -36,10 +35,27 @@ function buildInstitutionalAssessment_(base) {
   const recommendation = hardStops.blocking.length
     ? 'Manual review required'
     : businessHealth.score >= 75 && primary.coverageAtRecommended >= VFC_INSTITUTIONAL_CONFIG.TARGET_COVERAGE
-      ? 'Strong debt-service capacity'
+      ? 'Strong proposed funding offer'
       : businessHealth.score >= 60 && primary.coverageAtRecommended >= VFC_INSTITUTIONAL_CONFIG.STRETCH_COVERAGE
-        ? 'Acceptable with conditions'
-        : 'Caution — reduce exposure';
+        ? 'Proposed offer available with conditions'
+        : 'Caution — reduce proposed exposure';
+
+  const proposedFundingOffer = {
+    label: 'Proposed Funding Offer',
+    recommendedAmount: primary.recommendedAmount,
+    stretchAmount: primary.stretchAmount,
+    selectedTermMonths: primary.termMonths,
+    totalRepayment: primary.totalRepayment,
+    financingCost: primary.financingCost,
+    estimatedMonthlyPayment: primary.estimatedMonthlyPayment,
+    coverageRatio: primary.coverageAtRecommended,
+    decision: recommendation,
+    pricingAssumption: {
+      factorRate: VFC_INSTITUTIONAL_CONFIG.FACTOR_RATE,
+      targetCoverage: VFC_INSTITUTIONAL_CONFIG.TARGET_COVERAGE,
+      stretchCoverage: VFC_INSTITUTIONAL_CONFIG.STRETCH_COVERAGE
+    }
+  };
 
   return {
     modelVersion: VFC_INSTITUTIONAL_CONFIG.MODEL_VERSION,
@@ -53,19 +69,13 @@ function buildInstitutionalAssessment_(base) {
     },
     cashFlowAnalysis: cashFlow,
     termScenarios: scenarios,
-    lendingRecommendation: {
-      recommendedAmount: primary.recommendedAmount,
-      stretchAmount: primary.stretchAmount,
-      selectedTermMonths: primary.termMonths,
-      estimatedMonthlyPayment: primary.estimatedMonthlyPayment,
-      coverageRatio: primary.coverageAtRecommended,
-      decision: recommendation
-    },
+    proposedFundingOffer: proposedFundingOffer,
+    lendingRecommendation: proposedFundingOffer,
     approvalProbability: {
       probability: top.compositeScore || 0,
       band: top.observedFit || 'Insufficient history',
       topLender: top.lenderName || '',
-      note: 'Historical lender-fit indicator only; debt-service approval amounts are calculated independently from bank-statement cash flow.'
+      note: 'Historical lender-fit indicator only. Existing lender analysis is unchanged and remains separate from the VFC Proposed Funding Offer.'
     },
     confidence: confidence,
     hardStops: hardStops,
@@ -73,7 +83,7 @@ function buildInstitutionalAssessment_(base) {
     negativeReasonCodes: reasons.negative,
     requiredConditions: unique_([].concat(hardStops.conditions, ai.recommended_conditions || [], scenarios.conditions || [])).slice(0, 10),
     underwriterRecommendation: buildDebtServiceRecommendation_(recommendation, primary, cashFlow, businessHealth, hardStops),
-    methodologyNote: 'The engine does not predict repayment behaviour. It measures business health and supportable debt service from available business bank statements, using 1.35x target coverage, 1.20x stretch coverage, a 1.25 factor-rate assumption, and a 10% deposit stress test.'
+    methodologyNote: 'The Proposed Funding Offer is calculated independently from existing lender history. It measures business health and supportable principal plus financing cost over 6, 9 and 12 months using 1.35x target coverage, 1.20x stretch coverage, a 1.25 factor-rate assumption and a 10% deposit stress test.'
   };
 }
 
@@ -122,19 +132,19 @@ function calculateDebtServiceCashFlow_(f) {
   };
 }
 
-function calculateDebtServiceScenarios_(cashFlow, capacity, hardStops) {
+function calculateDebtServiceScenarios_(cashFlow, hardStops) {
   const targetPayment = hardStops.blocking.length ? 0 : cashFlow.conservativeFreeCashFlow / VFC_INSTITUTIONAL_CONFIG.TARGET_COVERAGE;
   const stretchPayment = hardStops.blocking.length ? 0 : cashFlow.conservativeFreeCashFlow / VFC_INSTITUTIONAL_CONFIG.STRETCH_COVERAGE;
   const stressPayment = hardStops.blocking.length ? 0 : cashFlow.stressedFreeCashFlow / VFC_INSTITUTIONAL_CONFIG.TARGET_COVERAGE;
-  const originalEngineAmount = Math.max(0, toNumber_(capacity.recommendedAmount));
   const byTerm = {};
 
   VFC_INSTITUTIONAL_CONFIG.TERMS.forEach(function(term) {
-    const baseAmount = roundToNearest_((targetPayment * term) / VFC_INSTITUTIONAL_CONFIG.FACTOR_RATE, VFC_POWER_CONFIG.ROUNDING);
-    const stretchAmount = roundToNearest_((stretchPayment * term) / VFC_INSTITUTIONAL_CONFIG.FACTOR_RATE, VFC_POWER_CONFIG.ROUNDING);
-    const stressAmount = roundToNearest_((stressPayment * term) / VFC_INSTITUTIONAL_CONFIG.FACTOR_RATE, VFC_POWER_CONFIG.ROUNDING);
-    const recommendedAmount = Math.max(0, Math.min(baseAmount, originalEngineAmount || baseAmount));
-    const estimatedMonthlyPayment = recommendedAmount > 0 ? round2_((recommendedAmount * VFC_INSTITUTIONAL_CONFIG.FACTOR_RATE) / term) : 0;
+    const recommendedAmount = Math.max(0, roundToNearest_((targetPayment * term) / VFC_INSTITUTIONAL_CONFIG.FACTOR_RATE, VFC_POWER_CONFIG.ROUNDING));
+    const stretchAmount = Math.max(0, roundToNearest_((stretchPayment * term) / VFC_INSTITUTIONAL_CONFIG.FACTOR_RATE, VFC_POWER_CONFIG.ROUNDING));
+    const stressAmount = Math.max(0, roundToNearest_((stressPayment * term) / VFC_INSTITUTIONAL_CONFIG.FACTOR_RATE, VFC_POWER_CONFIG.ROUNDING));
+    const totalRepayment = round2_(recommendedAmount * VFC_INSTITUTIONAL_CONFIG.FACTOR_RATE);
+    const financingCost = round2_(totalRepayment - recommendedAmount);
+    const estimatedMonthlyPayment = recommendedAmount > 0 ? round2_(totalRepayment / term) : 0;
     const coverage = estimatedMonthlyPayment > 0 ? round2_(cashFlow.conservativeFreeCashFlow / estimatedMonthlyPayment) : 0;
     const stressCoverage = estimatedMonthlyPayment > 0 ? round2_(cashFlow.stressedFreeCashFlow / estimatedMonthlyPayment) : 0;
 
@@ -142,9 +152,11 @@ function calculateDebtServiceScenarios_(cashFlow, capacity, hardStops) {
       termMonths: term,
       factorRate: VFC_INSTITUTIONAL_CONFIG.FACTOR_RATE,
       recommendedAmount: recommendedAmount,
-      baseSupportableAmount: Math.max(0, baseAmount),
-      stretchAmount: Math.max(recommendedAmount, stretchAmount),
-      stressTestedAmount: Math.max(0, stressAmount),
+      baseSupportableAmount: recommendedAmount,
+      stretchAmount: stretchAmount,
+      stressTestedAmount: stressAmount,
+      totalRepayment: totalRepayment,
+      financingCost: financingCost,
       estimatedMonthlyPayment: estimatedMonthlyPayment,
       estimatedWeeklyPayment: round2_(estimatedMonthlyPayment * 12 / 52),
       estimatedBusinessDailyPayment: round2_(estimatedMonthlyPayment * 12 / 260),
@@ -236,16 +248,17 @@ function calculateInstitutionalConfidence_(f, fundamental, top) {
 }
 
 function buildDebtServiceRecommendation_(decision, primary, cashFlow, businessHealth, hardStops) {
-  if (hardStops.blocking.length) return 'Do not issue an automated approval amount. Resolve the hard-stop items and complete manual underwriting.';
-  return decision + '. Business Health: ' + businessHealth.score + '/100. Conservative monthly free cash flow: ' + cashFlow.conservativeFreeCashFlow + '. Maximum supportable new monthly payment at 1.35x coverage: ' + round2_(cashFlow.conservativeFreeCashFlow / VFC_INSTITUTIONAL_CONFIG.TARGET_COVERAGE) + '. Recommended ' + primary.termMonths + '-month amount: ' + primary.recommendedAmount + ', with estimated payment coverage of ' + primary.coverageAtRecommended + 'x.';
+  if (hardStops.blocking.length) return 'Do not issue an automated Proposed Funding Offer. Resolve the hard-stop items and complete manual underwriting.';
+  return decision + '. Business Health: ' + businessHealth.score + '/100. Conservative monthly free cash flow: ' + cashFlow.conservativeFreeCashFlow + '. Maximum supportable new monthly payment at 1.35x coverage: ' + round2_(cashFlow.conservativeFreeCashFlow / VFC_INSTITUTIONAL_CONFIG.TARGET_COVERAGE) + '. Proposed ' + primary.termMonths + '-month principal: ' + primary.recommendedAmount + ', total repayment: ' + primary.totalRepayment + ', and estimated payment coverage: ' + primary.coverageAtRecommended + 'x.';
 }
 
 function saveInstitutionalAssessment_(base, i) {
   ensureSheetSchema_('Institutional Assessments', [
     'Assessment ID','Model Version','Company Name','Period','Business Health','Debt Service Score',
-    'Conservative Free Cash Flow','Maximum Monthly Payment','6 Month Amount','9 Month Amount','12 Month Amount',
-    '6 Month Stress Amount','9 Month Stress Amount','12 Month Stress Amount','Selected Recommended Amount',
-    'Selected Term','Selected Payment','Selected Coverage','Confidence','Decision','Positive Reason Codes',
+    'Conservative Free Cash Flow','Maximum Monthly Payment','6 Month Proposed Amount','9 Month Proposed Amount','12 Month Proposed Amount',
+    '6 Month Total Repayment','9 Month Total Repayment','12 Month Total Repayment',
+    '6 Month Stress Amount','9 Month Stress Amount','12 Month Stress Amount','Selected Proposed Amount',
+    'Selected Term','Selected Total Repayment','Selected Payment','Selected Coverage','Confidence','Decision','Positive Reason Codes',
     'Negative Reason Codes','Hard Stops','Required Conditions','Underwriter Recommendation','Created At'
   ]);
   appendRow_('Institutional Assessments', [
@@ -253,10 +266,11 @@ function saveInstitutionalAssessment_(base, i) {
     i.businessHealth.score,i.debtServiceCapacity.score,i.cashFlowAnalysis.conservativeFreeCashFlow,
     i.debtServiceCapacity.maximumSupportableMonthlyPayment,
     i.termScenarios.byTerm['6'].recommendedAmount,i.termScenarios.byTerm['9'].recommendedAmount,i.termScenarios.byTerm['12'].recommendedAmount,
+    i.termScenarios.byTerm['6'].totalRepayment,i.termScenarios.byTerm['9'].totalRepayment,i.termScenarios.byTerm['12'].totalRepayment,
     i.termScenarios.byTerm['6'].stressTestedAmount,i.termScenarios.byTerm['9'].stressTestedAmount,i.termScenarios.byTerm['12'].stressTestedAmount,
-    i.lendingRecommendation.recommendedAmount,i.lendingRecommendation.selectedTermMonths,
-    i.lendingRecommendation.estimatedMonthlyPayment,i.lendingRecommendation.coverageRatio,
-    i.confidence.score,i.lendingRecommendation.decision,cleanCell_(i.positiveReasonCodes),
+    i.proposedFundingOffer.recommendedAmount,i.proposedFundingOffer.selectedTermMonths,i.proposedFundingOffer.totalRepayment,
+    i.proposedFundingOffer.estimatedMonthlyPayment,i.proposedFundingOffer.coverageRatio,
+    i.confidence.score,i.proposedFundingOffer.decision,cleanCell_(i.positiveReasonCodes),
     cleanCell_(i.negativeReasonCodes),cleanCell_(i.hardStops.blocking),cleanCell_(i.requiredConditions),
     i.underwriterRecommendation,new Date()
   ]);
