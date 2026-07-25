@@ -1,22 +1,19 @@
 const VFC_INSTITUTIONAL_CONFIG = {
-  MODEL_VERSION: 'VFC-INSTITUTIONAL-3.0-PHASE-1',
-  ASSUMED_FACTOR_RATE: 1.25,
-  ASSUMED_TERM_MONTHS: 12,
-  MIN_PAYMENT_COVERAGE: 1.15,
-  TARGET_PAYMENT_COVERAGE: 1.35
+  MODEL_VERSION: 'VFC-INSTITUTIONAL-3.1-DEBT-SERVICE',
+  FACTOR_RATE: 1.25,
+  TARGET_COVERAGE: 1.35,
+  STRETCH_COVERAGE: 1.20,
+  STRESS_DECLINE: 0.10,
+  TERMS: [6, 9, 12]
 };
 
-/**
- * Institutional web-app entry point.
- * Enriches the existing hybrid assessment without changing the proven base engine.
- */
 function generateInstitutionalAssessmentSafe(companyOrRequest, requestedPeriod) {
   const base = generatePowerAssessmentSafe(companyOrRequest, requestedPeriod);
   const institutional = buildInstitutionalAssessment_(base);
   saveInstitutionalAssessment_(base, institutional);
   base.institutionalAssessment = institutional;
   base.modelVersion = VFC_INSTITUTIONAL_CONFIG.MODEL_VERSION;
-  base.disclaimer = 'VFC internal decision support only. Approval probability, repayment stability, fraud risk and lending amounts are estimates based on available data, assumptions and historical observations; they are not guarantees or official lender decisions.';
+  base.disclaimer = 'VFC internal decision support only. Business health and debt-service capacity are estimates based on uploaded business bank statements, stated assumptions and extracted banking behaviour. They are not guarantees or official lender decisions.';
   return base;
 }
 
@@ -29,173 +26,174 @@ function buildInstitutionalAssessment_(base) {
   const top = rankings[0] || {};
 
   const hardStops = evaluateInstitutionalHardStops_(f, fundamental);
-  const payment = calculatePaymentCapacity_(f, capacity);
-  const repayment = calculateRepaymentStability_(f, fundamental, payment);
-  const approval = calculateApprovalProbability_(top, fundamental, capacity, hardStops);
-  const fraud = calculateFraudRiskProxy_(f, fundamental);
-  const reasons = buildInstitutionalReasonCodes_(f, fundamental, payment, repayment, hardStops);
+  const cashFlow = calculateDebtServiceCashFlow_(f);
+  const scenarios = calculateDebtServiceScenarios_(cashFlow, capacity, hardStops);
+  const businessHealth = calculateBusinessHealth_(f, fundamental, cashFlow);
   const confidence = calculateInstitutionalConfidence_(f, fundamental, top);
+  const reasons = buildDebtServiceReasonCodes_(f, fundamental, cashFlow, scenarios, hardStops);
 
-  let recommendedAmount = toNumber_(capacity.recommendedAmount);
-  let stretchAmount = toNumber_(capacity.stretchAmount);
-  let decision = 'Proceed with conditions';
-
-  if (hardStops.blocking.length) {
-    recommendedAmount = 0;
-    stretchAmount = 0;
-    decision = 'Manual review required';
-  } else if (repayment.score < 45 || payment.coverageRatio < 1.0) {
-    recommendedAmount = roundToNearest_(recommendedAmount * 0.60, VFC_POWER_CONFIG.ROUNDING);
-    stretchAmount = recommendedAmount;
-    decision = 'High risk — reduce exposure or decline';
-  } else if (repayment.score < 60 || payment.coverageRatio < VFC_INSTITUTIONAL_CONFIG.MIN_PAYMENT_COVERAGE) {
-    recommendedAmount = roundToNearest_(recommendedAmount * 0.80, VFC_POWER_CONFIG.ROUNDING);
-    stretchAmount = recommendedAmount;
-    decision = 'Caution — reduced exposure recommended';
-  } else if (repayment.score >= 80 && approval.probability >= 75) {
-    decision = 'Strong submission candidate';
-  }
+  const primary = scenarios.byTerm['12'] || scenarios.byTerm['9'] || scenarios.byTerm['6'];
+  const recommendation = hardStops.blocking.length
+    ? 'Manual review required'
+    : businessHealth.score >= 75 && primary.coverageAtRecommended >= VFC_INSTITUTIONAL_CONFIG.TARGET_COVERAGE
+      ? 'Strong debt-service capacity'
+      : businessHealth.score >= 60 && primary.coverageAtRecommended >= VFC_INSTITUTIONAL_CONFIG.STRETCH_COVERAGE
+        ? 'Acceptable with conditions'
+        : 'Caution — reduce exposure';
 
   return {
     modelVersion: VFC_INSTITUTIONAL_CONFIG.MODEL_VERSION,
-    businessHealth: {
-      score: toNumber_(fundamental.score),
-      grade: fundamental.grade || 'Not rated'
+    businessHealth: businessHealth,
+    debtServiceCapacity: {
+      score: scenarios.capacityScore,
+      grade: scenarios.capacityGrade,
+      maximumSupportableMonthlyPayment: scenarios.maximumSupportableMonthlyPayment,
+      targetCoverage: VFC_INSTITUTIONAL_CONFIG.TARGET_COVERAGE,
+      stretchCoverage: VFC_INSTITUTIONAL_CONFIG.STRETCH_COVERAGE
     },
-    approvalProbability: approval,
-    repaymentStability: repayment,
-    fraudRisk: fraud,
-    paymentCapacity: payment,
+    cashFlowAnalysis: cashFlow,
+    termScenarios: scenarios,
     lendingRecommendation: {
-      recommendedAmount: recommendedAmount,
-      stretchAmount: stretchAmount,
-      originalEngineAmount: toNumber_(capacity.recommendedAmount),
-      adjustmentApplied: recommendedAmount - toNumber_(capacity.recommendedAmount),
-      decision: decision
+      recommendedAmount: primary.recommendedAmount,
+      stretchAmount: primary.stretchAmount,
+      selectedTermMonths: primary.termMonths,
+      estimatedMonthlyPayment: primary.estimatedMonthlyPayment,
+      coverageRatio: primary.coverageAtRecommended,
+      decision: recommendation
+    },
+    approvalProbability: {
+      probability: top.compositeScore || 0,
+      band: top.observedFit || 'Insufficient history',
+      topLender: top.lenderName || '',
+      note: 'Historical lender-fit indicator only; debt-service approval amounts are calculated independently from bank-statement cash flow.'
     },
     confidence: confidence,
     hardStops: hardStops,
     positiveReasonCodes: reasons.positive,
     negativeReasonCodes: reasons.negative,
-    requiredConditions: unique_([].concat(hardStops.conditions, ai.recommended_conditions || [], repayment.conditions || [])).slice(0, 10),
-    underwriterRecommendation: buildInstitutionalRecommendation_(decision, top, recommendedAmount, stretchAmount, repayment, payment, hardStops),
-    methodologyNote: 'Repayment Stability is currently a banking-behaviour proxy because funded repayment-performance records are not yet available. It should be recalibrated when 30/60/90-day, renewal, payoff and default outcomes are recorded.'
+    requiredConditions: unique_([].concat(hardStops.conditions, ai.recommended_conditions || [], scenarios.conditions || [])).slice(0, 10),
+    underwriterRecommendation: buildDebtServiceRecommendation_(recommendation, primary, cashFlow, businessHealth, hardStops),
+    methodologyNote: 'The engine does not predict repayment behaviour. It measures business health and supportable debt service from available business bank statements, using 1.35x target coverage, 1.20x stretch coverage, a 1.25 factor-rate assumption, and a 10% deposit stress test.'
   };
 }
 
-function calculatePaymentCapacity_(f, capacity) {
+function calculateDebtServiceCashFlow_(f) {
   const deposits = Math.max(0, toNumber_(f.averageMonthlyDeposits));
   const withdrawals = Math.max(0, toNumber_(f.averageMonthlyWithdrawals || (f.totalWithdrawals && f.monthsCovered ? f.totalWithdrawals / f.monthsCovered : 0)));
-  const ratio = toNumber_(f.depositWithdrawalRatio);
+  const monthlyDeposits = (f.monthlyDeposits || []).filter(function(n) { return toNumber_(n) > 0; }).map(toNumber_);
+  const monthlyWithdrawals = (f.monthlyWithdrawals || []).filter(function(n) { return toNumber_(n) >= 0; }).map(toNumber_);
 
-  // Conservative proxy until categorized operating expenses and exact debt payments are available.
-  const impliedMargin = clamp_(ratio - 0.84, 0.04, 0.24);
-  const depositBasedSurplus = deposits * impliedMargin;
-  const observedNetMovement = withdrawals > 0 ? Math.max(0, deposits - withdrawals) : 0;
-  const estimatedFreeCashFlow = round2_(depositBasedSurplus * 0.75 + observedNetMovement * 0.25);
+  const observedSurplus = withdrawals > 0 ? Math.max(0, deposits - withdrawals) : 0;
+  const impliedMargin = clamp_(toNumber_(f.depositWithdrawalRatio) - 0.84, 0.03, 0.22);
+  const marginSurplus = deposits * impliedMargin;
+  const averageFreeCashFlow = round2_(observedSurplus * 0.65 + marginSurplus * 0.35);
 
-  const proposedAmount = Math.max(0, toNumber_(capacity.recommendedAmount));
-  const estimatedMonthlyPayment = proposedAmount > 0
-    ? round2_((proposedAmount * VFC_INSTITUTIONAL_CONFIG.ASSUMED_FACTOR_RATE) / VFC_INSTITUTIONAL_CONFIG.ASSUMED_TERM_MONTHS)
-    : 0;
-  const coverageRatio = estimatedMonthlyPayment > 0 ? round2_(estimatedFreeCashFlow / estimatedMonthlyPayment) : 0;
-  const maxSupportablePayment = round2_(estimatedFreeCashFlow / VFC_INSTITUTIONAL_CONFIG.TARGET_PAYMENT_COVERAGE);
-  const paymentBasedAmount = roundToNearest_((maxSupportablePayment * VFC_INSTITUTIONAL_CONFIG.ASSUMED_TERM_MONTHS) / VFC_INSTITUTIONAL_CONFIG.ASSUMED_FACTOR_RATE, VFC_POWER_CONFIG.ROUNDING);
+  const recentDeposits = average_(monthlyDeposits.slice(-3));
+  const recentWithdrawals = average_(monthlyWithdrawals.slice(-3));
+  const recentFreeCashFlow = round2_(recentWithdrawals > 0 ? Math.max(0, recentDeposits - recentWithdrawals) : averageFreeCashFlow);
+
+  const monthlySurpluses = monthlyDeposits.map(function(d, index) {
+    const w = toNumber_(monthlyWithdrawals[index]);
+    return w > 0 ? Math.max(0, d - w) : d * impliedMargin;
+  });
+  const weakestMonthFreeCashFlow = round2_(monthlySurpluses.length ? Math.min.apply(null, monthlySurpluses) : averageFreeCashFlow);
+
+  const conservativeFreeCashFlow = round2_(Math.min(
+    averageFreeCashFlow || 0,
+    recentFreeCashFlow || averageFreeCashFlow || 0,
+    weakestMonthFreeCashFlow || averageFreeCashFlow || 0
+  ));
+
+  const stressedDeposits = deposits * (1 - VFC_INSTITUTIONAL_CONFIG.STRESS_DECLINE);
+  const expenseRatio = deposits > 0 ? clamp_(withdrawals / deposits, 0.55, 0.97) : 0.85;
+  const stressedWithdrawals = stressedDeposits * expenseRatio;
+  const stressedFreeCashFlow = round2_(Math.max(0, stressedDeposits - stressedWithdrawals));
 
   return {
     averageMonthlyDeposits: round2_(deposits),
     averageMonthlyWithdrawals: round2_(withdrawals),
-    estimatedMonthlyFreeCashFlow: estimatedFreeCashFlow,
-    estimatedMonthlyPayment: estimatedMonthlyPayment,
-    paymentCoverageRatio: coverageRatio,
-    coverageRatio: coverageRatio,
-    maximumSupportableMonthlyPayment: maxSupportablePayment,
-    paymentBasedMaximumAmount: Math.max(0, paymentBasedAmount),
-    assumedFactorRate: VFC_INSTITUTIONAL_CONFIG.ASSUMED_FACTOR_RATE,
-    assumedTermMonths: VFC_INSTITUTIONAL_CONFIG.ASSUMED_TERM_MONTHS,
-    assessment: coverageRatio >= 1.50 ? 'Strong' : coverageRatio >= 1.30 ? 'Acceptable' : coverageRatio >= 1.15 ? 'Caution' : 'Weak'
+    averageFreeCashFlow: averageFreeCashFlow,
+    recentThreeMonthFreeCashFlow: recentFreeCashFlow,
+    weakestMonthFreeCashFlow: weakestMonthFreeCashFlow,
+    conservativeFreeCashFlow: conservativeFreeCashFlow,
+    stressedFreeCashFlow: stressedFreeCashFlow,
+    stressDeclinePercent: Math.round(VFC_INSTITUTIONAL_CONFIG.STRESS_DECLINE * 100),
+    monthsAnalyzed: toNumber_(f.monthsCovered)
   };
 }
 
-function calculateRepaymentStability_(f, fundamental, payment) {
-  const stability = clamp_(100 - toNumber_(f.depositVolatility) * 100, 0, 100);
-  const trend = clamp_(55 + toNumber_(f.depositTrend) * 180, 0, 100);
-  const behaviour = Math.round(
-    toNumber_(fundamental.nsfScore) * 0.45 +
-    toNumber_(fundamental.balanceScore) * 0.35 +
-    toNumber_(fundamental.debtLoadScore) * 0.20
-  );
-  const paymentScore = payment.coverageRatio >= 1.75 ? 100 : payment.coverageRatio >= 1.50 ? 90 : payment.coverageRatio >= 1.30 ? 78 : payment.coverageRatio >= 1.15 ? 62 : payment.coverageRatio >= 1.0 ? 45 : 25;
-  const historyScore = Math.min(100, Math.max(25, toNumber_(f.monthsCovered) / 6 * 100));
+function calculateDebtServiceScenarios_(cashFlow, capacity, hardStops) {
+  const targetPayment = hardStops.blocking.length ? 0 : cashFlow.conservativeFreeCashFlow / VFC_INSTITUTIONAL_CONFIG.TARGET_COVERAGE;
+  const stretchPayment = hardStops.blocking.length ? 0 : cashFlow.conservativeFreeCashFlow / VFC_INSTITUTIONAL_CONFIG.STRETCH_COVERAGE;
+  const stressPayment = hardStops.blocking.length ? 0 : cashFlow.stressedFreeCashFlow / VFC_INSTITUTIONAL_CONFIG.TARGET_COVERAGE;
+  const originalEngineAmount = Math.max(0, toNumber_(capacity.recommendedAmount));
+  const byTerm = {};
 
-  let score = Math.round(
-    stability * 0.24 +
-    trend * 0.12 +
-    paymentScore * 0.28 +
-    behaviour * 0.26 +
-    historyScore * 0.10
-  );
-  if (f.mcaPaymentFlag) score -= 7;
-  if (f.suspectedStacking) score -= 12;
-  if (f.negativeBalanceFlag) score -= 8;
-  score = clamp_(score, 0, 100);
+  VFC_INSTITUTIONAL_CONFIG.TERMS.forEach(function(term) {
+    const baseAmount = roundToNearest_((targetPayment * term) / VFC_INSTITUTIONAL_CONFIG.FACTOR_RATE, VFC_POWER_CONFIG.ROUNDING);
+    const stretchAmount = roundToNearest_((stretchPayment * term) / VFC_INSTITUTIONAL_CONFIG.FACTOR_RATE, VFC_POWER_CONFIG.ROUNDING);
+    const stressAmount = roundToNearest_((stressPayment * term) / VFC_INSTITUTIONAL_CONFIG.FACTOR_RATE, VFC_POWER_CONFIG.ROUNDING);
+    const recommendedAmount = Math.max(0, Math.min(baseAmount, originalEngineAmount || baseAmount));
+    const estimatedMonthlyPayment = recommendedAmount > 0 ? round2_((recommendedAmount * VFC_INSTITUTIONAL_CONFIG.FACTOR_RATE) / term) : 0;
+    const coverage = estimatedMonthlyPayment > 0 ? round2_(cashFlow.conservativeFreeCashFlow / estimatedMonthlyPayment) : 0;
+    const stressCoverage = estimatedMonthlyPayment > 0 ? round2_(cashFlow.stressedFreeCashFlow / estimatedMonthlyPayment) : 0;
 
-  const outlook = score >= 85 ? 'Very Strong' : score >= 75 ? 'Strong' : score >= 62 ? 'Acceptable' : score >= 50 ? 'Caution' : 'Weak';
+    byTerm[String(term)] = {
+      termMonths: term,
+      factorRate: VFC_INSTITUTIONAL_CONFIG.FACTOR_RATE,
+      recommendedAmount: recommendedAmount,
+      baseSupportableAmount: Math.max(0, baseAmount),
+      stretchAmount: Math.max(recommendedAmount, stretchAmount),
+      stressTestedAmount: Math.max(0, stressAmount),
+      estimatedMonthlyPayment: estimatedMonthlyPayment,
+      estimatedWeeklyPayment: round2_(estimatedMonthlyPayment * 12 / 52),
+      estimatedBusinessDailyPayment: round2_(estimatedMonthlyPayment * 12 / 260),
+      coverageAtRecommended: coverage,
+      stressCoverageAtRecommended: stressCoverage,
+      decision: coverage >= 1.35 && stressCoverage >= 1.15 ? 'Supportable' : coverage >= 1.20 ? 'Caution' : 'Reduce amount'
+    };
+  });
+
+  const coverageCapacity = cashFlow.conservativeFreeCashFlow > 0 ? Math.min(100, Math.round((cashFlow.conservativeFreeCashFlow / Math.max(cashFlow.averageMonthlyDeposits * 0.08, 1)) * 65)) : 0;
+  const capacityScore = clamp_(Math.round(coverageCapacity * 0.55 + (cashFlow.stressedFreeCashFlow > 0 ? 75 : 25) * 0.25 + Math.min(100, cashFlow.monthsAnalyzed / 6 * 100) * 0.20), 0, 100);
   const conditions = [];
-  if (payment.coverageRatio < 1.30) conditions.push('Confirm exact existing debt payments and reduce the proposed payment if necessary.');
-  if (f.mcaPaymentFlag) conditions.push('Obtain current statements or payout letters for existing financing.');
-  if (f.monthsCovered < 6) conditions.push('Obtain additional bank-statement history before relying on the repayment estimate.');
+  if (cashFlow.monthsAnalyzed < 6) conditions.push('Obtain six complete months of business bank statements for final sizing.');
+  if (cashFlow.stressedFreeCashFlow <= 0) conditions.push('No supportable payment under the 10% deposit stress case.');
 
   return {
-    score: score,
-    outlook: outlook,
-    proxyProbability: score,
-    label: 'Banking-behaviour repayment proxy',
-    components: {
-      cashFlowStability: Math.round(stability),
-      depositTrend: Math.round(trend),
-      paymentCapacity: paymentScore,
-      bankingBehaviour: behaviour,
-      statementHistory: Math.round(historyScore)
-    },
+    maximumSupportableMonthlyPayment: round2_(targetPayment),
+    stretchMonthlyPayment: round2_(stretchPayment),
+    stressTestedMonthlyPayment: round2_(stressPayment),
+    capacityScore: capacityScore,
+    capacityGrade: capacityScore >= 80 ? 'Strong' : capacityScore >= 65 ? 'Acceptable' : capacityScore >= 50 ? 'Caution' : 'Weak',
+    byTerm: byTerm,
     conditions: conditions
   };
 }
 
-function calculateApprovalProbability_(top, fundamental, capacity, hardStops) {
-  if (hardStops.blocking.length) return { probability: 0, band: 'Manual review', topLender: top.lenderName || '' };
-  const topScore = toNumber_(top.compositeScore || 50);
-  const data = toNumber_(fundamental.dataQualityScore || 50);
-  const amountConfidence = toNumber_(capacity.confidenceScore || 50);
-  const probability = clamp_(Math.round(topScore * 0.60 + data * 0.20 + amountConfidence * 0.20), 5, 95);
-  return {
-    probability: probability,
-    band: probability >= 80 ? 'High' : probability >= 65 ? 'Moderate-High' : probability >= 50 ? 'Moderate' : probability >= 35 ? 'Low-Moderate' : 'Low',
-    topLender: top.lenderName || '',
-    observedApprovalRate: top.observedApprovalRate || 'N/A'
-  };
-}
-
-function calculateFraudRiskProxy_(f, fundamental) {
-  let score = 5;
-  const flags = [];
-  if (f.missingInfoFlag) { score += 12; flags.push('Extracted information is incomplete.'); }
-  if (toNumber_(fundamental.dataQualityScore) < 60) { score += 18; flags.push('Low extraction or document-data confidence.'); }
-  if (!f.averageMonthlyDeposits || !f.statementCount) { score += 25; flags.push('Critical banking fields are missing.'); }
-  if (f.returnedPaymentFlag) { score += 5; flags.push('Returned or reversed transactions require review.'); }
-  score = clamp_(score, 0, 100);
+function calculateBusinessHealth_(f, fundamental, cashFlow) {
+  const depositStrength = clamp_(Math.round(toNumber_(fundamental.cashFlowScore)), 0, 100);
+  const surplusRatio = cashFlow.averageMonthlyDeposits > 0 ? cashFlow.conservativeFreeCashFlow / cashFlow.averageMonthlyDeposits : 0;
+  const surplusScore = surplusRatio >= 0.18 ? 95 : surplusRatio >= 0.12 ? 82 : surplusRatio >= 0.08 ? 68 : surplusRatio >= 0.04 ? 48 : 25;
+  const stabilityScore = clamp_(Math.round(100 - toNumber_(f.depositVolatility) * 100), 0, 100);
+  const balanceScore = clamp_(toNumber_(fundamental.balanceScore), 0, 100);
+  const conductScore = clamp_(Math.round(toNumber_(fundamental.nsfScore) * 0.60 + toNumber_(fundamental.debtLoadScore) * 0.40), 0, 100);
+  const score = Math.round(depositStrength * 0.25 + surplusScore * 0.25 + stabilityScore * 0.15 + balanceScore * 0.15 + conductScore * 0.20);
   return {
     score: score,
-    grade: score <= 15 ? 'Low' : score <= 35 ? 'Moderate' : score <= 60 ? 'Elevated' : 'High',
-    flags: flags,
-    limitation: 'This is a document-data anomaly proxy, not forensic document authentication.'
+    grade: score >= 82 ? 'Strong' : score >= 70 ? 'Acceptable' : score >= 58 ? 'Caution' : score >= 45 ? 'Elevated Risk' : 'Weak',
+    components: {
+      depositStrength: depositStrength,
+      cashFlowSurplus: surplusScore,
+      depositStability: stabilityScore,
+      liquidity: balanceScore,
+      bankingConductAndDebt: conductScore
+    }
   };
 }
 
 function evaluateInstitutionalHardStops_(f, fundamental) {
-  const blocking = [];
-  const warnings = [];
-  const conditions = [];
+  const blocking = [], warnings = [], conditions = [];
   if (!f.statementCount || !f.averageMonthlyDeposits) blocking.push('Insufficient usable banking data.');
   if (toNumber_(fundamental.dataQualityScore) < 35) blocking.push('Critical data quality is too low for automated sizing.');
   if (f.monthsCovered < 2) blocking.push('Less than two months of usable statement history.');
@@ -206,23 +204,22 @@ function evaluateInstitutionalHardStops_(f, fundamental) {
   return { blocking: unique_(blocking), warnings: unique_(warnings), conditions: unique_(conditions) };
 }
 
-function buildInstitutionalReasonCodes_(f, fundamental, payment, repayment, hardStops) {
+function buildDebtServiceReasonCodes_(f, fundamental, cashFlow, scenarios, hardStops) {
   const positive = [], negative = [];
-  if (f.depositVolatility <= 0.20) positive.push('P01 Stable monthly deposits');
-  if (f.depositTrend >= 0.05) positive.push('P02 Positive deposit trend');
-  if (f.nsfPerMonth === 0) positive.push('P03 No extracted NSF activity');
-  if (!f.negativeBalanceFlag) positive.push('P04 No extracted negative-balance flag');
-  if (payment.coverageRatio >= 1.30) positive.push('P05 Acceptable proposed-payment coverage');
-  if (f.monthsCovered >= 6) positive.push('P06 Six or more months analyzed');
-
-  if (f.depositTrend <= -0.08) negative.push('N01 Declining deposit trend');
-  if (f.depositVolatility >= 0.45) negative.push('N02 High revenue volatility');
-  if (f.nsfPerMonth > 0) negative.push('N03 NSF activity detected');
-  if (f.negativeBalanceFlag) negative.push('N04 Negative balances detected');
-  if (f.mcaPaymentFlag) negative.push('N05 Existing financing payments detected');
-  if (f.suspectedStacking) negative.push('N06 Possible stacking');
-  if (payment.coverageRatio < 1.15) negative.push('N07 Weak proposed-payment coverage');
-  if (fundamental.dataQualityScore < 70) negative.push('N08 Data requires manual verification');
+  if (f.depositVolatility <= 0.20) positive.push('BH01 Stable monthly deposits');
+  if (f.depositTrend >= 0.05) positive.push('BH02 Positive deposit trend');
+  if (f.nsfPerMonth === 0) positive.push('BK01 No extracted NSF activity');
+  if (!f.negativeBalanceFlag) positive.push('BK02 No extracted negative-balance flag');
+  if (cashFlow.conservativeFreeCashFlow > 0) positive.push('DS01 Positive conservative monthly cash flow');
+  if (scenarios.maximumSupportableMonthlyPayment > 0) positive.push('DS02 Supportable new monthly debt payment identified');
+  if (f.depositTrend <= -0.08) negative.push('BH06 Declining deposit trend');
+  if (f.depositVolatility >= 0.45) negative.push('BH07 High deposit volatility');
+  if (f.nsfPerMonth > 0) negative.push('BK04 NSF activity detected');
+  if (f.negativeBalanceFlag) negative.push('BK05 Negative balances detected');
+  if (f.mcaPaymentFlag) negative.push('DB03 Existing financing payments detected');
+  if (f.suspectedStacking) negative.push('DB05 Possible stacking');
+  if (cashFlow.stressedFreeCashFlow <= 0) negative.push('DS06 No debt-service capacity under stress');
+  if (fundamental.dataQualityScore < 70) negative.push('DQ02 Material figures require manual verification');
   hardStops.blocking.forEach(function(x) { negative.push('HARD STOP: ' + x); });
   return { positive: unique_(positive), negative: unique_(negative) };
 }
@@ -230,45 +227,37 @@ function buildInstitutionalReasonCodes_(f, fundamental, payment, repayment, hard
 function calculateInstitutionalConfidence_(f, fundamental, top) {
   const statementScore = Math.min(100, toNumber_(f.monthsCovered) / 6 * 100);
   const sampleScore = Math.min(100, toNumber_(top.similarCases) / 8 * 100);
-  const score = Math.round(toNumber_(fundamental.dataQualityScore) * 0.50 + statementScore * 0.30 + sampleScore * 0.20);
+  const score = Math.round(toNumber_(fundamental.dataQualityScore) * 0.55 + statementScore * 0.35 + sampleScore * 0.10);
   return {
     score: score,
     grade: score >= 85 ? 'High' : score >= 65 ? 'Moderate' : 'Low',
-    basis: [
-      f.monthsCovered + ' months of statements',
-      toNumber_(top.similarCases) + ' comparable historical cases',
-      toNumber_(fundamental.dataQualityScore) + '/100 data quality'
-    ]
+    basis: [f.monthsCovered + ' months of statements', toNumber_(fundamental.dataQualityScore) + '/100 data quality', toNumber_(top.similarCases) + ' comparable historical cases']
   };
 }
 
-function buildInstitutionalRecommendation_(decision, top, amount, stretch, repayment, payment, hardStops) {
-  if (hardStops.blocking.length) return 'Do not issue an automated lending recommendation. Resolve the hard-stop items and complete manual underwriting.';
-  let text = decision + '. ';
-  if (top.lenderName) text += 'First lender review: ' + top.lenderName + '. ';
-  text += 'VFC internal recommended amount: ' + amount + '.';
-  if (stretch > amount) text += ' Stretch exposure up to ' + stretch + ' only after confirming external credit, existing obligations and repayment capacity.';
-  text += ' Repayment stability is ' + repayment.outlook + ' with estimated proposed-payment coverage of ' + payment.coverageRatio + 'x.';
-  return text;
+function buildDebtServiceRecommendation_(decision, primary, cashFlow, businessHealth, hardStops) {
+  if (hardStops.blocking.length) return 'Do not issue an automated approval amount. Resolve the hard-stop items and complete manual underwriting.';
+  return decision + '. Business Health: ' + businessHealth.score + '/100. Conservative monthly free cash flow: ' + cashFlow.conservativeFreeCashFlow + '. Maximum supportable new monthly payment at 1.35x coverage: ' + round2_(cashFlow.conservativeFreeCashFlow / VFC_INSTITUTIONAL_CONFIG.TARGET_COVERAGE) + '. Recommended ' + primary.termMonths + '-month amount: ' + primary.recommendedAmount + ', with estimated payment coverage of ' + primary.coverageAtRecommended + 'x.';
 }
 
 function saveInstitutionalAssessment_(base, i) {
   ensureSheetSchema_('Institutional Assessments', [
-    'Assessment ID','Model Version','Company Name','Period','Business Health','Approval Probability',
-    'Repayment Stability','Repayment Outlook','Fraud Risk','Recommended Amount','Stretch Amount',
-    'Estimated Free Cash Flow','Estimated Payment','Payment Coverage','Payment-Based Maximum',
-    'Confidence','Decision','Positive Reason Codes','Negative Reason Codes','Hard Stops',
-    'Required Conditions','Underwriter Recommendation','Created At'
+    'Assessment ID','Model Version','Company Name','Period','Business Health','Debt Service Score',
+    'Conservative Free Cash Flow','Maximum Monthly Payment','6 Month Amount','9 Month Amount','12 Month Amount',
+    '6 Month Stress Amount','9 Month Stress Amount','12 Month Stress Amount','Selected Recommended Amount',
+    'Selected Term','Selected Payment','Selected Coverage','Confidence','Decision','Positive Reason Codes',
+    'Negative Reason Codes','Hard Stops','Required Conditions','Underwriter Recommendation','Created At'
   ]);
   appendRow_('Institutional Assessments', [
     base.assessmentId,VFC_INSTITUTIONAL_CONFIG.MODEL_VERSION,base.companyName,base.period,
-    i.businessHealth.score,i.approvalProbability.probability,i.repaymentStability.score,
-    i.repaymentStability.outlook,i.fraudRisk.score,i.lendingRecommendation.recommendedAmount,
-    i.lendingRecommendation.stretchAmount,i.paymentCapacity.estimatedMonthlyFreeCashFlow,
-    i.paymentCapacity.estimatedMonthlyPayment,i.paymentCapacity.coverageRatio,
-    i.paymentCapacity.paymentBasedMaximumAmount,i.confidence.score,i.lendingRecommendation.decision,
-    cleanCell_(i.positiveReasonCodes),cleanCell_(i.negativeReasonCodes),
-    cleanCell_(i.hardStops.blocking),cleanCell_(i.requiredConditions),
+    i.businessHealth.score,i.debtServiceCapacity.score,i.cashFlowAnalysis.conservativeFreeCashFlow,
+    i.debtServiceCapacity.maximumSupportableMonthlyPayment,
+    i.termScenarios.byTerm['6'].recommendedAmount,i.termScenarios.byTerm['9'].recommendedAmount,i.termScenarios.byTerm['12'].recommendedAmount,
+    i.termScenarios.byTerm['6'].stressTestedAmount,i.termScenarios.byTerm['9'].stressTestedAmount,i.termScenarios.byTerm['12'].stressTestedAmount,
+    i.lendingRecommendation.recommendedAmount,i.lendingRecommendation.selectedTermMonths,
+    i.lendingRecommendation.estimatedMonthlyPayment,i.lendingRecommendation.coverageRatio,
+    i.confidence.score,i.lendingRecommendation.decision,cleanCell_(i.positiveReasonCodes),
+    cleanCell_(i.negativeReasonCodes),cleanCell_(i.hardStops.blocking),cleanCell_(i.requiredConditions),
     i.underwriterRecommendation,new Date()
   ]);
 }
