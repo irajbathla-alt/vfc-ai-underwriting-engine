@@ -1,6 +1,5 @@
 const VFC_INSTITUTIONAL_CONFIG = {
-  MODEL_VERSION: 'VFC-HISTORICAL-12M-MAX-4.1',
-  TERM_MONTHS: 12,
+  MODEL_VERSION: 'VFC-HISTORICAL-MAX-4.2',
   HISTORICAL_WEIGHT: 0.70,
   CURRENT_BANKING_WEIGHT: 0.20,
   AI_WEIGHT: 0.10,
@@ -37,12 +36,11 @@ function generateInstitutionalAssessmentSafe(companyOrRequest, requestedPeriod) 
     base.underwritingSummary.recommended_amount = recalibrated.maximumLoanAmount;
     base.underwritingSummary.stretch_amount = recalibrated.maximumLoanAmount;
     base.underwritingSummary.explanation = (base.underwritingSummary.explanation || '') +
-      ' Historical recalibration produced a 12-month maximum of ' + recalibrated.maximumLoanAmount + '.';
+      ' Historical recalibration produced a maximum recommended loan of ' + recalibrated.maximumLoanAmount + '.';
   }
 
   base.institutionalAssessment = {
     modelVersion: VFC_INSTITUTIONAL_CONFIG.MODEL_VERSION,
-    termMonths: VFC_INSTITUTIONAL_CONFIG.TERM_MONTHS,
     maximumLoanAmount: recalibrated.maximumLoanAmount,
     originalModelAmount: originalAmount,
     historicalExpectedAmount: recalibrated.historicalExpectedAmount,
@@ -66,12 +64,12 @@ function generateInstitutionalAssessmentSafe(companyOrRequest, requestedPeriod) 
     calculationNotes: recalibrated.calculationNotes,
     strengths: fundamental.strengths || [],
     risks: fundamental.risks || [],
-    decision: recalibrated.maximumLoanAmount > 0 ? 'Maximum historically supported 12-month loan recommendation' : 'No automated loan amount recommended',
-    methodologyNote: 'Historical approvals now drive 70% of the amount, current banking risk drives 20%, and AI review drives 10%. The original recommendation is preserved as a floor unless material current banking deterioration is detected. No 6- or 9-month sizing overlay is applied.'
+    decision: recalibrated.maximumLoanAmount > 0 ? 'Maximum historically supported loan recommendation' : 'No automated loan amount recommended',
+    methodologyNote: 'Historical approvals drive 70% of the amount, current banking risk drives 20%, and AI review drives 10%. The recommendation represents the maximum loan that reasonably fits the business profile and available historical evidence. No repayment-term assumption or term-based sizing adjustment is applied.'
   };
 
   base.modelVersion = VFC_INSTITUTIONAL_CONFIG.MODEL_VERSION;
-  base.disclaimer = 'VFC internal decision support only. This is a historically calibrated 12-month maximum based on uploaded bank statements and recorded lender outcomes. It is not a lender approval or guarantee.';
+  base.disclaimer = 'VFC internal decision support only. This maximum loan recommendation is based on uploaded bank statements and recorded historical lender outcomes. It is not a lender approval or guarantee.';
   saveOriginalMaximumAssessment_(base);
   return base;
 }
@@ -169,13 +167,13 @@ function buildHistoricalApprovalEvidence_(rankings) {
 function saveOriginalMaximumAssessment_(base) {
   const i = base.institutionalAssessment || {};
   ensureSheetSchema_('Institutional Assessments', [
-    'Assessment ID','Model Version','Company Name','Period','Term Months','Maximum Loan Amount',
+    'Assessment ID','Model Version','Company Name','Period','Maximum Loan Amount',
     'Original Model Amount','Historical Expected Amount','Current Banking Amount','Business Health Score',
     'Risk Grade','Average Monthly Deposits','Historical Anchor','Cash Flow Capacity','Revenue Capacity',
     'Amount Confidence','Amount Confidence Score','Strongest Lender','Lender Fit Score','Calculation Notes','Created At'
   ]);
   appendRow_('Institutional Assessments', [
-    base.assessmentId,i.modelVersion,base.companyName,base.period,i.termMonths,i.maximumLoanAmount,
+    base.assessmentId,i.modelVersion,base.companyName,base.period,i.maximumLoanAmount,
     i.originalModelAmount,i.historicalExpectedAmount,i.currentBankingAmount,i.businessHealthScore,
     i.riskGrade,i.averageMonthlyDeposits,i.historicalAnchor,i.cashFlowCapacity,i.revenueCapacity,
     i.amountConfidence,i.amountConfidenceScore,i.strongestLender,i.lenderFitScore,cleanCell_(i.calculationNotes),new Date()
