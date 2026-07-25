@@ -1,9 +1,45 @@
-// VFC Hybrid Engine V2 period-resolution fix.
-// Resolves the newest saved PDF Summary period for a company before assessment.
+// VFC Hybrid Engine V2 assessment lookup and request-normalization fix.
+// Accepts either generatePowerAssessmentSafe(companyName, period)
+// or generatePowerAssessmentSafe({ companyName, period, uploadResponse }).
 
-function generatePowerAssessmentSafe(companyName, requestedPeriod) {
-  const resolved = resolveLatestAssessmentPeriod_(companyName, requestedPeriod);
-  return generatePowerAssessment(companyName, resolved);
+function generatePowerAssessmentSafe(requestOrCompanyName, requestedPeriod) {
+  const request = normalizeAssessmentRequest_(requestOrCompanyName, requestedPeriod);
+  const companyName = request.companyName;
+  const period = resolveLatestAssessmentPeriod_(companyName, request.period);
+  return generatePowerAssessment(companyName, period);
+}
+
+function normalizeAssessmentRequest_(requestOrCompanyName, requestedPeriod) {
+  let companyName = '';
+  let period = requestedPeriod || '';
+
+  if (requestOrCompanyName && typeof requestOrCompanyName === 'object') {
+    companyName = String(
+      requestOrCompanyName.companyName ||
+      requestOrCompanyName.company ||
+      (requestOrCompanyName.uploadResponse && requestOrCompanyName.uploadResponse.companyName) ||
+      ''
+    ).trim();
+
+    period = String(
+      requestOrCompanyName.period ||
+      requestOrCompanyName.detectedPeriod ||
+      (requestOrCompanyName.uploadResponse && requestOrCompanyName.uploadResponse.detectedPeriod) ||
+      period ||
+      ''
+    ).trim();
+  } else {
+    companyName = String(requestOrCompanyName || '').trim();
+    period = String(period || '').trim();
+  }
+
+  if (!companyName || companyName === 'undefined' || companyName === 'null') {
+    throw new Error(
+      'Company name was not supplied to the assessment. Run the assessment from the web app after uploading statements; do not run generatePowerAssessmentSafe directly from the Apps Script editor.'
+    );
+  }
+
+  return { companyName: companyName, period: period };
 }
 
 function resolveLatestAssessmentPeriod_(companyName, requestedPeriod) {
@@ -12,35 +48,36 @@ function resolveLatestAssessmentPeriod_(companyName, requestedPeriod) {
   });
 
   if (!rows.length) {
-    throw new Error('The statements were uploaded, but no PDF Summary rows were found for "' + companyName + '". Confirm that uploadStatementBatch completed successfully.');
+    throw new Error(
+      'No PDF Summary rows were found for "' + companyName + '". Check the PDF Summaries sheet to confirm that uploadStatementBatch completed and that the company name matches.'
+    );
   }
 
-  // Use the requested period when it genuinely exists.
   if (requestedPeriod) {
     const exact = rows.filter(function(row) {
       return sameText_(row.detectedPeriod, requestedPeriod);
     });
-    if (exact.length) return exact[exact.length - 1].detectedPeriod || requestedPeriod;
+    if (exact.length) return String(exact[exact.length - 1].detectedPeriod || requestedPeriod).trim();
   }
 
-  // Otherwise use the newest summary row written for this company.
+  // Use the most recently written summary row for this company.
   const latest = rows[rows.length - 1];
-  const latestPeriod = String(latest.detectedPeriod || '').trim();
-  if (latestPeriod) return latestPeriod;
-
-  // Last fallback allows buildFeaturesForCase_ to use all available rows for the company.
-  return '';
+  return String(latest.detectedPeriod || '').trim();
 }
 
-function diagnoseAssessmentLookup(companyName, requestedPeriod) {
+function diagnoseAssessmentLookup(requestOrCompanyName, requestedPeriod) {
+  const request = normalizeAssessmentRequest_(requestOrCompanyName, requestedPeriod);
   const rows = getSheetObjects_('PDF Summaries').filter(function(row) {
-    return sameText_(row.companyName, companyName);
+    return sameText_(row.companyName, request.companyName);
   });
+
   return {
-    companyName: companyName,
-    requestedPeriod: requestedPeriod || '',
+    companyName: request.companyName,
+    requestedPeriod: request.period,
     matchingRows: rows.length,
-    availablePeriods: unique_(rows.map(function(row) { return row.detectedPeriod || ''; }).filter(Boolean)),
-    resolvedPeriod: rows.length ? resolveLatestAssessmentPeriod_(companyName, requestedPeriod) : ''
+    availablePeriods: unique_(rows.map(function(row) {
+      return row.detectedPeriod || '';
+    }).filter(Boolean)),
+    resolvedPeriod: rows.length ? resolveLatestAssessmentPeriod_(request.companyName, request.period) : ''
   };
 }
