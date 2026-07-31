@@ -1,8 +1,10 @@
 const VFC_INSTITUTIONAL_CONFIG = {
-  MODEL_VERSION: 'VFC-HISTORICAL-MAX-4.2',
+  MODEL_VERSION: 'VFC-HISTORICAL-MAX-4.3-PATTERN-LEARNING',
   HISTORICAL_WEIGHT: 0.70,
   CURRENT_BANKING_WEIGHT: 0.20,
   AI_WEIGHT: 0.10,
+  PATTERN_BLEND: 0.70,
+  BASE_BLEND: 0.30,
   ROUNDING: 500
 };
 
@@ -18,60 +20,98 @@ function generateInstitutionalAssessmentSafe(companyOrRequest, requestedPeriod) 
   const originalAmount = Math.max(0, toNumber_(capacity.recommendedAmount));
   const historicalAnchor = Math.max(0, toNumber_(capacity.historicalAnchor));
   const historicalCases = buildHistoricalApprovalEvidence_(rankings);
-  const recalibrated = calculateHistoricalMaximum_(
-    originalAmount,
-    historicalAnchor,
-    features,
-    fundamental,
-    ai,
-    top
-  );
+  const baseRecalibration = calculateHistoricalMaximum_(originalAmount, historicalAnchor, features, fundamental, ai, top);
+  const pattern = getLearnedPatternRecommendation_(features);
+  const finalResult = blendPatternRecommendation_(baseRecalibration, pattern, originalAmount, features, fundamental);
 
   base.lendingCapacity.originalRecommendedAmount = originalAmount;
-  base.lendingCapacity.recommendedAmount = recalibrated.maximumLoanAmount;
-  base.lendingCapacity.stretchAmount = recalibrated.maximumLoanAmount;
-  base.lendingCapacity.historicalRecalibration = recalibrated;
+  base.lendingCapacity.recommendedAmount = finalResult.maximumLoanAmount;
+  base.lendingCapacity.stretchAmount = finalResult.maximumLoanAmount;
+  base.lendingCapacity.historicalRecalibration = baseRecalibration;
+  base.lendingCapacity.patternLearning = pattern;
 
   if (base.underwritingSummary) {
-    base.underwritingSummary.recommended_amount = recalibrated.maximumLoanAmount;
-    base.underwritingSummary.stretch_amount = recalibrated.maximumLoanAmount;
+    base.underwritingSummary.recommended_amount = finalResult.maximumLoanAmount;
+    base.underwritingSummary.stretch_amount = finalResult.maximumLoanAmount;
     base.underwritingSummary.explanation = (base.underwritingSummary.explanation || '') +
-      ' Historical recalibration produced a maximum recommended loan of ' + recalibrated.maximumLoanAmount + '.';
+      ' Pattern-learning recalibration produced a maximum recommended loan of ' + finalResult.maximumLoanAmount + '.';
   }
 
   base.institutionalAssessment = {
     modelVersion: VFC_INSTITUTIONAL_CONFIG.MODEL_VERSION,
-    maximumLoanAmount: recalibrated.maximumLoanAmount,
+    maximumLoanAmount: finalResult.maximumLoanAmount,
     originalModelAmount: originalAmount,
-    historicalExpectedAmount: recalibrated.historicalExpectedAmount,
-    historicalExpectedLow: recalibrated.historicalExpectedLow,
-    historicalExpectedHigh: recalibrated.historicalExpectedHigh,
-    currentBankingAmount: recalibrated.currentBankingAmount,
-    historicalWeight: 70,
-    currentBankingWeight: 20,
-    aiWeight: 10,
-    amountConfidence: recalibrated.confidence,
-    amountConfidenceScore: recalibrated.confidenceScore,
+    historicalExpectedAmount: baseRecalibration.historicalExpectedAmount,
+    historicalExpectedLow: baseRecalibration.historicalExpectedLow,
+    historicalExpectedHigh: baseRecalibration.historicalExpectedHigh,
+    currentBankingAmount: baseRecalibration.currentBankingAmount,
+    learnedPatternAmount: pattern.predictedAmount || 0,
+    patternActive: !!pattern.active,
+    patternConfidence: pattern.confidence || 'Insufficient history',
+    patternConfidenceScore: pattern.confidenceScore || 0,
+    comparablePatternCases: pattern.comparableCases || 0,
+    patternAverageSimilarity: pattern.averageSimilarity || 0,
+    patternBacktest: pattern.model && pattern.model.backtest ? pattern.model.backtest : {},
+    closestPatternCases: pattern.closestCases || [],
+    amountConfidence: finalResult.confidence,
+    amountConfidenceScore: finalResult.confidenceScore,
     businessHealthScore: toNumber_(fundamental.score),
     riskGrade: fundamental.grade || '',
     averageMonthlyDeposits: toNumber_(features.averageMonthlyDeposits),
     historicalAnchor: historicalAnchor,
-    cashFlowCapacity: toNumber_(capacity.cashFlowCapacity),
-    revenueCapacity: toNumber_(capacity.revenueCapacity),
     strongestLender: top.lenderName || '',
     lenderFitScore: toNumber_(top.compositeScore),
     closestHistoricalApprovals: historicalCases,
-    calculationNotes: recalibrated.calculationNotes,
+    calculationNotes: finalResult.calculationNotes,
     strengths: fundamental.strengths || [],
     risks: fundamental.risks || [],
-    decision: recalibrated.maximumLoanAmount > 0 ? 'Maximum historically supported loan recommendation' : 'No automated loan amount recommended',
-    methodologyNote: 'Historical approvals drive 70% of the amount, current banking risk drives 20%, and AI review drives 10%. The recommendation represents the maximum loan that reasonably fits the business profile and available historical evidence. No repayment-term assumption or term-based sizing adjustment is applied.'
+    decision: finalResult.maximumLoanAmount > 0 ? 'Maximum recommended loan' : 'No automated loan amount recommended',
+    methodologyNote: 'The maximum loan combines verified historical lender outcomes, learned banking-pattern similarity, current business-bank-statement health and AI review. The pattern model automatically retrains when the number of historical outcomes changes and is used only when minimum sample and back-test requirements are met.'
   };
 
   base.modelVersion = VFC_INSTITUTIONAL_CONFIG.MODEL_VERSION;
-  base.disclaimer = 'VFC internal decision support only. This maximum loan recommendation is based on uploaded bank statements and recorded historical lender outcomes. It is not a lender approval or guarantee.';
+  base.disclaimer = 'VFC internal decision support only. The maximum loan is estimated from uploaded bank statements and recorded historical lender outcomes. It is not a lender approval or guarantee.';
   saveOriginalMaximumAssessment_(base);
   return base;
+}
+
+function blendPatternRecommendation_(baseResult, pattern, originalAmount, features, fundamental) {
+  let amount = baseResult.maximumLoanAmount;
+  const notes = (baseResult.calculationNotes || []).slice();
+  let confidenceScore = baseResult.confidenceScore || 0;
+
+  if (pattern && pattern.active && pattern.predictedAmount > 0) {
+    const patternReliability = clamp_(toNumber_(pattern.confidenceScore) / 100, 0.35, 0.90);
+    const patternWeight = VFC_INSTITUTIONAL_CONFIG.PATTERN_BLEND * patternReliability;
+    const baseWeight = 1 - patternWeight;
+    amount = baseResult.maximumLoanAmount * baseWeight + pattern.predictedAmount * patternWeight;
+
+    const materialRisk = baseResult.materialRiskFactor < 0.90 || toNumber_(fundamental.score) < 45;
+    if (!materialRisk) amount = Math.max(amount, originalAmount);
+
+    notes.push('Learned pattern amount: ' + roundToNearest_(pattern.predictedAmount, VFC_INSTITUTIONAL_CONFIG.ROUNDING));
+    notes.push('Pattern comparable cases: ' + toNumber_(pattern.comparableCases));
+    notes.push('Pattern confidence: ' + (pattern.confidence || '') + ' (' + toNumber_(pattern.confidenceScore) + '/100)');
+    if (pattern.model && pattern.model.backtest) {
+      notes.push('Pattern back-test median error: ' + toNumber_(pattern.model.backtest.medianPercentError) + '%');
+    }
+    confidenceScore = Math.round(confidenceScore * 0.55 + toNumber_(pattern.confidenceScore) * 0.45);
+  } else {
+    notes.push('Pattern model not active yet; using historical recalibration only.');
+  }
+
+  const deposits = Math.max(0, toNumber_(features.averageMonthlyDeposits));
+  const reasonableCap = deposits > 0 ? deposits * (toNumber_(fundamental.score) >= 70 ? 1.40 : toNumber_(fundamental.score) >= 58 ? 1.15 : 0.90) : amount;
+  if (reasonableCap > 0) amount = Math.min(amount, Math.max(reasonableCap, baseResult.historicalExpectedAmount * 1.05));
+  amount = roundToNearest_(Math.max(0, amount), VFC_INSTITUTIONAL_CONFIG.ROUNDING);
+  if (toNumber_(fundamental.score) < 40 || !deposits) amount = 0;
+
+  return {
+    maximumLoanAmount: amount,
+    confidenceScore: clamp_(confidenceScore, 0, 100),
+    confidence: confidenceScore >= 80 ? 'High' : confidenceScore >= 60 ? 'Moderate' : 'Low',
+    calculationNotes: notes
+  };
 }
 
 function calculateHistoricalMaximum_(originalAmount, historicalAnchor, features, fundamental, ai, top) {
@@ -79,14 +119,8 @@ function calculateHistoricalMaximum_(originalAmount, historicalAnchor, features,
   const fundamentalScore = toNumber_(fundamental.score);
   const aiScore = toNumber_(ai.risk_score || fundamentalScore);
   const lenderFit = toNumber_(top.compositeScore);
-
   const historicalExpected = historicalAnchor > 0 ? historicalAnchor : originalAmount;
-  const currentBankingAmount = deposits * (
-    fundamentalScore >= 82 ? 1.05 :
-    fundamentalScore >= 70 ? 0.95 :
-    fundamentalScore >= 58 ? 0.80 :
-    fundamentalScore >= 45 ? 0.62 : 0.40
-  );
+  const currentBankingAmount = deposits * (fundamentalScore >= 82 ? 1.05 : fundamentalScore >= 70 ? 0.95 : fundamentalScore >= 58 ? 0.80 : fundamentalScore >= 45 ? 0.62 : 0.40);
   const aiAmount = historicalExpected * clamp_(aiScore / 75, 0.80, 1.10);
 
   let blended = historicalExpected * VFC_INSTITUTIONAL_CONFIG.HISTORICAL_WEIGHT +
@@ -105,12 +139,8 @@ function calculateHistoricalMaximum_(originalAmount, historicalAnchor, features,
   blended *= materialRiskFactor;
 
   const noMaterialDeterioration = materialRiskFactor >= 0.98 && fundamentalScore >= 50;
-  if (noMaterialDeterioration && historicalExpected > 0) {
-    blended = Math.max(blended, historicalExpected * 0.92);
-  }
-  if (noMaterialDeterioration) {
-    blended = Math.max(blended, originalAmount);
-  }
+  if (noMaterialDeterioration && historicalExpected > 0) blended = Math.max(blended, historicalExpected * 0.92);
+  if (noMaterialDeterioration) blended = Math.max(blended, originalAmount);
 
   const marketCap = deposits > 0 ? deposits * (fundamentalScore >= 70 ? 1.25 : fundamentalScore >= 58 ? 1.05 : 0.85) : blended;
   if (marketCap > 0) blended = Math.min(blended, Math.max(marketCap, historicalExpected * 0.92));
@@ -148,18 +178,12 @@ function calculateHistoricalMaximum_(originalAmount, historicalAnchor, features,
 }
 
 function buildHistoricalApprovalEvidence_(rankings) {
-  return (rankings || []).filter(function(r) {
-    return toNumber_(r.medianApprovedAmount) > 0;
-  }).slice(0, 5).map(function(r) {
+  return (rankings || []).filter(function(r) { return toNumber_(r.medianApprovedAmount) > 0; }).slice(0, 5).map(function(r) {
     return {
-      lenderName: r.lenderName || '',
-      similarityScore: toNumber_(r.compositeScore),
-      similarApprovals: toNumber_(r.similarApprovals),
-      similarCases: toNumber_(r.similarCases),
-      approvalRate: r.observedApprovalRate || '',
-      lowApprovedAmount: toNumber_(r.lowApprovedAmount),
-      medianApprovedAmount: toNumber_(r.medianApprovedAmount),
-      highApprovedAmount: toNumber_(r.highApprovedAmount)
+      lenderName:r.lenderName || '', similarityScore:toNumber_(r.compositeScore),
+      similarApprovals:toNumber_(r.similarApprovals), similarCases:toNumber_(r.similarCases),
+      approvalRate:r.observedApprovalRate || '', lowApprovedAmount:toNumber_(r.lowApprovedAmount),
+      medianApprovedAmount:toNumber_(r.medianApprovedAmount), highApprovedAmount:toNumber_(r.highApprovedAmount)
     };
   });
 }
@@ -167,15 +191,17 @@ function buildHistoricalApprovalEvidence_(rankings) {
 function saveOriginalMaximumAssessment_(base) {
   const i = base.institutionalAssessment || {};
   ensureSheetSchema_('Institutional Assessments', [
-    'Assessment ID','Model Version','Company Name','Period','Maximum Loan Amount',
-    'Original Model Amount','Historical Expected Amount','Current Banking Amount','Business Health Score',
-    'Risk Grade','Average Monthly Deposits','Historical Anchor','Cash Flow Capacity','Revenue Capacity',
-    'Amount Confidence','Amount Confidence Score','Strongest Lender','Lender Fit Score','Calculation Notes','Created At'
+    'Assessment ID','Model Version','Company Name','Period','Maximum Loan Amount','Original Model Amount',
+    'Historical Expected Amount','Current Banking Amount','Learned Pattern Amount','Pattern Active',
+    'Pattern Confidence','Pattern Confidence Score','Comparable Pattern Cases','Business Health Score',
+    'Risk Grade','Average Monthly Deposits','Historical Anchor','Amount Confidence','Amount Confidence Score',
+    'Strongest Lender','Lender Fit Score','Calculation Notes','Created At'
   ]);
   appendRow_('Institutional Assessments', [
-    base.assessmentId,i.modelVersion,base.companyName,base.period,i.maximumLoanAmount,
-    i.originalModelAmount,i.historicalExpectedAmount,i.currentBankingAmount,i.businessHealthScore,
-    i.riskGrade,i.averageMonthlyDeposits,i.historicalAnchor,i.cashFlowCapacity,i.revenueCapacity,
-    i.amountConfidence,i.amountConfidenceScore,i.strongestLender,i.lenderFitScore,cleanCell_(i.calculationNotes),new Date()
+    base.assessmentId,i.modelVersion,base.companyName,base.period,i.maximumLoanAmount,i.originalModelAmount,
+    i.historicalExpectedAmount,i.currentBankingAmount,i.learnedPatternAmount,i.patternActive,
+    i.patternConfidence,i.patternConfidenceScore,i.comparablePatternCases,i.businessHealthScore,
+    i.riskGrade,i.averageMonthlyDeposits,i.historicalAnchor,i.amountConfidence,i.amountConfidenceScore,
+    i.strongestLender,i.lenderFitScore,cleanCell_(i.calculationNotes),new Date()
   ]);
 }
