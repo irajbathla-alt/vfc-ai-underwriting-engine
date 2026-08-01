@@ -5,40 +5,66 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
     :root{--blue:#1877d2;--green:#176b55;--soft:#f6f7f8;--line:#e5e7eb;--muted:#747b84;--ink:#25282d;--red:#9b2c2c}
-    *{box-sizing:border-box}body{margin:0;padding:18px 12px 36px;background:#fff;color:var(--ink);font-family:Arial,sans-serif}.wrap{max-width:960px;margin:auto}.header{text-align:center;margin-bottom:14px}h1{margin:0;font-family:Georgia,serif;font-weight:400;font-size:34px}.subtitle{color:var(--muted);font-size:14px}.tabs{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;max-width:620px;margin:14px auto;padding:4px;background:var(--soft);border:1px solid var(--line);border-radius:12px}.tab{border:0;background:transparent;padding:10px;border-radius:9px;cursor:pointer}.tab.active{background:#fff;color:var(--blue);box-shadow:0 1px 5px rgba(0,0,0,.08)}.panel{display:none}.panel.active{display:block}.card{border:1px solid var(--line);border-radius:15px;padding:17px;margin-bottom:14px;box-shadow:0 3px 12px rgba(0,0,0,.025)}.card h2{font-family:Georgia,serif;font-weight:400;margin:0 0 5px}.intro,.note,.disclaimer{font-size:11px;color:var(--muted);line-height:1.5}.field{margin:12px 0}label{display:block;font-size:12px;font-weight:600;margin-bottom:5px}input,select,textarea{width:100%;padding:10px;border:1px solid #d9dde2;border-radius:9px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:11px}.button{width:100%;padding:11px;border:0;border-radius:10px;font-weight:600;cursor:pointer}.button:disabled{opacity:.55;cursor:not-allowed}.primary{background:var(--blue);color:#fff}.secondary{margin-top:8px;background:#f1f3f5;border:1px solid var(--line)}.status{white-space:pre-wrap;background:#fafafa;border:1px solid #eceef0;border-radius:10px;padding:10px;margin-top:12px;font-size:11px}.status.error{color:var(--red);border-color:#f0caca;background:#fff8f8}.hero{background:#f4fbf7;border:1px solid #d7eee2;border-radius:15px;padding:22px;text-align:center}.hero .label{font-size:12px;color:var(--muted)}.hero .amount{font-size:46px;font-weight:700;color:var(--green);margin:6px 0}.dashboard{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:12px 0}.tile{background:#f7f7f7;border-radius:10px;padding:12px;text-align:center}.tile strong{display:block;font-size:17px}.tile span{font-size:9px;color:var(--muted)}.section-title{font-family:Georgia,serif;font-size:18px;margin:18px 0 7px}.ranking{border:1px solid var(--line);border-radius:11px;padding:12px;margin:9px 0}.ranking-head{display:flex;justify-content:space-between}.lender{font-family:Georgia,serif;font-size:17px}.score{font-size:18px;font-weight:600;color:var(--blue)}.badges{display:flex;gap:6px;flex-wrap:wrap;margin:7px 0}.badge{padding:4px 8px;border-radius:999px;background:#f1f2f3;font-size:10px}.metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}.metric{background:#f7f7f7;border-radius:8px;padding:8px;text-align:center}.metric strong{display:block;font-size:13px}.metric span{font-size:9px;color:var(--muted)}.reason,.risk,.conditions{font-size:11px;line-height:1.5;margin-top:6px}.risk{color:var(--red)}.table{width:100%;border-collapse:collapse;font-size:11px}.table th,.table td{padding:8px;border-bottom:1px solid var(--line);text-align:left}.table th{color:var(--muted)}#assessmentSection{display:none}@media(max-width:760px){.grid,.dashboard,.metrics{grid-template-columns:1fr}.ranking-head{display:block}.tabs{grid-template-columns:1fr}}
+    *{box-sizing:border-box}
+    body{margin:0;padding:18px 12px 36px;background:#fff;color:var(--ink);font-family:Arial,sans-serif}
+    .wrap{max-width:960px;margin:auto}.header{text-align:center;margin-bottom:14px}
+    h1{margin:0;font-family:Georgia,serif;font-weight:400;font-size:34px}.subtitle{color:var(--muted);font-size:14px}
+    .tabs{display:grid;grid-template-columns:1fr 1fr;gap:4px;max-width:430px;margin:14px auto;padding:4px;background:var(--soft);border:1px solid var(--line);border-radius:12px}
+    .tab{border:0;background:transparent;padding:10px;border-radius:9px;cursor:pointer}.tab.active{background:#fff;color:var(--blue);box-shadow:0 1px 5px rgba(0,0,0,.08)}
+    .panel{display:none}.panel.active{display:block}.card{border:1px solid var(--line);border-radius:15px;padding:17px;margin-bottom:14px;box-shadow:0 3px 12px rgba(0,0,0,.025)}
+    .card h2{font-family:Georgia,serif;font-weight:400;margin:0 0 5px}.intro,.note,.disclaimer{font-size:11px;color:var(--muted);line-height:1.5}
+    .field{margin:12px 0}label{display:block;font-size:12px;font-weight:600;margin-bottom:5px}input,select,textarea{width:100%;padding:10px;border:1px solid #d9dde2;border-radius:9px}
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:11px}.button{width:100%;padding:11px;border:0;border-radius:10px;font-weight:600;cursor:pointer}.button:disabled{opacity:.55;cursor:not-allowed}.primary{background:var(--blue);color:#fff}
+    .status{white-space:pre-wrap;background:#fafafa;border:1px solid #eceef0;border-radius:10px;padding:10px;margin-top:12px;font-size:11px}.status.error{color:var(--red);border-color:#f0caca;background:#fff8f8}
+    .hero{background:#f4fbf7;border:1px solid #d7eee2;border-radius:15px;padding:22px;text-align:center}.hero .label{font-size:12px;color:var(--muted)}.hero .amount{font-size:46px;font-weight:700;color:var(--green);margin:6px 0}
+    .dashboard{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:12px 0}.tile{background:#f7f7f7;border-radius:10px;padding:12px;text-align:center}.tile strong{display:block;font-size:17px}.tile span{font-size:9px;color:var(--muted)}
+    .section-title{font-family:Georgia,serif;font-size:18px;margin:18px 0 7px}.ranking,.comparable{border:1px solid var(--line);border-radius:11px;padding:12px;margin:9px 0}.ranking-head{display:flex;justify-content:space-between}.lender{font-family:Georgia,serif;font-size:17px}.score{font-size:18px;font-weight:600;color:var(--blue)}
+    .badges{display:flex;gap:6px;flex-wrap:wrap;margin:7px 0}.badge{padding:4px 8px;border-radius:999px;background:#f1f2f3;font-size:10px}.metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}.metric{background:#f7f7f7;border-radius:8px;padding:8px;text-align:center}.metric strong{display:block;font-size:13px}.metric span{font-size:9px;color:var(--muted)}
+    .reason,.risk{font-size:11px;line-height:1.5;margin-top:6px}.risk{color:var(--red)}#assessmentSection{display:none}
+    @media(max-width:760px){.grid,.dashboard,.metrics{grid-template-columns:1fr}.ranking-head{display:block}.tabs{grid-template-columns:1fr}}
   </style>
 </head>
 <body>
 <div class="wrap">
-  <div class="header"><h1>Vancouver Finance Company Inc.</h1><div class="subtitle">VFC Historical Underwriting Engine</div></div>
+  <div class="header">
+    <h1>Vancouver Finance Company Inc.</h1>
+    <div class="subtitle">Simple Historical Underwriting Engine</div>
+  </div>
+
   <div class="tabs">
     <button id="trainingTab" class="tab active" onclick="showTab('training')">Training Data</button>
     <button id="assessmentTab" class="tab" onclick="showTab('assessment')">Assessment</button>
-    <button id="accuracyTab" class="tab" onclick="showTab('accuracy')">Accuracy</button>
   </div>
 
   <section id="trainingPanel" class="panel active">
     <div class="card">
       <h2>Add Historical Outcome</h2>
-      <div class="intro">Upload reviewed bank statements and record the lender's actual outcome.</div>
+      <div class="intro">Upload the reviewed statements and record the lender's actual decision. New records are used automatically in the next assessment.</div>
       <div class="field"><label>Company Name</label><input id="trainCompanyName"></div>
       <div class="field"><label>Bank Statements</label><input id="trainFiles" type="file" accept="application/pdf" multiple></div>
       <div class="grid">
-        <div class="field"><label>Decision</label><select id="trainDecision" onchange="toggleTrainingFields()"><option value="">Select decision</option><option>Approved</option><option>Conditional</option><option>Declined</option></select></div>
+        <div class="field">
+          <label>Decision</label>
+          <select id="trainDecision" onchange="toggleTrainingFields()">
+            <option value="">Select decision</option>
+            <option>Approved</option>
+            <option>Conditional</option>
+            <option>Declined</option>
+          </select>
+        </div>
         <div class="field"><label>Lender</label><input id="trainLenderName" placeholder="Example: Journey Capital"></div>
       </div>
       <div class="field" id="trainApprovedBox"><label>Approved Amount</label><input id="trainApprovedAmount" inputmode="decimal" placeholder="77000"></div>
-      <div class="field" id="trainDeclineBox"><label>Decline / Conditional Reason</label><textarea id="trainDeclineReason"></textarea></div>
+      <div class="field" id="trainReasonBox"><label>Decline / Conditional Reason</label><textarea id="trainDeclineReason"></textarea></div>
       <button id="trainButton" class="button primary" onclick="submitTraining()">Upload & Save Training Record</button>
-      <button id="rebuildButton" class="button secondary" onclick="rebuildHistory()">Rebuild Historical Features</button>
       <div id="trainStatus" class="status">Ready.</div>
     </div>
   </section>
 
   <section id="assessmentPanel" class="panel">
     <div class="card">
-      <h2>Calculate Maximum Loan</h2>
-      <div class="intro">The displayed result comes directly from the original VFC underwriting engine.</div>
+      <h2>Calculate Maximum Recommended Loan</h2>
+      <div class="intro">The engine compares this business with the closest approved and declined files in your Training Data and applies essential current-banking checks.</div>
       <div class="field"><label>Company Name</label><input id="assessCompanyName"></div>
       <div class="field"><label>Bank Statements</label><input id="assessFiles" type="file" accept="application/pdf" multiple></div>
       <button id="assessButton" class="button primary" onclick="submitAssessment()">Upload & Calculate Maximum Loan</button>
@@ -48,105 +74,98 @@
     <div class="card" id="assessmentSection">
       <h2>Underwriting Report</h2>
       <div id="maximumBox"></div>
+      <div id="comparables"></div>
       <div id="rankings"></div>
       <div id="disclaimer" class="disclaimer"></div>
-
-      <div class="section-title">Record Actual Outcome</div>
-      <div class="grid">
-        <div class="field"><label>Actual Decision</label><select id="outcomeDecision" onchange="toggleOutcomeAmount()"><option value="">Select decision</option><option>Approved</option><option>Conditional</option><option>Declined</option></select></div>
-        <div class="field"><label>Actual Lender</label><input id="outcomeLender"></div>
-      </div>
-      <div class="field" id="outcomeAmountBox"><label>Actual Approved Amount</label><input id="outcomeAmount" inputmode="decimal" placeholder="77000"></div>
-      <div class="field"><label>Underwriter Notes</label><textarea id="outcomeNotes"></textarea></div>
-      <button id="outcomeButton" class="button primary" onclick="saveOutcome()">Save Actual Outcome</button>
-      <div id="outcomeStatus" class="status">Run an assessment first.</div>
-    </div>
-  </section>
-
-  <section id="accuracyPanel" class="panel">
-    <div class="card">
-      <h2>Prediction Accuracy Dashboard</h2>
-      <button class="button secondary" onclick="loadAccuracy()">Refresh Accuracy Dashboard</button>
-      <div id="accuracyStatus" class="status">Open this tab to load results.</div>
-      <div id="accuracyDashboard"></div>
     </div>
   </section>
 </div>
-<script>
-let currentAssessment = null;
 
+<script>
 function showTab(name){
-  ['training','assessment','accuracy'].forEach(function(n){
-    id(n+'Panel').classList.toggle('active',n===name);
-    id(n+'Tab').classList.toggle('active',n===name);
-  });
-  if(name==='accuracy') loadAccuracy();
+  const training=name==='training';
+  id('trainingPanel').classList.toggle('active',training);
+  id('assessmentPanel').classList.toggle('active',!training);
+  id('trainingTab').classList.toggle('active',training);
+  id('assessmentTab').classList.toggle('active',!training);
 }
 
 function toggleTrainingFields(){
-  const d=value('trainDecision');
-  id('trainApprovedBox').style.display=d==='Declined'?'none':'block';
-  id('trainDeclineBox').style.display=d==='Approved'?'none':'block';
+  const decision=value('trainDecision');
+  id('trainApprovedBox').style.display=decision==='Declined'?'none':'block';
+  id('trainReasonBox').style.display=decision==='Approved'?'none':'block';
 }
-
-function toggleOutcomeAmount(){
-  id('outcomeAmountBox').style.display=value('outcomeDecision')==='Declined'?'none':'block';
-}
-
 toggleTrainingFields();
-toggleOutcomeAmount();
 
-function runServer(functionName,args){
+function serverCall(functionName,args){
   return new Promise(function(resolve,reject){
-    let runner=google.script.run.withSuccessHandler(resolve).withFailureHandler(function(error){reject(new Error(errorMessage(error)));});
+    const runner=google.script.run
+      .withSuccessHandler(resolve)
+      .withFailureHandler(function(error){reject(new Error(errorMessage(error)));});
     runner[functionName].apply(runner,args||[]);
   });
 }
 
-async function rebuildHistory(){
-  const button=id('rebuildButton');
-  setBusy(button,'trainStatus','Rebuilding historical features...');
-  try{
-    const result=await runServer('rebuildStructuredFeatures',[]);
-    setReady(button,'trainStatus',(result&&result.message?result.message:'Complete')+' Records: '+numberOrZero(result&&result.recordsUpdated));
-  }catch(error){setError(button,'trainStatus',error);}
-}
-
 async function submitTraining(){
   const company=value('trainCompanyName');
-  const fileInput=id('trainFiles');
+  const filesInput=id('trainFiles');
   const decision=value('trainDecision');
   const lender=value('trainLenderName');
-  if(!company||!fileInput.files.length||!decision||!lender){alert('Please complete company, statements, decision, and lender.');return;}
   const approvedAmount=decision==='Declined'?'':value('trainApprovedAmount');
   const reason=decision==='Approved'?'':value('trainDeclineReason');
+
+  if(!company||!filesInput.files.length||!decision||!lender){
+    alert('Please complete company, statements, decision, and lender.');
+    return;
+  }
+  if((decision==='Approved'||decision==='Conditional')&&!approvedAmount){
+    alert('Please enter the approved amount.');
+    return;
+  }
+
   const button=id('trainButton');
   setBusy(button,'trainStatus','Reading statements...');
   try{
-    const files=await prepareFiles(fileInput.files);
-    const upload=await runServer('uploadStatementBatch',[company,files]);
-    const saved=await runServer('saveLenderDecision',[{companyName:company,period:(upload&&upload.detectedPeriod)||'',lenderName:lender,decision:decision,approvedAmount:approvedAmount,declineReason:reason,notes:'Actual historical outcome.'}]);
-    setReady(button,'trainStatus',(saved&&saved.message)||'Training record saved.');
-  }catch(error){setError(button,'trainStatus',error);}
+    const files=await prepareFiles(filesInput.files);
+    const upload=await serverCall('uploadStatementBatch',[company,files]);
+    const result=await serverCall('saveLenderDecision',[{
+      companyName:company,
+      period:(upload&&upload.detectedPeriod)||'',
+      lenderName:lender,
+      decision:decision,
+      approvedAmount:approvedAmount,
+      declineReason:reason,
+      notes:'Actual historical outcome.'
+    }]);
+    setReady(button,'trainStatus',(result&&result.message)||'Training record saved. It will be used automatically.');
+  }catch(error){
+    setError(button,'trainStatus',error);
+  }
 }
 
 async function submitAssessment(){
   const company=value('assessCompanyName');
-  const fileInput=id('assessFiles');
-  if(!company||!fileInput.files.length){alert('Please enter the company and upload bank statements.');return;}
+  const filesInput=id('assessFiles');
+  if(!company||!filesInput.files.length){
+    alert('Please enter the company and upload bank statements.');
+    return;
+  }
+
   const button=id('assessButton');
   id('assessmentSection').style.display='none';
-  currentAssessment=null;
   setBusy(button,'assessStatus','Reading statements...');
+
   try{
-    const files=await prepareFiles(fileInput.files);
-    const upload=await runServer('uploadStatementBatch',[company,files]);
-    setStatus('assessStatus','Calculating maximum loan...');
-    const assessment=await runServer('generateInstitutionalAssessmentSafe',[{companyName:company,period:(upload&&upload.detectedPeriod)||''}]);
-    if(!assessment||typeof assessment!=='object') throw new Error('The underwriting engine returned no result.');
-    currentAssessment=assessment;
-    renderAssessment(assessment);
-    setReady(button,'assessStatus','Assessment complete. Model: '+safeText(assessment.modelVersion||assessment.activeProductionModel||'VFC'));
+    const files=await prepareFiles(filesInput.files);
+    const upload=await serverCall('uploadStatementBatch',[company,files]);
+    setStatus('assessStatus','Comparing with historical training data...');
+    const result=await serverCall('generateInstitutionalAssessmentSafe',[{
+      companyName:company,
+      period:(upload&&upload.detectedPeriod)||''
+    }]);
+    if(!result||typeof result!=='object') throw new Error('The underwriting engine returned no result.');
+    renderAssessment(result);
+    setReady(button,'assessStatus','Assessment complete. Model: '+safeText(result.modelVersion||''));
   }catch(error){
     id('assessmentSection').style.display='none';
     setError(button,'assessStatus',error);
@@ -154,95 +173,109 @@ async function submitAssessment(){
 }
 
 function renderAssessment(data){
-  const institutional=data.institutionalAssessment||{};
+  const assessment=data.institutionalAssessment||{};
   const capacity=data.lendingCapacity||{};
   const summary=data.underwritingSummary||{};
-  const maximum=firstValidNumber(institutional.maximumLoanAmount,capacity.recommendedAmount,summary.recommended_amount,capacity.stretchAmount);
-  if(maximum===null) throw new Error('The result did not contain a maximum-loan amount.');
+  const amount=firstValidNumber(
+    assessment.maximumLoanAmount,
+    capacity.recommendedAmount,
+    summary.recommended_amount
+  );
+  if(amount===null) throw new Error('The result did not contain a maximum-loan amount.');
 
   id('assessmentSection').style.display='block';
   id('maximumBox').innerHTML=
-    '<div class="hero"><div class="label">Maximum recommended loan</div><div class="amount">'+money(maximum)+'</div><div class="note">'+escapeHtml(institutional.decision||summary.summary||'Maximum recommended loan')+'</div></div>'+
-    '<div class="dashboard">'+
-      tile((institutional.businessHealthScore??0)+'/100','Business health')+
-      tile(institutional.riskGrade||'—','Risk grade')+
-      tile(money(institutional.averageMonthlyDeposits??(data.currentFeatures||{}).averageMonthlyDeposits??0),'Average monthly deposits')+
-      tile(institutional.amountConfidence||capacity.confidence||'—','Amount confidence')+
+    '<div class="hero">'+
+      '<div class="label">Maximum recommended loan</div>'+
+      '<div class="amount">'+money(amount)+'</div>'+
+      '<div class="note">'+escapeHtml(assessment.decision||summary.summary||'Maximum recommended loan')+'</div>'+
     '</div>'+
-    '<div class="note">Model: '+escapeHtml(institutional.modelVersion||data.modelVersion||'')+'</div>'+
-    '<div class="note">'+escapeHtml(institutional.methodologyNote||'')+'</div>';
+    '<div class="dashboard">'+
+      tile((assessment.businessHealthScore||0)+'/100','Business health')+
+      tile(assessment.riskGrade||'—','Risk grade')+
+      tile(money(assessment.averageMonthlyDeposits||0),'Average monthly deposits')+
+      tile(assessment.amountConfidence||capacity.confidence||'—','Confidence')+
+    '</div>'+
+    '<div class="note">'+escapeHtml(assessment.methodologyNote||'')+'</div>'+
+    '<div class="note">Model: '+escapeHtml(assessment.modelVersion||data.modelVersion||'')+'</div>';
 
-  const box=id('rankings');
-  box.innerHTML='<div class="section-title">Existing Lender Analysis</div>';
-  const rankings=Array.isArray(data.lenderRankings)?data.lenderRankings:[];
-  if(!rankings.length){box.innerHTML+='<div class="note">No lender ranking was returned.</div>';}
-  rankings.forEach(function(item,index){
-    const range=validPositive(item.lowApprovedAmount)?money(item.lowApprovedAmount)+' – '+money(item.highApprovedAmount):'Insufficient history';
-    const card=document.createElement('div');
-    card.className='ranking';
-    card.innerHTML='<div class="ranking-head"><div><div class="lender">'+(index+1)+'. '+escapeHtml(item.lenderName||'Lender')+'</div><div class="badges"><span class="badge">'+escapeHtml(item.observedFit||'')+'</span><span class="badge">Confidence: '+escapeHtml(item.confidence||'')+'</span></div></div><div class="score">'+escapeHtml(item.compositeScore??0)+'/100</div></div><div class="metrics"><div class="metric"><strong>'+escapeHtml(item.similarApprovals??0)+' / '+escapeHtml(item.similarCases??0)+'</strong><span>Similar approvals</span></div><div class="metric"><strong>'+escapeHtml(item.observedApprovalRate||'N/A')+'</strong><span>Observed approval rate</span></div><div class="metric"><strong>'+escapeHtml(range)+'</strong><span>Historical range</span></div></div><div class="reason">'+escapeHtml(item.reasoning||'')+'</div>'+(Array.isArray(item.risks)&&item.risks.length?'<div class="risk"><strong>Risks:</strong> '+escapeHtml(item.risks.join(' • '))+'</div>':'')+(Array.isArray(item.conditions)&&item.conditions.length?'<div class="conditions"><strong>Conditions:</strong> '+escapeHtml(item.conditions.join(' • '))+'</div>':'');
-    box.appendChild(card);
-  });
+  renderComparables(assessment.closestHistoricalApprovals||[]);
+  renderRankings(data.lenderRankings||[]);
   id('disclaimer').innerText=data.disclaimer||'';
-  id('outcomeStatus').innerText='Ready to record the actual lender outcome.';
   id('assessmentSection').scrollIntoView({behavior:'smooth'});
 }
 
-async function saveOutcome(){
-  if(!currentAssessment){alert('Run an assessment first.');return;}
-  const decision=value('outcomeDecision');
-  const lender=value('outcomeLender');
-  const amount=value('outcomeAmount');
-  if(!decision||!lender){alert('Enter the actual decision and lender.');return;}
-  if(decision!=='Declined'&&!amount){alert('Enter the actual approved amount.');return;}
-  const institutional=currentAssessment.institutionalAssessment||{};
-  const capacity=currentAssessment.lendingCapacity||{};
-  const predicted=firstValidNumber(institutional.maximumLoanAmount,capacity.recommendedAmount);
-  const button=id('outcomeButton');
-  setBusy(button,'outcomeStatus','Saving actual outcome...');
-  try{
-    const result=await runServer('saveActualOutcome',[{assessmentId:currentAssessment.assessmentId,companyName:currentAssessment.companyName,period:currentAssessment.period,modelVersion:currentAssessment.modelVersion,predictedAmount:predicted===null?0:predicted,actualDecision:decision,actualLender:lender,actualApprovedAmount:amount,notes:value('outcomeNotes')}]);
-    setReady(button,'outcomeStatus',(result&&result.message)||'Actual outcome saved.');
-  }catch(error){setError(button,'outcomeStatus',error);}
+function renderComparables(rows){
+  const box=id('comparables');
+  box.innerHTML='<div class="section-title">Closest Historical Approvals</div>';
+  if(!Array.isArray(rows)||!rows.length){
+    box.innerHTML+='<div class="note">No close approved training cases were available. The amount relied more heavily on current banking.</div>';
+    return;
+  }
+  rows.forEach(function(row){
+    const card=document.createElement('div');
+    card.className='comparable';
+    card.innerHTML=
+      '<div class="ranking-head"><div><div class="lender">'+escapeHtml(row.companyName||'Historical case')+'</div><div class="note">'+escapeHtml(row.lenderName||'')+' • '+escapeHtml(row.decision||'')+'</div></div><div class="score">'+escapeHtml(row.similarityScore||0)+'%</div></div>'+
+      '<div class="metrics">'+
+        metric(money(row.actualApprovedAmount||0),'Actual approval')+
+        metric(money(row.depositAdjustedAmount||0),'Deposit-adjusted amount')+
+        metric(escapeHtml(row.similarityScore||0)+'%','Similarity')+
+      '</div>';
+    box.appendChild(card);
+  });
 }
 
-async function loadAccuracy(){
-  setStatus('accuracyStatus','Loading accuracy...');
-  try{
-    const result=await runServer('getAccuracyDashboard',[]);
-    const lenderRows=((result&&result.lenderAccuracy)||[]).map(function(item){return '<tr><td>'+escapeHtml(item.lender)+'</td><td>'+escapeHtml(item.cases)+'</td><td>'+escapeHtml(item.medianAbsolutePercentageError)+'%</td><td>'+escapeHtml(item.within15Percent)+'%</td></tr>';}).join('');
-    const recentRows=((result&&result.recentOutcomes)||[]).map(function(item){return '<tr><td>'+escapeHtml(item.companyName)+'</td><td>'+money(item.predictedAmount)+'</td><td>'+money(item.actualApprovedAmount)+'</td><td>'+escapeHtml(item.actualDecision)+'</td></tr>';}).join('');
-    id('accuracyDashboard').innerHTML='<div class="dashboard">'+tile(numberOrZero(result&&result.totalOutcomes),'Total outcomes')+tile(numberOrZero(result&&result.within15Percent)+'%','Within ±15%')+tile(numberOrZero(result&&result.medianAbsolutePercentageError)+'%','Median percentage error')+tile(money(numberOrZero(result&&result.medianDollarError)),'Median dollar error')+'</div><div class="note">'+escapeHtml((result&&result.bias)||'')+'</div><div class="section-title">Accuracy by Lender</div><table class="table"><thead><tr><th>Lender</th><th>Cases</th><th>Median Error</th><th>Within ±15%</th></tr></thead><tbody>'+lenderRows+'</tbody></table><div class="section-title">Recent Outcomes</div><table class="table"><thead><tr><th>Company</th><th>Predicted</th><th>Actual</th><th>Decision</th></tr></thead><tbody>'+recentRows+'</tbody></table>';
-    setStatus('accuracyStatus','Accuracy updated.');
-  }catch(error){setStatusError('accuracyStatus',errorMessage(error));}
+function renderRankings(rankings){
+  const box=id('rankings');
+  box.innerHTML='<div class="section-title">Lender Analysis</div>';
+  if(!Array.isArray(rankings)||!rankings.length){
+    box.innerHTML+='<div class="note">No lender analysis was available.</div>';
+    return;
+  }
+  rankings.forEach(function(item,index){
+    const range=positive(item.lowApprovedAmount)
+      ? money(item.lowApprovedAmount)+' – '+money(item.highApprovedAmount)
+      : 'Insufficient history';
+    const card=document.createElement('div');
+    card.className='ranking';
+    card.innerHTML=
+      '<div class="ranking-head"><div><div class="lender">'+(index+1)+'. '+escapeHtml(item.lenderName||'Lender')+'</div><div class="badges"><span class="badge">'+escapeHtml(item.observedFit||'')+'</span><span class="badge">Confidence: '+escapeHtml(item.confidence||'')+'</span></div></div><div class="score">'+escapeHtml(item.compositeScore||0)+'/100</div></div>'+
+      '<div class="metrics">'+
+        metric(escapeHtml(item.similarApprovals||0)+' / '+escapeHtml(item.similarCases||0),'Similar approvals')+
+        metric(escapeHtml(item.observedApprovalRate||'N/A'),'Observed approval rate')+
+        metric(escapeHtml(range),'Historical range')+
+      '</div>'+
+      '<div class="reason">'+escapeHtml(item.reasoning||'')+'</div>'+
+      (Array.isArray(item.risks)&&item.risks.length?'<div class="risk"><strong>Observed decline reasons:</strong> '+escapeHtml(item.risks.join(' • '))+'</div>':'');
+    box.appendChild(card);
+  });
 }
 
+function tile(valueText,label){return '<div class="tile"><strong>'+escapeHtml(valueText)+'</strong><span>'+escapeHtml(label)+'</span></div>';}
+function metric(valueText,label){return '<div class="metric"><strong>'+valueText+'</strong><span>'+escapeHtml(label)+'</span></div>';}
+function id(name){return document.getElementById(name);}
+function value(name){return id(name).value.trim();}
+function safeText(value){return String(value==null?'':value);}
 function firstValidNumber(){
   for(let i=0;i<arguments.length;i++){
-    const value=arguments[i];
-    if(value===null||value===undefined||value==='') continue;
-    const number=Number(String(value).replace(/[^0-9.-]/g,''));
+    const raw=arguments[i];
+    if(raw===null||raw===undefined||raw==='') continue;
+    const number=Number(String(raw).replace(/[^0-9.-]/g,''));
     if(Number.isFinite(number)&&number>=0) return number;
   }
   return null;
 }
-
-function validPositive(value){const number=firstValidNumber(value);return number!==null&&number>0;}
-function tile(main,label){return '<div class="tile"><strong>'+escapeHtml(main)+'</strong><span>'+escapeHtml(label)+'</span></div>';}
-function id(name){return document.getElementById(name);}
-function value(name){return id(name).value.trim();}
-function safeText(value){return String(value==null?'':value);}
-function numberOrZero(value){const n=Number(value);return Number.isFinite(n)?n:0;}
+function positive(value){const number=Number(String(value==null?'':value).replace(/[^0-9.-]/g,''));return Number.isFinite(number)&&number>0;}
 function setStatus(name,message){const element=id(name);element.classList.remove('error');element.innerText=message;}
-function setStatusError(name,message){const element=id(name);element.classList.add('error');element.innerText='Error: '+message;}
 function setBusy(button,status,message){button.disabled=true;setStatus(status,message);}
 function setReady(button,status,message){button.disabled=false;setStatus(status,message);}
-function setError(button,status,error){button.disabled=false;setStatusError(status,errorMessage(error));}
+function setError(button,status,error){button.disabled=false;const element=id(status);element.classList.add('error');element.innerText='Error: '+errorMessage(error);}
 function errorMessage(error){return error&&error.message?error.message:String(error||'Unknown error');}
 function prepareFiles(list){return Promise.all(Array.from(list).map(async function(file){const data=await toBase64(file);return{name:file.name,mimeType:file.type||'application/pdf',base64:data.split(',')[1]};}));}
 function toBase64(file){return new Promise(function(resolve,reject){const reader=new FileReader();reader.readAsDataURL(file);reader.onload=function(){resolve(reader.result);};reader.onerror=reject;});}
-function money(value){const n=Number(String(value==null?0:value).replace(/[^0-9.-]/g,''));return Number.isFinite(n)?n.toLocaleString('en-CA',{style:'currency',currency:'CAD',maximumFractionDigits:0}):String(value);}
-function escapeHtml(value){return String(value==null?'':value).replace(/[&<>'\"]/g,function(char){return{'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','\"':'&quot;'}[char];}).replace(/\n/g,'<br>');}
+function money(value){const number=Number(String(value==null?0:value).replace(/[^0-9.-]/g,''));return Number.isFinite(number)?number.toLocaleString('en-CA',{style:'currency',currency:'CAD',maximumFractionDigits:0}):String(value);}
+function escapeHtml(value){return String(value==null?'':value).replace(/[&<>"']/g,function(character){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[character];});}
 </script>
 </body>
 </html>
