@@ -1,5 +1,5 @@
 const VFC_SIMPLE_CONFIG = {
-  MODEL_VERSION: 'VFC-SIMPLE-HISTORICAL-7.0',
+  MODEL_VERSION: 'VFC-SIMPLE-HISTORICAL-7.1-CLEAN',
   MAX_COMPARABLE_CASES: 12,
   MAX_APPROVAL_CASES: 8,
   MIN_SIMILARITY: 0.40,
@@ -22,7 +22,8 @@ function generateInstitutionalAssessmentSafe(companyOrRequest, requestedPeriod) 
   const companyName = request.companyName;
   const period = resolveLatestAssessmentPeriod_(companyName, request.period);
 
-  setupVFC();
+  setupSimpleVFC();
+  cleanupUnusedSheetsOnce_();
 
   const current = buildPowerFeatures_(companyName, period);
   if (!current || !current.statementCount) {
@@ -435,6 +436,7 @@ function getProductionModelStatus() {
     patternLearningActive: false,
     regressionFloorActive: false,
     termSizingActive: false,
-    shadowModelActive: false
+    shadowModelActive: false,
+    legacySheetCleanupActive: true
   };
 }
