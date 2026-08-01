@@ -1,66 +1,97 @@
 const VFC_INSTITUTIONAL_CONFIG = {
-  MODEL_VERSION: 'VFC-ORIGINAL-MAX-5.1-DISPLAY-SAFE'
+  MODEL_VERSION: 'VFC-ORIGINAL-MAX-5.2-RETURN-FIRST'
 };
 
 /**
- * Public assessment entry point used by the web app.
+ * Display-safe underwriting entry point.
  *
- * Important: this function performs no secondary model training, no shadow
- * calculation and no additional Sheet write before returning the result.
- * The original VFC engine calculates the recommendation and the response is
- * immediately converted to a client-safe plain object for display.
+ * This calculates the original VFC recommendation directly from the uploaded
+ * summaries and historical outcomes. It deliberately does not write to Hybrid
+ * Assessments, Risk Scorecards, Institutional Assessments or AI Pattern Models
+ * before returning the result to the browser.
  */
 function generateInstitutionalAssessmentSafe(companyOrRequest, requestedPeriod) {
-  const base = generatePowerAssessmentSafe(companyOrRequest, requestedPeriod);
-  if (!base || typeof base !== 'object') {
-    throw new Error('The original underwriting engine returned an empty result.');
+  const request = normalizeAssessmentRequest_(companyOrRequest, requestedPeriod);
+  const companyName = request.companyName;
+  const period = resolveLatestAssessmentPeriod_(companyName, request.period);
+
+  setupVFC();
+
+  const current = buildPowerFeatures_(companyName, period);
+  if (!current || !current.statementCount) {
+    throw new Error('No bank-statement summaries were found for this company and period.');
   }
 
-  const capacity = base.lendingCapacity || {};
-  const fundamental = base.fundamentalScorecard || {};
-  const features = base.currentFeatures || {};
-  const rankings = Array.isArray(base.lenderRankings) ? base.lenderRankings : [];
-  const summary = base.underwritingSummary || {};
+  const outcomes = collectHistoricalOutcomes_().filter(function(row) {
+    return !(sameText_(row.companyName, companyName) && sameText_(row.period, period));
+  });
+  if (!outcomes.length) {
+    throw new Error('No historical lender outcomes are available. Add approvals and declines in Training Data first.');
+  }
+
+  const fundamental = calculateFundamentalScore_(current);
+  const aiReview = createExpertReview_(current, fundamental);
+  const lenders = unique_(outcomes.map(function(row) {
+    return row.lenderName;
+  }).filter(Boolean));
+
+  const rankings = lenders.map(function(lender) {
+    return scorePowerLender_(lender, current, outcomes, fundamental, aiReview);
+  }).sort(function(a, b) {
+    return b.compositeScore - a.compositeScore;
+  });
+
+  const capacity = calculateExactLendingCapacity_(current, fundamental, aiReview, rankings);
+  const decision = buildPowerDecision_(current, fundamental, aiReview, rankings, capacity);
+  const assessmentId = Utilities.getUuid();
   const top = rankings[0] || {};
 
   const maximumLoanAmount = firstAssessmentAmount_(
     capacity.recommendedAmount,
-    summary.recommended_amount,
+    decision.recommended_amount,
     capacity.stretchAmount
   );
 
-  if (!base.lendingCapacity) base.lendingCapacity = {};
-  base.lendingCapacity.recommendedAmount = maximumLoanAmount;
-  base.lendingCapacity.stretchAmount = maximumLoanAmount;
+  capacity.recommendedAmount = maximumLoanAmount;
+  capacity.stretchAmount = maximumLoanAmount;
 
-  base.institutionalAssessment = {
+  const response = {
+    ok: true,
+    assessmentId: assessmentId,
     modelVersion: VFC_INSTITUTIONAL_CONFIG.MODEL_VERSION,
-    maximumLoanAmount: maximumLoanAmount,
-    originalModelAmount: maximumLoanAmount,
-    amountConfidence: capacity.confidence || confidenceLabel_(capacity.confidenceScore),
-    amountConfidenceScore: toNumber_(capacity.confidenceScore),
-    businessHealthScore: toNumber_(fundamental.score),
-    riskGrade: fundamental.grade || '',
-    averageMonthlyDeposits: toNumber_(features.averageMonthlyDeposits),
-    historicalAnchor: toNumber_(capacity.historicalAnchor),
-    cashFlowCapacity: toNumber_(capacity.cashFlowCapacity),
-    revenueCapacity: toNumber_(capacity.revenueCapacity),
-    strongestLender: top.lenderName || '',
-    lenderFitScore: toNumber_(top.compositeScore),
-    calculationNotes: Array.isArray(capacity.calculationNotes) ? capacity.calculationNotes : [],
-    strengths: Array.isArray(fundamental.strengths) ? fundamental.strengths : [],
-    risks: Array.isArray(fundamental.risks) ? fundamental.risks : [],
-    decision: maximumLoanAmount > 0 ? 'Maximum recommended loan' : 'No automated loan amount recommended',
-    methodologyNote: 'The displayed amount comes directly from the original VFC hybrid underwriting engine. No term sizing, pattern learning or secondary recalibration changes this result.'
+    activeProductionModel: VFC_INSTITUTIONAL_CONFIG.MODEL_VERSION,
+    companyName: companyName,
+    period: period,
+    currentFeatures: current,
+    fundamentalScorecard: fundamental,
+    expertReview: aiReview,
+    lendingCapacity: capacity,
+    lenderRankings: rankings,
+    underwritingSummary: decision,
+    institutionalAssessment: {
+      modelVersion: VFC_INSTITUTIONAL_CONFIG.MODEL_VERSION,
+      maximumLoanAmount: maximumLoanAmount,
+      originalModelAmount: maximumLoanAmount,
+      amountConfidence: capacity.confidence || confidenceLabel_(capacity.confidenceScore),
+      amountConfidenceScore: toNumber_(capacity.confidenceScore),
+      businessHealthScore: toNumber_(fundamental.score),
+      riskGrade: fundamental.grade || '',
+      averageMonthlyDeposits: toNumber_(current.averageMonthlyDeposits),
+      historicalAnchor: toNumber_(capacity.historicalAnchor),
+      cashFlowCapacity: toNumber_(capacity.cashFlowCapacity),
+      revenueCapacity: toNumber_(capacity.revenueCapacity),
+      strongestLender: top.lenderName || '',
+      lenderFitScore: toNumber_(top.compositeScore),
+      calculationNotes: Array.isArray(capacity.calculationNotes) ? capacity.calculationNotes : [],
+      strengths: Array.isArray(fundamental.strengths) ? fundamental.strengths : [],
+      risks: Array.isArray(fundamental.risks) ? fundamental.risks : [],
+      decision: maximumLoanAmount > 0 ? 'Maximum recommended loan' : 'No automated loan amount recommended',
+      methodologyNote: 'The displayed maximum is calculated directly by the original VFC hybrid underwriting logic. The result is returned before any assessment-history logging, pattern learning or secondary recalibration.'
+    },
+    disclaimer: 'VFC internal decision support only. This recommendation is not a lender approval or guarantee.'
   };
 
-  base.modelVersion = VFC_INSTITUTIONAL_CONFIG.MODEL_VERSION;
-  base.activeProductionModel = VFC_INSTITUTIONAL_CONFIG.MODEL_VERSION;
-  base.disclaimer = 'VFC internal decision support only. This recommendation is not a lender approval or guarantee.';
-
-  // google.script.run only receives a plain JSON-safe object. This removes
-  // undefined values and any non-serializable values that could block display.
-  return JSON.parse(JSON.stringify(base));
+  return JSON.parse(JSON.stringify(response));
 }
 
 function firstAssessmentAmount_() {
@@ -81,9 +112,10 @@ function confidenceLabel_(scoreValue) {
 function getProductionModelStatus() {
   return {
     modelVersion: VFC_INSTITUTIONAL_CONFIG.MODEL_VERSION,
-    liveAmountSource: 'Original VFC hybrid underwriting engine',
+    calculationSource: 'Original VFC hybrid underwriting functions',
+    resultReturnedBeforeAuditLogging: true,
+    assessmentHistoryWriteActive: false,
     secondaryRecalibrationActive: false,
-    patternLearningAffectsLiveAmount: false,
-    additionalAssessmentSheetWriteBeforeDisplay: false
+    patternLearningAffectsLiveAmount: false
   };
 }
