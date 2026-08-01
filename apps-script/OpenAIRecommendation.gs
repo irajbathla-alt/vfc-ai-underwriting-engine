@@ -1,6 +1,6 @@
 const VFC_OPENAI_RECOMMENDATION_CONFIG = {
   MODEL_VERSION: 'VFC-OPENAI-SHEETS-1.0',
-  DEFAULT_MODEL: 'gpt-5-mini',
+  DEFAULT_MODEL: 'gpt-4.1-mini',
   MAX_COMPARABLE_CASES: 24,
   MIN_SIMILARITY: 0.30,
   ROUNDING: 500,
@@ -58,8 +58,7 @@ function generateOpenAIRecommendationSafe(companyOrRequest, requestedPeriod) {
         nsf_per_month: row.features.nsfPerMonth,
         negative_balance: row.features.negativeBalanceFlag,
         existing_mca_or_loan: row.features.mcaPaymentFlag,
-        months_covered: row.features.monthsCovered,
-        decline_reason: row.decision === 'Declined' ? row.declineReason : ''
+        months_covered: row.features.monthsCovered
       };
     })
   };
@@ -108,7 +107,8 @@ function generateOpenAIRecommendationSafe(companyOrRequest, requestedPeriod) {
       structuredMetricsOnly: true,
       historicalCompanyNamesSent: false,
       bankStatementTextSent: false,
-      accountNumbersSent: false
+      accountNumbersSent: false,
+      declineNotesSent: false
     },
     note: 'OpenAI recommendation only. It does not change Our Max and is not a lender approval or guarantee.'
   }));
@@ -143,7 +143,11 @@ function vfcOaiCallOpenAI_(instruction, promptData) {
   const apiKey = properties.getProperty('OPENAI_API_KEY');
   if (!apiKey) throw new Error('Missing OPENAI_API_KEY in Apps Script Properties.');
 
+  const existingModel = typeof VFC_CONFIG !== 'undefined' && VFC_CONFIG.OPENAI_MODEL
+    ? VFC_CONFIG.OPENAI_MODEL
+    : '';
   const model = properties.getProperty('OPENAI_RECOMMENDATION_MODEL') ||
+    existingModel ||
     VFC_OPENAI_RECOMMENDATION_CONFIG.DEFAULT_MODEL;
 
   const schema = {
@@ -338,7 +342,7 @@ function vfcOaiBuildComparableCases_(current, outcomes) {
   });
 
   validCases.sort(function(a, b) {
-    return b.similarity - a.similarity;
+    return b.similarity - a.simity;
   });
   return { validCases: validCases, ignoredCases: ignoredCases };
 }
