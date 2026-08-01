@@ -342,7 +342,7 @@ function vfcOaiBuildComparableCases_(current, outcomes) {
   });
 
   validCases.sort(function(a, b) {
-    return b.similarity - a.simity;
+    return b.similarity - a.similarity;
   });
   return { validCases: validCases, ignoredCases: ignoredCases };
 }
