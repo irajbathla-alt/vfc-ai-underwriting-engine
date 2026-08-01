@@ -1,10 +1,9 @@
 const VFC_INSTITUTIONAL_CONFIG = {
-  MODEL_VERSION: 'VFC-HISTORICAL-MAX-4.3-PATTERN-LEARNING',
+  MODEL_VERSION: 'VFC-HISTORICAL-MAX-4.4-SHADOW',
   HISTORICAL_WEIGHT: 0.70,
   CURRENT_BANKING_WEIGHT: 0.20,
   AI_WEIGHT: 0.10,
-  PATTERN_BLEND: 0.70,
-  BASE_BLEND: 0.30,
+  PATTERN_SHADOW_MODE: true,
   ROUNDING: 500
 };
 
@@ -20,41 +19,57 @@ function generateInstitutionalAssessmentSafe(companyOrRequest, requestedPeriod) 
   const originalAmount = Math.max(0, toNumber_(capacity.recommendedAmount));
   const historicalAnchor = Math.max(0, toNumber_(capacity.historicalAnchor));
   const historicalCases = buildHistoricalApprovalEvidence_(rankings);
-  const baseRecalibration = calculateHistoricalMaximum_(originalAmount, historicalAnchor, features, fundamental, ai, top);
+
+  // The proven historical recalibration remains the production recommendation.
+  const productionResult = calculateHistoricalMaximum_(
+    originalAmount,
+    historicalAnchor,
+    features,
+    fundamental,
+    ai,
+    top
+  );
+
+  // Pattern learning still trains and predicts, but it cannot change the live amount.
   const pattern = getLearnedPatternRecommendation_(features);
-  const finalResult = blendPatternRecommendation_(baseRecalibration, pattern, originalAmount, features, fundamental);
+  const shadowComparison = buildPatternShadowComparison_(productionResult, pattern);
 
   base.lendingCapacity.originalRecommendedAmount = originalAmount;
-  base.lendingCapacity.recommendedAmount = finalResult.maximumLoanAmount;
-  base.lendingCapacity.stretchAmount = finalResult.maximumLoanAmount;
-  base.lendingCapacity.historicalRecalibration = baseRecalibration;
+  base.lendingCapacity.recommendedAmount = productionResult.maximumLoanAmount;
+  base.lendingCapacity.stretchAmount = productionResult.maximumLoanAmount;
+  base.lendingCapacity.historicalRecalibration = productionResult;
   base.lendingCapacity.patternLearning = pattern;
+  base.lendingCapacity.patternShadowComparison = shadowComparison;
 
   if (base.underwritingSummary) {
-    base.underwritingSummary.recommended_amount = finalResult.maximumLoanAmount;
-    base.underwritingSummary.stretch_amount = finalResult.maximumLoanAmount;
+    base.underwritingSummary.recommended_amount = productionResult.maximumLoanAmount;
+    base.underwritingSummary.stretch_amount = productionResult.maximumLoanAmount;
     base.underwritingSummary.explanation = (base.underwritingSummary.explanation || '') +
-      ' Pattern-learning recalibration produced a maximum recommended loan of ' + finalResult.maximumLoanAmount + '.';
+      ' The proven historical recalibration produced a maximum recommended loan of ' +
+      productionResult.maximumLoanAmount + '. Pattern learning ran in shadow mode and did not change the result.';
   }
 
   base.institutionalAssessment = {
     modelVersion: VFC_INSTITUTIONAL_CONFIG.MODEL_VERSION,
-    maximumLoanAmount: finalResult.maximumLoanAmount,
+    maximumLoanAmount: productionResult.maximumLoanAmount,
     originalModelAmount: originalAmount,
-    historicalExpectedAmount: baseRecalibration.historicalExpectedAmount,
-    historicalExpectedLow: baseRecalibration.historicalExpectedLow,
-    historicalExpectedHigh: baseRecalibration.historicalExpectedHigh,
-    currentBankingAmount: baseRecalibration.currentBankingAmount,
+    historicalExpectedAmount: productionResult.historicalExpectedAmount,
+    historicalExpectedLow: productionResult.historicalExpectedLow,
+    historicalExpectedHigh: productionResult.historicalExpectedHigh,
+    currentBankingAmount: productionResult.currentBankingAmount,
     learnedPatternAmount: pattern.predictedAmount || 0,
     patternActive: !!pattern.active,
+    patternShadowMode: true,
+    patternDifferenceAmount: shadowComparison.differenceAmount,
+    patternDifferencePercent: shadowComparison.differencePercent,
     patternConfidence: pattern.confidence || 'Insufficient history',
     patternConfidenceScore: pattern.confidenceScore || 0,
     comparablePatternCases: pattern.comparableCases || 0,
     patternAverageSimilarity: pattern.averageSimilarity || 0,
     patternBacktest: pattern.model && pattern.model.backtest ? pattern.model.backtest : {},
     closestPatternCases: pattern.closestCases || [],
-    amountConfidence: finalResult.confidence,
-    amountConfidenceScore: finalResult.confidenceScore,
+    amountConfidence: productionResult.confidence,
+    amountConfidenceScore: productionResult.confidenceScore,
     businessHealthScore: toNumber_(fundamental.score),
     riskGrade: fundamental.grade || '',
     averageMonthlyDeposits: toNumber_(features.averageMonthlyDeposits),
@@ -62,54 +77,46 @@ function generateInstitutionalAssessmentSafe(companyOrRequest, requestedPeriod) 
     strongestLender: top.lenderName || '',
     lenderFitScore: toNumber_(top.compositeScore),
     closestHistoricalApprovals: historicalCases,
-    calculationNotes: finalResult.calculationNotes,
+    calculationNotes: shadowComparison.calculationNotes,
     strengths: fundamental.strengths || [],
     risks: fundamental.risks || [],
-    decision: finalResult.maximumLoanAmount > 0 ? 'Maximum recommended loan' : 'No automated loan amount recommended',
-    methodologyNote: 'The maximum loan combines verified historical lender outcomes, learned banking-pattern similarity, current business-bank-statement health and AI review. The pattern model automatically retrains when the number of historical outcomes changes and is used only when minimum sample and back-test requirements are met.'
+    decision: productionResult.maximumLoanAmount > 0 ? 'Maximum recommended loan' : 'No automated loan amount recommended',
+    methodologyNote: 'The live maximum loan uses the previously proven historical-recalibration model. The AI pattern model continues learning and back-testing in shadow mode, but it cannot alter the recommendation until its real-world accuracy is demonstrably better.'
   };
 
   base.modelVersion = VFC_INSTITUTIONAL_CONFIG.MODEL_VERSION;
-  base.disclaimer = 'VFC internal decision support only. The maximum loan is estimated from uploaded bank statements and recorded historical lender outcomes. It is not a lender approval or guarantee.';
+  base.disclaimer = 'VFC internal decision support only. The maximum loan is estimated from uploaded bank statements and recorded historical lender outcomes. Pattern learning is currently observational only and does not affect the live result. This is not a lender approval or guarantee.';
   saveOriginalMaximumAssessment_(base);
   return base;
 }
 
-function blendPatternRecommendation_(baseResult, pattern, originalAmount, features, fundamental) {
-  let amount = baseResult.maximumLoanAmount;
-  const notes = (baseResult.calculationNotes || []).slice();
-  let confidenceScore = baseResult.confidenceScore || 0;
+function buildPatternShadowComparison_(productionResult, pattern) {
+  const productionAmount = Math.max(0, toNumber_(productionResult.maximumLoanAmount));
+  const patternAmount = pattern && pattern.active ? Math.max(0, toNumber_(pattern.predictedAmount)) : 0;
+  const differenceAmount = patternAmount > 0 ? roundToNearest_(patternAmount - productionAmount, VFC_INSTITUTIONAL_CONFIG.ROUNDING) : 0;
+  const differencePercent = productionAmount > 0 && patternAmount > 0
+    ? round2_((patternAmount - productionAmount) / productionAmount * 100)
+    : 0;
 
-  if (pattern && pattern.active && pattern.predictedAmount > 0) {
-    const patternReliability = clamp_(toNumber_(pattern.confidenceScore) / 100, 0.35, 0.90);
-    const patternWeight = VFC_INSTITUTIONAL_CONFIG.PATTERN_BLEND * patternReliability;
-    const baseWeight = 1 - patternWeight;
-    amount = baseResult.maximumLoanAmount * baseWeight + pattern.predictedAmount * patternWeight;
-
-    const materialRisk = baseResult.materialRiskFactor < 0.90 || toNumber_(fundamental.score) < 45;
-    if (!materialRisk) amount = Math.max(amount, originalAmount);
-
-    notes.push('Learned pattern amount: ' + roundToNearest_(pattern.predictedAmount, VFC_INSTITUTIONAL_CONFIG.ROUNDING));
+  const notes = (productionResult.calculationNotes || []).slice();
+  if (patternAmount > 0) {
+    notes.push('Shadow pattern amount (not used): ' + roundToNearest_(patternAmount, VFC_INSTITUTIONAL_CONFIG.ROUNDING));
+    notes.push('Shadow difference from live recommendation: ' + differenceAmount + ' (' + differencePercent + '%)');
     notes.push('Pattern comparable cases: ' + toNumber_(pattern.comparableCases));
     notes.push('Pattern confidence: ' + (pattern.confidence || '') + ' (' + toNumber_(pattern.confidenceScore) + '/100)');
     if (pattern.model && pattern.model.backtest) {
       notes.push('Pattern back-test median error: ' + toNumber_(pattern.model.backtest.medianPercentError) + '%');
     }
-    confidenceScore = Math.round(confidenceScore * 0.55 + toNumber_(pattern.confidenceScore) * 0.45);
   } else {
-    notes.push('Pattern model not active yet; using historical recalibration only.');
+    notes.push('Pattern model did not have enough reliable history to produce a shadow estimate.');
   }
-
-  const deposits = Math.max(0, toNumber_(features.averageMonthlyDeposits));
-  const reasonableCap = deposits > 0 ? deposits * (toNumber_(fundamental.score) >= 70 ? 1.40 : toNumber_(fundamental.score) >= 58 ? 1.15 : 0.90) : amount;
-  if (reasonableCap > 0) amount = Math.min(amount, Math.max(reasonableCap, baseResult.historicalExpectedAmount * 1.05));
-  amount = roundToNearest_(Math.max(0, amount), VFC_INSTITUTIONAL_CONFIG.ROUNDING);
-  if (toNumber_(fundamental.score) < 40 || !deposits) amount = 0;
+  notes.push('Shadow mode safeguard: the learned pattern did not change the maximum recommended loan.');
 
   return {
-    maximumLoanAmount: amount,
-    confidenceScore: clamp_(confidenceScore, 0, 100),
-    confidence: confidenceScore >= 80 ? 'High' : confidenceScore >= 60 ? 'Moderate' : 'Low',
+    productionAmount: productionAmount,
+    patternAmount: patternAmount,
+    differenceAmount: differenceAmount,
+    differencePercent: differencePercent,
     calculationNotes: notes
   };
 }
