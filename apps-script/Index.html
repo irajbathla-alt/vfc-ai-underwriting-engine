@@ -4,24 +4,8 @@
   <base target="_top">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
-    :root{--blue:#1877d2;--green:#176b55;--soft:#f6f7f8;--line:#e5e7eb;--muted:#747b84;--ink:#25282d;--red:#8b3333}
-    *{box-sizing:border-box}
-    body{margin:0;padding:18px 12px 36px;background:#fff;color:var(--ink);font-family:Arial,sans-serif}
-    .wrap{max-width:960px;margin:auto}.header{text-align:center;margin-bottom:14px}
-    h1{margin:0;font-family:Georgia,serif;font-weight:400;font-size:34px}.subtitle{color:var(--muted);font-size:14px}
-    .tabs{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;max-width:620px;margin:14px auto;padding:4px;background:var(--soft);border:1px solid var(--line);border-radius:12px}
-    .tab{border:0;background:transparent;padding:10px;border-radius:9px;cursor:pointer}.tab.active{background:#fff;color:var(--blue);box-shadow:0 1px 5px rgba(0,0,0,.08)}
-    .panel{display:none}.panel.active{display:block}.card{border:1px solid var(--line);border-radius:15px;padding:17px;margin-bottom:14px;box-shadow:0 3px 12px rgba(0,0,0,.025)}
-    .card h2{font-family:Georgia,serif;font-weight:400;margin:0 0 5px}.intro,.note,.disclaimer{font-size:11px;color:var(--muted);line-height:1.5}
-    .field{margin:12px 0}label{display:block;font-size:12px;font-weight:600;margin-bottom:5px}input,select,textarea{width:100%;padding:10px;border:1px solid #d9dde2;border-radius:9px}
-    .grid{display:grid;grid-template-columns:1fr 1fr;gap:11px}.button{width:100%;padding:11px;border:0;border-radius:10px;font-weight:600;cursor:pointer}.primary{background:var(--blue);color:#fff}.secondary{margin-top:8px;background:#f1f3f5;border:1px solid var(--line)}
-    .status{white-space:pre-wrap;background:#fafafa;border:1px solid #eceef0;border-radius:10px;padding:10px;margin-top:12px;font-size:11px}
-    .hero{background:#f4fbf7;border:1px solid #d7eee2;border-radius:15px;padding:22px;text-align:center}.hero .label{font-size:12px;color:var(--muted)}.hero .amount{font-size:46px;font-weight:700;color:var(--green);margin:6px 0}
-    .dashboard{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:12px 0}.tile{background:#f7f7f7;border-radius:10px;padding:12px;text-align:center}.tile strong{display:block;font-size:17px}.tile span{font-size:9px;color:var(--muted)}
-    .section-title{font-family:Georgia,serif;font-size:18px;margin:18px 0 7px}.ranking{border:1px solid var(--line);border-radius:11px;padding:12px;margin:9px 0}.ranking-head{display:flex;justify-content:space-between}.lender{font-family:Georgia,serif;font-size:17px}.score{font-size:18px;font-weight:600;color:var(--blue)}
-    .badges{display:flex;gap:6px;flex-wrap:wrap;margin:7px 0}.badge{padding:4px 8px;border-radius:999px;background:#f1f2f3;font-size:10px}.metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}.metric{background:#f7f7f7;border-radius:8px;padding:8px;text-align:center}.metric strong{display:block;font-size:13px}.metric span{font-size:9px;color:var(--muted)}
-    .reason,.risk,.conditions{font-size:11px;line-height:1.5;margin-top:6px}.risk{color:var(--red)}.table{width:100%;border-collapse:collapse;font-size:11px}.table th,.table td{padding:8px;border-bottom:1px solid var(--line);text-align:left}.table th{color:var(--muted);font-weight:600}#assessmentSection{display:none}
-    @media(max-width:760px){.grid,.dashboard,.metrics{grid-template-columns:1fr}.ranking-head{display:block}.tabs{grid-template-columns:1fr}}
+    :root{--blue:#1877d2;--green:#176b55;--soft:#f6f7f8;--line:#e5e7eb;--muted:#747b84;--ink:#25282d;--red:#9b2c2c}
+    *{box-sizing:border-box}body{margin:0;padding:18px 12px 36px;background:#fff;color:var(--ink);font-family:Arial,sans-serif}.wrap{max-width:960px;margin:auto}.header{text-align:center;margin-bottom:14px}h1{margin:0;font-family:Georgia,serif;font-weight:400;font-size:34px}.subtitle{color:var(--muted);font-size:14px}.tabs{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;max-width:620px;margin:14px auto;padding:4px;background:var(--soft);border:1px solid var(--line);border-radius:12px}.tab{border:0;background:transparent;padding:10px;border-radius:9px;cursor:pointer}.tab.active{background:#fff;color:var(--blue);box-shadow:0 1px 5px rgba(0,0,0,.08)}.panel{display:none}.panel.active{display:block}.card{border:1px solid var(--line);border-radius:15px;padding:17px;margin-bottom:14px;box-shadow:0 3px 12px rgba(0,0,0,.025)}.card h2{font-family:Georgia,serif;font-weight:400;margin:0 0 5px}.intro,.note,.disclaimer{font-size:11px;color:var(--muted);line-height:1.5}.field{margin:12px 0}label{display:block;font-size:12px;font-weight:600;margin-bottom:5px}input,select,textarea{width:100%;padding:10px;border:1px solid #d9dde2;border-radius:9px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:11px}.button{width:100%;padding:11px;border:0;border-radius:10px;font-weight:600;cursor:pointer}.button:disabled{opacity:.55;cursor:not-allowed}.primary{background:var(--blue);color:#fff}.secondary{margin-top:8px;background:#f1f3f5;border:1px solid var(--line)}.status{white-space:pre-wrap;background:#fafafa;border:1px solid #eceef0;border-radius:10px;padding:10px;margin-top:12px;font-size:11px}.status.error{color:var(--red);border-color:#f0caca;background:#fff8f8}.hero{background:#f4fbf7;border:1px solid #d7eee2;border-radius:15px;padding:22px;text-align:center}.hero .label{font-size:12px;color:var(--muted)}.hero .amount{font-size:46px;font-weight:700;color:var(--green);margin:6px 0}.dashboard{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:12px 0}.tile{background:#f7f7f7;border-radius:10px;padding:12px;text-align:center}.tile strong{display:block;font-size:17px}.tile span{font-size:9px;color:var(--muted)}.section-title{font-family:Georgia,serif;font-size:18px;margin:18px 0 7px}.ranking{border:1px solid var(--line);border-radius:11px;padding:12px;margin:9px 0}.ranking-head{display:flex;justify-content:space-between}.lender{font-family:Georgia,serif;font-size:17px}.score{font-size:18px;font-weight:600;color:var(--blue)}.badges{display:flex;gap:6px;flex-wrap:wrap;margin:7px 0}.badge{padding:4px 8px;border-radius:999px;background:#f1f2f3;font-size:10px}.metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}.metric{background:#f7f7f7;border-radius:8px;padding:8px;text-align:center}.metric strong{display:block;font-size:13px}.metric span{font-size:9px;color:var(--muted)}.reason,.risk,.conditions{font-size:11px;line-height:1.5;margin-top:6px}.risk{color:var(--red)}.table{width:100%;border-collapse:collapse;font-size:11px}.table th,.table td{padding:8px;border-bottom:1px solid var(--line);text-align:left}.table th{color:var(--muted)}#assessmentSection{display:none}@media(max-width:760px){.grid,.dashboard,.metrics{grid-template-columns:1fr}.ranking-head{display:block}.tabs{grid-template-columns:1fr}}
   </style>
 </head>
 <body>
@@ -36,14 +20,14 @@
   <section id="trainingPanel" class="panel active">
     <div class="card">
       <h2>Add Historical Outcome</h2>
-      <div class="intro">Upload a reviewed file and record the lender’s actual decision. Historical outcomes improve lender matching and maximum-loan accuracy.</div>
+      <div class="intro">Upload reviewed bank statements and record the lender's actual outcome.</div>
       <div class="field"><label>Company Name</label><input id="trainCompanyName"></div>
       <div class="field"><label>Bank Statements</label><input id="trainFiles" type="file" accept="application/pdf" multiple></div>
       <div class="grid">
-        <div class="field"><label>Decision</label><select id="trainDecision" onchange="toggleTrainingFields(true)"><option value="">Select decision</option><option>Approved</option><option>Declined</option><option>Conditional</option></select></div>
+        <div class="field"><label>Decision</label><select id="trainDecision" onchange="toggleTrainingFields()"><option value="">Select decision</option><option>Approved</option><option>Conditional</option><option>Declined</option></select></div>
         <div class="field"><label>Lender</label><input id="trainLenderName" placeholder="Example: Journey Capital"></div>
       </div>
-      <div class="field" id="trainApprovedBox"><label>Approved Amount</label><input id="trainApprovedAmount" placeholder="25000"></div>
+      <div class="field" id="trainApprovedBox"><label>Approved Amount</label><input id="trainApprovedAmount" inputmode="decimal" placeholder="77000"></div>
       <div class="field" id="trainDeclineBox"><label>Decline / Conditional Reason</label><textarea id="trainDeclineReason"></textarea></div>
       <button id="trainButton" class="button primary" onclick="submitTraining()">Upload & Save Training Record</button>
       <button id="rebuildButton" class="button secondary" onclick="rebuildHistory()">Rebuild Historical Features</button>
@@ -54,34 +38,34 @@
   <section id="assessmentPanel" class="panel">
     <div class="card">
       <h2>Calculate Maximum Loan</h2>
-      <div class="intro">Uses historical lender approvals, similar business profiles, current bank-statement strength, banking conduct and risk review to estimate the maximum loan that reasonably fits the business.</div>
+      <div class="intro">The displayed result comes directly from the original VFC underwriting engine.</div>
       <div class="field"><label>Company Name</label><input id="assessCompanyName"></div>
       <div class="field"><label>Bank Statements</label><input id="assessFiles" type="file" accept="application/pdf" multiple></div>
       <button id="assessButton" class="button primary" onclick="submitAssessment()">Upload & Calculate Maximum Loan</button>
       <div id="assessStatus" class="status">Ready.</div>
     </div>
+
     <div class="card" id="assessmentSection">
       <h2>Underwriting Report</h2>
       <div id="maximumBox"></div>
+      <div id="rankings"></div>
+      <div id="disclaimer" class="disclaimer"></div>
+
       <div class="section-title">Record Actual Outcome</div>
-      <div class="intro">Complete this when the lender responds. The system will measure the prediction error and improve future calibration.</div>
       <div class="grid">
         <div class="field"><label>Actual Decision</label><select id="outcomeDecision" onchange="toggleOutcomeAmount()"><option value="">Select decision</option><option>Approved</option><option>Conditional</option><option>Declined</option></select></div>
         <div class="field"><label>Actual Lender</label><input id="outcomeLender"></div>
       </div>
-      <div class="field" id="outcomeAmountBox"><label>Actual Approved Amount</label><input id="outcomeAmount" placeholder="77000"></div>
+      <div class="field" id="outcomeAmountBox"><label>Actual Approved Amount</label><input id="outcomeAmount" inputmode="decimal" placeholder="77000"></div>
       <div class="field"><label>Underwriter Notes</label><textarea id="outcomeNotes"></textarea></div>
       <button id="outcomeButton" class="button primary" onclick="saveOutcome()">Save Actual Outcome</button>
       <div id="outcomeStatus" class="status">Run an assessment first.</div>
-      <div id="rankings"></div>
-      <div id="disclaimer" class="disclaimer"></div>
     </div>
   </section>
 
   <section id="accuracyPanel" class="panel">
     <div class="card">
       <h2>Prediction Accuracy Dashboard</h2>
-      <div class="intro">Measures how close the engine’s maximum-loan predictions are to actual lender approvals.</div>
       <button class="button secondary" onclick="loadAccuracy()">Refresh Accuracy Dashboard</button>
       <div id="accuracyStatus" class="status">Open this tab to load results.</div>
       <div id="accuracyDashboard"></div>
@@ -91,279 +75,174 @@
 <script>
 let currentAssessment = null;
 
-function showTab(name) {
-  ['training', 'assessment', 'accuracy'].forEach(function(n) {
-    id(n + 'Panel').classList.toggle('active', n === name);
-    id(n + 'Tab').classList.toggle('active', n === name);
+function showTab(name){
+  ['training','assessment','accuracy'].forEach(function(n){
+    id(n+'Panel').classList.toggle('active',n===name);
+    id(n+'Tab').classList.toggle('active',n===name);
   });
-  if (name === 'accuracy') loadAccuracy();
+  if(name==='accuracy') loadAccuracy();
 }
 
-function toggleTrainingFields(clear) {
-  const d = v('trainDecision');
-  id('trainApprovedBox').style.display = d === 'Declined' ? 'none' : 'block';
-  id('trainDeclineBox').style.display = d === 'Approved' ? 'none' : 'block';
-  if (clear) {
-    if (d === 'Approved') id('trainDeclineReason').value = '';
-    if (d === 'Declined') id('trainApprovedAmount').value = '';
-  }
+function toggleTrainingFields(){
+  const d=value('trainDecision');
+  id('trainApprovedBox').style.display=d==='Declined'?'none':'block';
+  id('trainDeclineBox').style.display=d==='Approved'?'none':'block';
 }
-toggleTrainingFields(false);
 
-function toggleOutcomeAmount() {
-  id('outcomeAmountBox').style.display = v('outcomeDecision') === 'Declined' ? 'none' : 'block';
+function toggleOutcomeAmount(){
+  id('outcomeAmountBox').style.display=value('outcomeDecision')==='Declined'?'none':'block';
 }
+
+toggleTrainingFields();
 toggleOutcomeAmount();
 
-function rebuildHistory() {
-  const b = id('rebuildButton');
-  const s = id('trainStatus');
-  b.disabled = true;
-  s.innerText = 'Rebuilding historical features...';
-  google.script.run
-    .withSuccessHandler(function(r) {
-      b.disabled = false;
-      s.innerText = (r.message || 'Complete') + ' Records: ' + (r.recordsUpdated || 0);
-    })
-    .withFailureHandler(function(e) {
-      b.disabled = false;
-      s.innerText = 'Error: ' + errorMessage(e);
-    })
-    .rebuildStructuredFeatures();
-}
-
-async function submitTraining() {
-  const c = v('trainCompanyName');
-  const f = id('trainFiles');
-  const d = v('trainDecision');
-  const l = v('trainLenderName');
-  if (!c || !f.files.length || !d || !l) return alert('Please complete company, statements, decision, and lender.');
-  const a = (d === 'Approved' || d === 'Conditional') ? v('trainApprovedAmount') : '';
-  const r = (d === 'Declined' || d === 'Conditional') ? v('trainDeclineReason') : '';
-  const b = id('trainButton');
-  const s = id('trainStatus');
-  b.disabled = true;
-  s.innerText = 'Reading statements...';
-  try {
-    const files = await prepareFiles(f.files);
-    google.script.run
-      .withSuccessHandler(function(u) {
-        google.script.run
-          .withSuccessHandler(function(x) {
-            b.disabled = false;
-            s.innerText = x.message || 'Saved.';
-          })
-          .withFailureHandler(function(e) {
-            b.disabled = false;
-            s.innerText = 'Save failed: ' + errorMessage(e);
-          })
-          .saveLenderDecision({companyName:c, period:u.detectedPeriod || '', lenderName:l, decision:d, approvedAmount:a, declineReason:r, notes:'Actual historical outcome.'});
-      })
-      .withFailureHandler(function(e) {
-        b.disabled = false;
-        s.innerText = 'Upload failed: ' + errorMessage(e);
-      })
-      .uploadStatementBatch(c, files);
-  } catch (e) {
-    b.disabled = false;
-    s.innerText = 'Error: ' + errorMessage(e);
-  }
-}
-
-async function submitAssessment() {
-  const c = v('assessCompanyName');
-  const f = id('assessFiles');
-  if (!c || !f.files.length) return alert('Please enter company and upload statements.');
-  const b = id('assessButton');
-  const s = id('assessStatus');
-  b.disabled = true;
-  s.innerText = 'Reading statements...';
-  id('assessmentSection').style.display = 'none';
-  try {
-    const files = await prepareFiles(f.files);
-    google.script.run
-      .withSuccessHandler(function(u) {
-        s.innerText = 'Calculating maximum loan...';
-        google.script.run
-          .withSuccessHandler(function(a) {
-            try {
-              if (!a || typeof a !== 'object') throw new Error('The underwriting engine returned an empty response.');
-              currentAssessment = a;
-              renderAssessment(a);
-              b.disabled = false;
-              s.innerText = 'Assessment complete.';
-            } catch (renderError) {
-              b.disabled = false;
-              s.innerText = 'Result display failed: ' + errorMessage(renderError);
-            }
-          })
-          .withFailureHandler(function(e) {
-            b.disabled = false;
-            s.innerText = 'Assessment failed: ' + errorMessage(e);
-          })
-          .generateInstitutionalAssessmentSafe({companyName:c, period:u.detectedPeriod || ''});
-      })
-      .withFailureHandler(function(e) {
-        b.disabled = false;
-        s.innerText = 'Upload failed: ' + errorMessage(e);
-      })
-      .uploadStatementBatch(c, files);
-  } catch (e) {
-    b.disabled = false;
-    s.innerText = 'Error: ' + errorMessage(e);
-  }
-}
-
-function renderAssessment(data) {
-  const i = data.institutionalAssessment || {};
-  const capacity = data.lendingCapacity || {};
-  const summary = data.underwritingSummary || {};
-  const maximumAmount = firstPositiveNumber(i.maximumLoanAmount, capacity.recommendedAmount, summary.recommended_amount);
-  if (!maximumAmount && maximumAmount !== 0) throw new Error('Maximum-loan amount was missing from the underwriting response.');
-
-  id('assessmentSection').style.display = 'block';
-  id('maximumBox').innerHTML =
-    '<div class="hero">' +
-      '<div class="label">Maximum recommended loan</div>' +
-      '<div class="amount">' + money(maximumAmount) + '</div>' +
-      '<div class="note">' + esc(i.decision || 'Maximum recommended loan') + '</div>' +
-    '</div>' +
-    '<div class="dashboard">' +
-      '<div class="tile"><strong>' + esc(i.businessHealthScore || 0) + '/100</strong><span>Business health</span></div>' +
-      '<div class="tile"><strong>' + esc(i.riskGrade || '') + '</strong><span>Risk grade</span></div>' +
-      '<div class="tile"><strong>' + money(i.averageMonthlyDeposits || 0) + '</strong><span>Average monthly deposits</span></div>' +
-      '<div class="tile"><strong>' + esc(i.amountConfidence || '') + '</strong><span>Amount confidence</span></div>' +
-    '</div>' +
-    '<div class="note">' + esc(i.methodologyNote || '') + '</div>';
-
-  id('outcomeStatus').innerText = 'Ready to record the actual lender outcome.';
-  const box = id('rankings');
-  box.innerHTML = '<div class="section-title">Existing Lender Analysis</div>';
-  (data.lenderRankings || []).forEach(function(x, n) {
-    const d = document.createElement('div');
-    d.className = 'ranking';
-    const hist = x.lowApprovedAmount ? money(x.lowApprovedAmount) + ' – ' + money(x.highApprovedAmount) : 'Insufficient history';
-    d.innerHTML =
-      '<div class="ranking-head"><div><div class="lender">' + (n + 1) + '. ' + esc(x.lenderName) + '</div>' +
-      '<div class="badges"><span class="badge">' + esc(x.observedFit) + '</span><span class="badge">Confidence: ' + esc(x.confidence) + '</span></div></div>' +
-      '<div class="score">' + esc(x.compositeScore) + '/100</div></div>' +
-      '<div class="metrics"><div class="metric"><strong>' + esc(x.similarApprovals) + ' / ' + esc(x.similarCases) + '</strong><span>Similar approvals</span></div>' +
-      '<div class="metric"><strong>' + esc(x.observedApprovalRate) + '</strong><span>Observed approval rate</span></div>' +
-      '<div class="metric"><strong>' + esc(hist) + '</strong><span>Historical range</span></div></div>' +
-      '<div class="reason">' + esc(x.reasoning || '') + '</div>' +
-      (x.risks && x.risks.length ? '<div class="risk"><strong>Risks:</strong> ' + esc(x.risks.join(' • ')) + '</div>' : '') +
-      (x.conditions && x.conditions.length ? '<div class="conditions"><strong>Conditions:</strong> ' + esc(x.conditions.join(' • ')) + '</div>' : '');
-    box.appendChild(d);
+function runServer(functionName,args){
+  return new Promise(function(resolve,reject){
+    let runner=google.script.run.withSuccessHandler(resolve).withFailureHandler(function(error){reject(new Error(errorMessage(error)));});
+    runner[functionName].apply(runner,args||[]);
   });
-  id('disclaimer').innerText = data.disclaimer || '';
+}
+
+async function rebuildHistory(){
+  const button=id('rebuildButton');
+  setBusy(button,'trainStatus','Rebuilding historical features...');
+  try{
+    const result=await runServer('rebuildStructuredFeatures',[]);
+    setReady(button,'trainStatus',(result&&result.message?result.message:'Complete')+' Records: '+numberOrZero(result&&result.recordsUpdated));
+  }catch(error){setError(button,'trainStatus',error);}
+}
+
+async function submitTraining(){
+  const company=value('trainCompanyName');
+  const fileInput=id('trainFiles');
+  const decision=value('trainDecision');
+  const lender=value('trainLenderName');
+  if(!company||!fileInput.files.length||!decision||!lender){alert('Please complete company, statements, decision, and lender.');return;}
+  const approvedAmount=decision==='Declined'?'':value('trainApprovedAmount');
+  const reason=decision==='Approved'?'':value('trainDeclineReason');
+  const button=id('trainButton');
+  setBusy(button,'trainStatus','Reading statements...');
+  try{
+    const files=await prepareFiles(fileInput.files);
+    const upload=await runServer('uploadStatementBatch',[company,files]);
+    const saved=await runServer('saveLenderDecision',[{companyName:company,period:(upload&&upload.detectedPeriod)||'',lenderName:lender,decision:decision,approvedAmount:approvedAmount,declineReason:reason,notes:'Actual historical outcome.'}]);
+    setReady(button,'trainStatus',(saved&&saved.message)||'Training record saved.');
+  }catch(error){setError(button,'trainStatus',error);}
+}
+
+async function submitAssessment(){
+  const company=value('assessCompanyName');
+  const fileInput=id('assessFiles');
+  if(!company||!fileInput.files.length){alert('Please enter the company and upload bank statements.');return;}
+  const button=id('assessButton');
+  id('assessmentSection').style.display='none';
+  currentAssessment=null;
+  setBusy(button,'assessStatus','Reading statements...');
+  try{
+    const files=await prepareFiles(fileInput.files);
+    const upload=await runServer('uploadStatementBatch',[company,files]);
+    setStatus('assessStatus','Calculating maximum loan...');
+    const assessment=await runServer('generateInstitutionalAssessmentSafe',[{companyName:company,period:(upload&&upload.detectedPeriod)||''}]);
+    if(!assessment||typeof assessment!=='object') throw new Error('The underwriting engine returned no result.');
+    currentAssessment=assessment;
+    renderAssessment(assessment);
+    setReady(button,'assessStatus','Assessment complete. Model: '+safeText(assessment.modelVersion||assessment.activeProductionModel||'VFC'));
+  }catch(error){
+    id('assessmentSection').style.display='none';
+    setError(button,'assessStatus',error);
+  }
+}
+
+function renderAssessment(data){
+  const institutional=data.institutionalAssessment||{};
+  const capacity=data.lendingCapacity||{};
+  const summary=data.underwritingSummary||{};
+  const maximum=firstValidNumber(institutional.maximumLoanAmount,capacity.recommendedAmount,summary.recommended_amount,capacity.stretchAmount);
+  if(maximum===null) throw new Error('The result did not contain a maximum-loan amount.');
+
+  id('assessmentSection').style.display='block';
+  id('maximumBox').innerHTML=
+    '<div class="hero"><div class="label">Maximum recommended loan</div><div class="amount">'+money(maximum)+'</div><div class="note">'+escapeHtml(institutional.decision||summary.summary||'Maximum recommended loan')+'</div></div>'+
+    '<div class="dashboard">'+
+      tile((institutional.businessHealthScore??0)+'/100','Business health')+
+      tile(institutional.riskGrade||'—','Risk grade')+
+      tile(money(institutional.averageMonthlyDeposits??(data.currentFeatures||{}).averageMonthlyDeposits??0),'Average monthly deposits')+
+      tile(institutional.amountConfidence||capacity.confidence||'—','Amount confidence')+
+    '</div>'+
+    '<div class="note">Model: '+escapeHtml(institutional.modelVersion||data.modelVersion||'')+'</div>'+
+    '<div class="note">'+escapeHtml(institutional.methodologyNote||'')+'</div>';
+
+  const box=id('rankings');
+  box.innerHTML='<div class="section-title">Existing Lender Analysis</div>';
+  const rankings=Array.isArray(data.lenderRankings)?data.lenderRankings:[];
+  if(!rankings.length){box.innerHTML+='<div class="note">No lender ranking was returned.</div>';}
+  rankings.forEach(function(item,index){
+    const range=validPositive(item.lowApprovedAmount)?money(item.lowApprovedAmount)+' – '+money(item.highApprovedAmount):'Insufficient history';
+    const card=document.createElement('div');
+    card.className='ranking';
+    card.innerHTML='<div class="ranking-head"><div><div class="lender">'+(index+1)+'. '+escapeHtml(item.lenderName||'Lender')+'</div><div class="badges"><span class="badge">'+escapeHtml(item.observedFit||'')+'</span><span class="badge">Confidence: '+escapeHtml(item.confidence||'')+'</span></div></div><div class="score">'+escapeHtml(item.compositeScore??0)+'/100</div></div><div class="metrics"><div class="metric"><strong>'+escapeHtml(item.similarApprovals??0)+' / '+escapeHtml(item.similarCases??0)+'</strong><span>Similar approvals</span></div><div class="metric"><strong>'+escapeHtml(item.observedApprovalRate||'N/A')+'</strong><span>Observed approval rate</span></div><div class="metric"><strong>'+escapeHtml(range)+'</strong><span>Historical range</span></div></div><div class="reason">'+escapeHtml(item.reasoning||'')+'</div>'+(Array.isArray(item.risks)&&item.risks.length?'<div class="risk"><strong>Risks:</strong> '+escapeHtml(item.risks.join(' • '))+'</div>':'')+(Array.isArray(item.conditions)&&item.conditions.length?'<div class="conditions"><strong>Conditions:</strong> '+escapeHtml(item.conditions.join(' • '))+'</div>':'');
+    box.appendChild(card);
+  });
+  id('disclaimer').innerText=data.disclaimer||'';
+  id('outcomeStatus').innerText='Ready to record the actual lender outcome.';
   id('assessmentSection').scrollIntoView({behavior:'smooth'});
 }
 
-function saveOutcome() {
-  if (!currentAssessment) return alert('Run an assessment first.');
-  const d = v('outcomeDecision');
-  const l = v('outcomeLender');
-  const a = v('outcomeAmount');
-  const n = v('outcomeNotes');
-  if (!d || !l) return alert('Enter the actual decision and lender.');
-  if (d !== 'Declined' && !a) return alert('Enter the actual approved amount.');
-  const i = currentAssessment.institutionalAssessment || {};
-  const b = id('outcomeButton');
-  const s = id('outcomeStatus');
-  b.disabled = true;
-  s.innerText = 'Saving actual outcome...';
-  google.script.run
-    .withSuccessHandler(function(r) {
-      b.disabled = false;
-      s.innerText = (r.message || 'Saved.') + (r.absolutePercentageError !== '' ? ' Absolute error: ' + r.absolutePercentageError + '%' : '');
-    })
-    .withFailureHandler(function(e) {
-      b.disabled = false;
-      s.innerText = 'Error: ' + errorMessage(e);
-    })
-    .saveActualOutcome({
-      assessmentId:currentAssessment.assessmentId,
-      companyName:currentAssessment.companyName,
-      period:currentAssessment.period,
-      modelVersion:currentAssessment.modelVersion,
-      predictedAmount:firstPositiveNumber(i.maximumLoanAmount, (currentAssessment.lendingCapacity || {}).recommendedAmount),
-      actualDecision:d,
-      actualLender:l,
-      actualApprovedAmount:a,
-      notes:n
-    });
+async function saveOutcome(){
+  if(!currentAssessment){alert('Run an assessment first.');return;}
+  const decision=value('outcomeDecision');
+  const lender=value('outcomeLender');
+  const amount=value('outcomeAmount');
+  if(!decision||!lender){alert('Enter the actual decision and lender.');return;}
+  if(decision!=='Declined'&&!amount){alert('Enter the actual approved amount.');return;}
+  const institutional=currentAssessment.institutionalAssessment||{};
+  const capacity=currentAssessment.lendingCapacity||{};
+  const predicted=firstValidNumber(institutional.maximumLoanAmount,capacity.recommendedAmount);
+  const button=id('outcomeButton');
+  setBusy(button,'outcomeStatus','Saving actual outcome...');
+  try{
+    const result=await runServer('saveActualOutcome',[{assessmentId:currentAssessment.assessmentId,companyName:currentAssessment.companyName,period:currentAssessment.period,modelVersion:currentAssessment.modelVersion,predictedAmount:predicted===null?0:predicted,actualDecision:decision,actualLender:lender,actualApprovedAmount:amount,notes:value('outcomeNotes')}]);
+    setReady(button,'outcomeStatus',(result&&result.message)||'Actual outcome saved.');
+  }catch(error){setError(button,'outcomeStatus',error);}
 }
 
-function loadAccuracy() {
-  const s = id('accuracyStatus');
-  const box = id('accuracyDashboard');
-  s.innerText = 'Loading accuracy...';
-  google.script.run
-    .withSuccessHandler(function(r) {
-      s.innerText = 'Accuracy updated.';
-      const lenders = (r.lenderAccuracy || []).map(function(x) {
-        return '<tr><td>' + esc(x.lender) + '</td><td>' + esc(x.cases) + '</td><td>' + esc(x.medianAbsolutePercentageError) + '%</td><td>' + esc(x.within15Percent) + '%</td></tr>';
-      }).join('');
-      const recent = (r.recentOutcomes || []).map(function(x) {
-        return '<tr><td>' + esc(x.companyName) + '</td><td>' + money(x.predictedAmount) + '</td><td>' + money(x.actualApprovedAmount) + '</td><td>' + esc(x.actualDecision) + '</td><td>' + esc(x.percentageError === '' ? '—' : x.percentageError + '%') + '</td></tr>';
-      }).join('');
-      box.innerHTML =
-        '<div class="dashboard">' +
-          '<div class="tile"><strong>' + esc(r.totalOutcomes) + '</strong><span>Total outcomes</span></div>' +
-          '<div class="tile"><strong>' + esc(r.within15Percent) + '%</strong><span>Within ±15%</span></div>' +
-          '<div class="tile"><strong>' + esc(r.medianAbsolutePercentageError) + '%</strong><span>Median percentage error</span></div>' +
-          '<div class="tile"><strong>' + money(r.medianDollarError) + '</strong><span>Median dollar error</span></div>' +
-        '</div>' +
-        '<div class="note">' + esc(r.bias || '') + '</div>' +
-        '<div class="section-title">Accuracy by Lender</div>' +
-        '<table class="table"><thead><tr><th>Lender</th><th>Cases</th><th>Median Error</th><th>Within ±15%</th></tr></thead><tbody>' + lenders + '</tbody></table>' +
-        '<div class="section-title">Recent Outcomes</div>' +
-        '<table class="table"><thead><tr><th>Company</th><th>Predicted</th><th>Actual</th><th>Decision</th><th>Error</th></tr></thead><tbody>' + recent + '</tbody></table>';
-    })
-    .withFailureHandler(function(e) {
-      s.innerText = 'Error: ' + errorMessage(e);
-    })
-    .getAccuracyDashboard();
+async function loadAccuracy(){
+  setStatus('accuracyStatus','Loading accuracy...');
+  try{
+    const result=await runServer('getAccuracyDashboard',[]);
+    const lenderRows=((result&&result.lenderAccuracy)||[]).map(function(item){return '<tr><td>'+escapeHtml(item.lender)+'</td><td>'+escapeHtml(item.cases)+'</td><td>'+escapeHtml(item.medianAbsolutePercentageError)+'%</td><td>'+escapeHtml(item.within15Percent)+'%</td></tr>';}).join('');
+    const recentRows=((result&&result.recentOutcomes)||[]).map(function(item){return '<tr><td>'+escapeHtml(item.companyName)+'</td><td>'+money(item.predictedAmount)+'</td><td>'+money(item.actualApprovedAmount)+'</td><td>'+escapeHtml(item.actualDecision)+'</td></tr>';}).join('');
+    id('accuracyDashboard').innerHTML='<div class="dashboard">'+tile(numberOrZero(result&&result.totalOutcomes),'Total outcomes')+tile(numberOrZero(result&&result.within15Percent)+'%','Within ±15%')+tile(numberOrZero(result&&result.medianAbsolutePercentageError)+'%','Median percentage error')+tile(money(numberOrZero(result&&result.medianDollarError)),'Median dollar error')+'</div><div class="note">'+escapeHtml((result&&result.bias)||'')+'</div><div class="section-title">Accuracy by Lender</div><table class="table"><thead><tr><th>Lender</th><th>Cases</th><th>Median Error</th><th>Within ±15%</th></tr></thead><tbody>'+lenderRows+'</tbody></table><div class="section-title">Recent Outcomes</div><table class="table"><thead><tr><th>Company</th><th>Predicted</th><th>Actual</th><th>Decision</th></tr></thead><tbody>'+recentRows+'</tbody></table>';
+    setStatus('accuracyStatus','Accuracy updated.');
+  }catch(error){setStatusError('accuracyStatus',errorMessage(error));}
 }
 
-function firstPositiveNumber() {
-  for (let i = 0; i < arguments.length; i++) {
-    const n = Number(String(arguments[i] == null ? '' : arguments[i]).replace(/[^0-9.-]/g, ''));
-    if (!isNaN(n) && n >= 0) return n;
+function firstValidNumber(){
+  for(let i=0;i<arguments.length;i++){
+    const value=arguments[i];
+    if(value===null||value===undefined||value==='') continue;
+    const number=Number(String(value).replace(/[^0-9.-]/g,''));
+    if(Number.isFinite(number)&&number>=0) return number;
   }
-  return 0;
+  return null;
 }
 
-function id(x) { return document.getElementById(x); }
-function v(x) { return id(x).value.trim(); }
-function prepareFiles(list) {
-  return Promise.all(Array.from(list).map(async function(f) {
-    const b = await toBase64(f);
-    return {name:f.name, mimeType:f.type || 'application/pdf', base64:b.split(',')[1]};
-  }));
-}
-function toBase64(f) {
-  return new Promise(function(resolve, reject) {
-    const x = new FileReader();
-    x.readAsDataURL(f);
-    x.onload = function() { resolve(x.result); };
-    x.onerror = reject;
-  });
-}
-function money(value) {
-  const n = Number(String(value == null ? 0 : value).replace(/[^0-9.-]/g, ''));
-  return isNaN(n) ? String(value) : n.toLocaleString('en-CA', {style:'currency', currency:'CAD', maximumFractionDigits:0});
-}
-function esc(value) {
-  return String(value == null ? '' : value)
-    .replace(/[&<>'"]/g, function(c) {
-      return {'&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;'}[c];
-    })
-    .replace(/\n/g, '<br>');
-}
-function errorMessage(e) {
-  return e && e.message ? e.message : String(e || 'Unknown error');
-}
+function validPositive(value){const number=firstValidNumber(value);return number!==null&&number>0;}
+function tile(main,label){return '<div class="tile"><strong>'+escapeHtml(main)+'</strong><span>'+escapeHtml(label)+'</span></div>';}
+function id(name){return document.getElementById(name);}
+function value(name){return id(name).value.trim();}
+function safeText(value){return String(value==null?'':value);}
+function numberOrZero(value){const n=Number(value);return Number.isFinite(n)?n:0;}
+function setStatus(name,message){const element=id(name);element.classList.remove('error');element.innerText=message;}
+function setStatusError(name,message){const element=id(name);element.classList.add('error');element.innerText='Error: '+message;}
+function setBusy(button,status,message){button.disabled=true;setStatus(status,message);}
+function setReady(button,status,message){button.disabled=false;setStatus(status,message);}
+function setError(button,status,error){button.disabled=false;setStatusError(status,errorMessage(error));}
+function errorMessage(error){return error&&error.message?error.message:String(error||'Unknown error');}
+function prepareFiles(list){return Promise.all(Array.from(list).map(async function(file){const data=await toBase64(file);return{name:file.name,mimeType:file.type||'application/pdf',base64:data.split(',')[1]};}));}
+function toBase64(file){return new Promise(function(resolve,reject){const reader=new FileReader();reader.readAsDataURL(file);reader.onload=function(){resolve(reader.result);};reader.onerror=reject;});}
+function money(value){const n=Number(String(value==null?0:value).replace(/[^0-9.-]/g,''));return Number.isFinite(n)?n.toLocaleString('en-CA',{style:'currency',currency:'CAD',maximumFractionDigits:0}):String(value);}
+function escapeHtml(value){return String(value==null?'':value).replace(/[&<>'\"]/g,function(char){return{'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','\"':'&quot;'}[char];}).replace(/\n/g,'<br>');}
 </script>
 </body>
 </html>
