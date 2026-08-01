@@ -17,6 +17,7 @@
     .grid{display:grid;grid-template-columns:1fr 1fr;gap:11px}.button{width:100%;padding:11px;border:0;border-radius:10px;font-weight:600;cursor:pointer}.button:disabled{opacity:.55;cursor:not-allowed}.primary{background:var(--blue);color:#fff}
     .status{white-space:pre-wrap;background:#fafafa;border:1px solid #eceef0;border-radius:10px;padding:10px;margin-top:12px;font-size:11px}.status.error{color:var(--red);border-color:#f0caca;background:#fff8f8}
     .hero{background:#f4fbf7;border:1px solid #d7eee2;border-radius:15px;padding:22px;text-align:center}.hero .label{font-size:12px;color:var(--muted)}.hero .amount{font-size:46px;font-weight:700;color:var(--green);margin:6px 0}
+    .ai-panel{margin-top:14px;background:#f7fbff;border:1px solid #d8e8f7;border-radius:15px;padding:20px}.ai-panel.error{background:#fff8f8;border-color:#f0caca}.ai-title{font-family:Georgia,serif;font-size:19px}.ai-amount{font-size:38px;font-weight:700;color:var(--blue);margin:7px 0}.ai-label{font-size:11px;color:var(--muted)}
     .dashboard{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:12px 0}.tile{background:#f7f7f7;border-radius:10px;padding:12px;text-align:center}.tile strong{display:block;font-size:17px}.tile span{font-size:9px;color:var(--muted)}
     .section-title{font-family:Georgia,serif;font-size:18px;margin:18px 0 7px}.ranking,.comparable{border:1px solid var(--line);border-radius:11px;padding:12px;margin:9px 0}.ranking-head{display:flex;justify-content:space-between}.lender{font-family:Georgia,serif;font-size:17px}.score{font-size:18px;font-weight:600;color:var(--blue)}
     .badges{display:flex;gap:6px;flex-wrap:wrap;margin:7px 0}.badge{padding:4px 8px;border-radius:999px;background:#f1f2f3;font-size:10px}.metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}.metric{background:#f7f7f7;border-radius:8px;padding:8px;text-align:center}.metric strong{display:block;font-size:13px}.metric span{font-size:9px;color:var(--muted)}
@@ -74,6 +75,7 @@
     <div class="card" id="assessmentSection">
       <h2>Underwriting Report</h2>
       <div id="maximumBox"></div>
+      <div id="openAIBox"></div>
       <div id="comparables"></div>
       <div id="rankings"></div>
       <div id="disclaimer" class="disclaimer"></div>
@@ -153,19 +155,36 @@ async function submitAssessment(){
 
   const button=id('assessButton');
   id('assessmentSection').style.display='none';
+  id('openAIBox').innerHTML='';
   setBusy(button,'assessStatus','Reading statements...');
 
   try{
     const files=await prepareFiles(filesInput.files);
     const upload=await serverCall('uploadStatementBatch',[company,files]);
-    setStatus('assessStatus','Comparing with historical training data...');
+    const period=(upload&&upload.detectedPeriod)||'';
+
+    setStatus('assessStatus','Calculating Our Max from historical training data...');
     const result=await serverCall('generateInstitutionalAssessmentSafe',[{
       companyName:company,
-      period:(upload&&upload.detectedPeriod)||''
+      period:period
     }]);
     if(!result||typeof result!=='object') throw new Error('The underwriting engine returned no result.');
+
     renderAssessment(result);
-    setReady(button,'assessStatus','Assessment complete. Model: '+safeText(result.modelVersion||''));
+    renderOpenAILoading();
+    setStatus('assessStatus','Our Max is complete. Getting the separate OpenAI recommendation...');
+
+    try{
+      const openAIResult=await serverCall('generateOpenAIRecommendationSafe',[{
+        companyName:company,
+        period:period
+      }]);
+      renderOpenAIRecommendation(openAIResult,result);
+      setReady(button,'assessStatus','Assessment complete. Our Max: '+safeText(result.modelVersion||'')+' | OpenAI: '+safeText(openAIResult.modelVersion||''));
+    }catch(openAIError){
+      renderOpenAIError(openAIError);
+      setReady(button,'assessStatus','Our Max completed successfully. OpenAI recommendation was unavailable: '+errorMessage(openAIError));
+    }
   }catch(error){
     id('assessmentSection').style.display='none';
     setError(button,'assessStatus',error);
@@ -186,7 +205,7 @@ function renderAssessment(data){
   id('assessmentSection').style.display='block';
   id('maximumBox').innerHTML=
     '<div class="hero">'+
-      '<div class="label">Maximum recommended loan</div>'+
+      '<div class="label">VFC Maximum Recommendation — Our Max</div>'+
       '<div class="amount">'+money(amount)+'</div>'+
       '<div class="note">'+escapeHtml(assessment.decision||summary.summary||'Maximum recommended loan')+'</div>'+
     '</div>'+
@@ -203,6 +222,61 @@ function renderAssessment(data){
   renderRankings(data.lenderRankings||[]);
   id('disclaimer').innerText=data.disclaimer||'';
   id('assessmentSection').scrollIntoView({behavior:'smooth'});
+}
+
+function renderOpenAILoading(){
+  id('openAIBox').innerHTML=
+    '<div class="ai-panel">'+
+      '<div class="ai-title">OpenAI Recommendation</div>'+
+      '<div class="ai-label">Reading the current banking profile and verified historical outcomes...</div>'+
+    '</div>';
+}
+
+function renderOpenAIRecommendation(data,productionData){
+  const recommendation=data.recommendation||{};
+  const amount=firstValidNumber(recommendation.recommendedAmount);
+  if(amount===null) throw new Error('OpenAI returned no recommended amount.');
+
+  const productionAssessment=productionData.institutionalAssessment||{};
+  const productionCapacity=productionData.lendingCapacity||{};
+  const productionSummary=productionData.underwritingSummary||{};
+  const ourMax=firstValidNumber(
+    productionAssessment.maximumLoanAmount,
+    productionCapacity.recommendedAmount,
+    productionSummary.recommended_amount
+  );
+  const difference=ourMax===null?null:amount-ourMax;
+  const strengths=Array.isArray(recommendation.keyStrengths)?recommendation.keyStrengths:[];
+  const risks=Array.isArray(recommendation.keyRisks)?recommendation.keyRisks:[];
+  const training=data.trainingDataRead||{};
+
+  id('openAIBox').innerHTML=
+    '<div class="ai-panel">'+
+      '<div class="ai-title">OpenAI Recommendation — Separate Analysis</div>'+
+      '<div class="ai-label">This amount does not change or blend with Our Max.</div>'+
+      '<div class="ai-amount">'+money(amount)+'</div>'+
+      '<div class="dashboard">'+
+        tile(recommendation.recommendedLender||'—','Suggested lender')+
+        tile(safeText(recommendation.approvalProbability||0)+'%','Approval probability')+
+        tile(recommendation.confidence||'Low','Confidence')+
+        tile(difference===null?'—':money(difference),'Difference from Our Max')+
+      '</div>'+
+      '<div class="reason">'+escapeHtml(recommendation.reasoning||'')+'</div>'+
+      (strengths.length?'<div class="reason"><strong>Strengths:</strong> '+escapeHtml(strengths.join(' • '))+'</div>':'')+
+      (risks.length?'<div class="risk"><strong>Risks:</strong> '+escapeHtml(risks.join(' • '))+'</div>':'')+
+      (recommendation.sanityCapApplied?'<div class="note">A safety cap was applied because the raw OpenAI amount exceeded the support available from comparable approvals or current deposits.</div>':'')+
+      '<div class="note">Comparable cases read: '+escapeHtml(training.validComparableCases||0)+' • Approvals used: '+escapeHtml(training.comparableApprovals||0)+' • Model: '+escapeHtml(data.openAIModel||data.modelVersion||'')+'</div>'+
+      '<div class="note">Only structured banking metrics and verified outcomes were sent. Historical company names, account numbers and statement text were not sent.</div>'+
+    '</div>';
+}
+
+function renderOpenAIError(error){
+  id('openAIBox').innerHTML=
+    '<div class="ai-panel error">'+
+      '<div class="ai-title">OpenAI Recommendation Unavailable</div>'+
+      '<div class="risk">'+escapeHtml(errorMessage(error))+'</div>'+
+      '<div class="note">Our Max above remains complete and unchanged.</div>'+
+    '</div>';
 }
 
 function renderComparables(rows){
