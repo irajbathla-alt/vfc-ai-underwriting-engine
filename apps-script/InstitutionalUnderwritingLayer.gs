@@ -1,20 +1,21 @@
-const VFC_INSTITUTIONAL_CONFIG = {
-  MODEL_VERSION: 'VFC-STABLE-MAX-6.0-FINAL',
-  HISTORICAL_WEIGHT: 0.70,
-  CURRENT_BANKING_WEIGHT: 0.20,
-  DETERMINISTIC_RISK_WEIGHT: 0.10,
-  ROUNDING: 500
+const VFC_SIMPLE_CONFIG = {
+  MODEL_VERSION: 'VFC-SIMPLE-HISTORICAL-7.0',
+  MAX_COMPARABLE_CASES: 12,
+  MAX_APPROVAL_CASES: 8,
+  MIN_SIMILARITY: 0.40,
+  ROUNDING: 500,
+  MIN_AMOUNT: 5000
 };
 
 /**
- * Final production underwriting entry point.
+ * Single production underwriting path.
  *
- * Safeguards:
- * 1. Production sizing is deterministic. OpenAI output does not change the amount.
- * 2. Pattern learning and accuracy analytics do not affect the amount.
- * 3. For the exact same company and statement period, a previously verified
- *    approval or proven VFC 4.1/4.2 result is a regression floor.
- * 4. No assessment-history write occurs before the result is returned.
+ * Flow:
+ * uploaded statements -> extracted banking features -> closest historical
+ * training outcomes -> maximum recommended loan.
+ *
+ * There is no OpenAI amount adjustment, pattern model, regression floor,
+ * term-based sizing, shadow calculation, or accuracy-layer adjustment.
  */
 function generateInstitutionalAssessmentSafe(companyOrRequest, requestedPeriod) {
   const request = normalizeAssessmentRequest_(companyOrRequest, requestedPeriod);
@@ -29,339 +30,411 @@ function generateInstitutionalAssessmentSafe(companyOrRequest, requestedPeriod) 
   }
 
   const outcomes = collectHistoricalOutcomes_().filter(function(row) {
-    return !(sameText_(row.companyName, companyName) && stablePeriodMatches_(row.period, period));
+    return !(sameText_(row.companyName, companyName) && simplePeriodMatches_(row.period, period));
   });
+
   if (!outcomes.length) {
-    throw new Error('No historical lender outcomes are available. Add approvals and declines in Training Data first.');
+    throw new Error('No historical lender outcomes are available. Add approved and declined training files first.');
   }
 
   const fundamental = calculateFundamentalScore_(current);
+  const comparables = simpleBuildComparableCases_(current, outcomes);
+  const closestCases = comparables.slice(0, VFC_SIMPLE_CONFIG.MAX_COMPARABLE_CASES);
+  const closestApprovals = closestCases.filter(function(row) {
+    return row.isPositive && row.approvedAmount > 0;
+  }).slice(0, VFC_SIMPLE_CONFIG.MAX_APPROVAL_CASES);
 
-  // Deterministic production review. This prevents the amount changing because
-  // an OpenAI response used a slightly different risk score on a later run.
-  const deterministicReview = buildDeterministicProductionReview_(fundamental);
+  const historicalAmount = simpleHistoricalAmount_(closestApprovals);
+  const bankingAmount = simpleBankingAmount_(current, fundamental);
+  const approvalRate = simpleApprovalRate_(closestCases);
+  const risk = simpleRiskAdjustment_(current, fundamental);
 
-  const lenders = unique_(outcomes.map(function(row) {
-    return row.lenderName;
-  }).filter(Boolean));
+  let historicalWeight = 0;
+  if (closestApprovals.length >= 5) historicalWeight = 0.85;
+  else if (closestApprovals.length >= 3) historicalWeight = 0.78;
+  else if (closestApprovals.length > 0) historicalWeight = 0.65;
 
-  const rankings = lenders.map(function(lender) {
-    return scorePowerLender_(lender, current, outcomes, fundamental, deterministicReview);
-  }).sort(function(a, b) {
-    return b.compositeScore - a.compositeScore;
-  });
+  let maximumLoanAmount = historicalAmount > 0
+    ? historicalAmount * historicalWeight + bankingAmount * (1 - historicalWeight)
+    : bankingAmount * 0.75;
 
-  const originalCapacity = calculateExactLendingCapacity_(
-    current,
-    fundamental,
-    deterministicReview,
-    rankings
-  );
-  const top = rankings[0] || {};
+  let approvalAdjustment = 1;
+  if (closestCases.length >= 3) {
+    if (approvalRate < 0.35) approvalAdjustment = 0.80;
+    else if (approvalRate < 0.50) approvalAdjustment = 0.88;
+    else if (approvalRate < 0.65) approvalAdjustment = 0.95;
+  }
 
-  const stableCalculation = calculateStableHistoricalMaximum_(
-    Math.max(0, toNumber_(originalCapacity.recommendedAmount)),
-    Math.max(0, toNumber_(originalCapacity.historicalAnchor)),
-    current,
-    fundamental,
-    deterministicReview,
-    top
-  );
+  maximumLoanAmount *= approvalAdjustment;
+  maximumLoanAmount *= risk.factor;
 
-  const benchmark = getVerifiedRegressionBenchmark_(companyName, period);
-  let maximumLoanAmount = stableCalculation.maximumLoanAmount;
-  let regressionGuardApplied = false;
+  if (
+    historicalAmount > 0 &&
+    closestApprovals.length >= 3 &&
+    approvalRate >= 0.50 &&
+    risk.factor >= 0.95
+  ) {
+    maximumLoanAmount = Math.max(maximumLoanAmount, historicalAmount * 0.90);
+  }
 
-  if (benchmark.amount > maximumLoanAmount) {
-    maximumLoanAmount = benchmark.amount;
-    regressionGuardApplied = true;
+  const deposits = Math.max(0, toNumber_(current.averageMonthlyDeposits));
+  const score = toNumber_(fundamental.score);
+  const marketCap = deposits * (score >= 75 ? 1.25 : score >= 60 ? 1.05 : 0.85);
+  if (marketCap > 0) {
+    maximumLoanAmount = Math.min(
+      maximumLoanAmount,
+      Math.max(marketCap, historicalAmount * 1.05)
+    );
   }
 
   maximumLoanAmount = roundToNearest_(
     Math.max(0, maximumLoanAmount),
-    VFC_INSTITUTIONAL_CONFIG.ROUNDING
+    VFC_SIMPLE_CONFIG.ROUNDING
   );
 
-  const capacity = Object.assign({}, originalCapacity, {
-    originalRecommendedAmount: toNumber_(originalCapacity.recommendedAmount),
-    recommendedAmount: maximumLoanAmount,
-    stretchAmount: maximumLoanAmount,
-    historicalRecalibration: stableCalculation,
-    verifiedRegressionBenchmark: benchmark.amount,
-    regressionGuardApplied: regressionGuardApplied,
-    regressionBenchmarkSource: benchmark.source
+  if (score < 40 || !deposits) maximumLoanAmount = 0;
+  if (
+    maximumLoanAmount > 0 &&
+    maximumLoanAmount < VFC_SIMPLE_CONFIG.MIN_AMOUNT &&
+    score >= 45
+  ) {
+    maximumLoanAmount = VFC_SIMPLE_CONFIG.MIN_AMOUNT;
+  }
+
+  const confidenceScore = simpleConfidenceScore_(
+    closestApprovals,
+    closestCases,
+    fundamental,
+    current
+  );
+  const confidence = simpleConfidenceLabel_(confidenceScore);
+  const rankings = simpleBuildLenderRankings_(comparables);
+  const assessmentId = Utilities.getUuid();
+
+  const closestHistoricalApprovals = closestApprovals.slice(0, 5).map(function(row) {
+    return {
+      companyName: row.companyName,
+      lenderName: row.lenderName,
+      decision: row.decision,
+      similarityScore: Math.round(row.similarity * 100),
+      actualApprovedAmount: row.approvedAmount,
+      depositAdjustedAmount: roundToNearest_(row.adjustedAmount, VFC_SIMPLE_CONFIG.ROUNDING)
+    };
   });
 
-  const decision = buildPowerDecision_(current, fundamental, deterministicReview, rankings, capacity);
-  decision.recommended_amount = maximumLoanAmount;
-  decision.stretch_amount = maximumLoanAmount;
-  decision.explanation = regressionGuardApplied
-    ? 'The deterministic underwriting result was protected by the last verified result for this exact company and statement period.'
-    : 'The maximum recommended loan was calculated using deterministic historical and banking analysis.';
+  const calculationNotes = [
+    'Closest training cases reviewed: ' + closestCases.length,
+    'Closest approved or conditional cases used: ' + closestApprovals.length,
+    'Historical comparable amount: ' + roundToNearest_(historicalAmount, VFC_SIMPLE_CONFIG.ROUNDING),
+    'Current banking amount: ' + roundToNearest_(bankingAmount, VFC_SIMPLE_CONFIG.ROUNDING),
+    'Observed approval rate among closest cases: ' + Math.round(approvalRate * 100) + '%',
+    'Current banking-risk factor: ' + Math.round(risk.factor * 100) + '%',
+    risk.reasons.length
+      ? 'Banking-risk adjustments: ' + risk.reasons.join(', ')
+      : 'No material banking-risk reduction applied.'
+  ];
 
-  const assessmentId = Utilities.getUuid();
-  const confidenceScore = Math.max(
-    toNumber_(stableCalculation.confidenceScore),
-    toNumber_(originalCapacity.confidenceScore)
-  );
+  const lendingCapacity = {
+    recommendedAmount: maximumLoanAmount,
+    stretchAmount: maximumLoanAmount,
+    confidence: confidence,
+    confidenceScore: confidenceScore,
+    historicalAnchor: roundToNearest_(historicalAmount, VFC_SIMPLE_CONFIG.ROUNDING),
+    cashFlowCapacity: roundToNearest_(bankingAmount, VFC_SIMPLE_CONFIG.ROUNDING),
+    revenueCapacity: roundToNearest_(marketCap, VFC_SIMPLE_CONFIG.ROUNDING),
+    calculationNotes: calculationNotes
+  };
 
-  const response = {
+  const underwritingSummary = {
+    summary: maximumLoanAmount > 0 ? 'Maximum recommended loan' : 'Manual review required',
+    recommended_amount: maximumLoanAmount,
+    stretch_amount: maximumLoanAmount,
+    strongest_lender: rankings.length ? rankings[0].lenderName : '',
+    explanation:
+      'The recommendation is based on the closest historical lender outcomes in the Training Data and the current bank-statement profile.',
+    fundamental_score: score,
+    risk_grade: fundamental.grade || '',
+    key_strengths: fundamental.strengths || [],
+    key_risks: fundamental.risks || []
+  };
+
+  return JSON.parse(JSON.stringify({
     ok: true,
     assessmentId: assessmentId,
-    modelVersion: VFC_INSTITUTIONAL_CONFIG.MODEL_VERSION,
-    activeProductionModel: VFC_INSTITUTIONAL_CONFIG.MODEL_VERSION,
+    modelVersion: VFC_SIMPLE_CONFIG.MODEL_VERSION,
+    activeProductionModel: VFC_SIMPLE_CONFIG.MODEL_VERSION,
     companyName: companyName,
     period: period,
     currentFeatures: current,
     fundamentalScorecard: fundamental,
-    expertReview: deterministicReview,
-    lendingCapacity: capacity,
+    lendingCapacity: lendingCapacity,
     lenderRankings: rankings,
-    underwritingSummary: decision,
+    underwritingSummary: underwritingSummary,
     institutionalAssessment: {
-      modelVersion: VFC_INSTITUTIONAL_CONFIG.MODEL_VERSION,
+      modelVersion: VFC_SIMPLE_CONFIG.MODEL_VERSION,
       maximumLoanAmount: maximumLoanAmount,
-      originalModelAmount: toNumber_(originalCapacity.recommendedAmount),
-      historicalExpectedAmount: stableCalculation.historicalExpectedAmount,
-      currentBankingAmount: stableCalculation.currentBankingAmount,
-      verifiedRegressionBenchmark: benchmark.amount,
-      regressionGuardApplied: regressionGuardApplied,
-      regressionBenchmarkSource: benchmark.source,
-      amountConfidence: confidenceLabel_(confidenceScore),
+      amountConfidence: confidence,
       amountConfidenceScore: confidenceScore,
-      businessHealthScore: toNumber_(fundamental.score),
+      businessHealthScore: score,
       riskGrade: fundamental.grade || '',
-      averageMonthlyDeposits: toNumber_(current.averageMonthlyDeposits),
-      historicalAnchor: toNumber_(originalCapacity.historicalAnchor),
-      cashFlowCapacity: toNumber_(originalCapacity.cashFlowCapacity),
-      revenueCapacity: toNumber_(originalCapacity.revenueCapacity),
-      strongestLender: top.lenderName || '',
-      lenderFitScore: toNumber_(top.compositeScore),
-      calculationNotes: stableCalculation.calculationNotes.concat(
-        benchmark.amount > 0
-          ? ['Verified regression benchmark: ' + benchmark.amount + ' from ' + benchmark.source + '.']
-          : ['No prior verified benchmark was found for this exact company and period.'],
-        regressionGuardApplied
-          ? ['Regression safeguard applied: the result was not allowed to fall below the verified benchmark.']
-          : ['Regression safeguard was not required.']
-      ),
-      strengths: Array.isArray(fundamental.strengths) ? fundamental.strengths : [],
-      risks: Array.isArray(fundamental.risks) ? fundamental.risks : [],
+      averageMonthlyDeposits: deposits,
+      historicalExpectedAmount: roundToNearest_(historicalAmount, VFC_SIMPLE_CONFIG.ROUNDING),
+      currentBankingAmount: roundToNearest_(bankingAmount, VFC_SIMPLE_CONFIG.ROUNDING),
+      comparableCases: closestCases.length,
+      comparableApprovals: closestApprovals.length,
+      observedApprovalRate: Math.round(approvalRate * 100),
+      strongestLender: rankings.length ? rankings[0].lenderName : '',
+      closestHistoricalApprovals: closestHistoricalApprovals,
+      calculationNotes: calculationNotes,
+      strengths: fundamental.strengths || [],
+      risks: fundamental.risks || [],
       decision: maximumLoanAmount > 0
         ? 'Maximum recommended loan'
         : 'No automated loan amount recommended',
       methodologyNote:
-        'Production model ' + VFC_INSTITUTIONAL_CONFIG.MODEL_VERSION +
-        ' uses deterministic historical and banking calculations. OpenAI wording, pattern learning and newly added training files cannot reduce a previously verified result for the exact same company and statement period.'
+        'One simple model is active: closest historical training outcomes are adjusted to the current business deposits and checked against current banking conduct. No AI amount adjustment, regression floor, pattern learner, term sizing or shadow model is used.'
     },
     disclaimer:
-      'VFC internal decision support only. The recommendation is based on uploaded bank statements and recorded historical outcomes and is not a lender approval or guarantee.'
-  };
-
-  return JSON.parse(JSON.stringify(response));
+      'VFC internal decision support only. This recommendation is based on uploaded bank statements and recorded historical lender outcomes and is not a lender approval or guarantee.'
+  }));
 }
 
-function buildDeterministicProductionReview_(fundamental) {
-  return {
-    risk_score: toNumber_(fundamental.score),
-    risk_grade: fundamental.grade || '',
-    executive_summary: 'Deterministic banking and historical analysis completed.',
-    key_strengths: Array.isArray(fundamental.strengths) ? fundamental.strengths : [],
-    key_risks: Array.isArray(fundamental.risks) ? fundamental.risks : [],
-    missing_information: [],
-    recommended_conditions: []
-  };
+function simpleBuildComparableCases_(current, outcomes) {
+  const currentDeposits = Math.max(0, toNumber_(current.averageMonthlyDeposits));
+  const cases = [];
+
+  (outcomes || []).forEach(function(outcome) {
+    const decision = simpleDecision_(outcome.decision);
+    if (!decision || !outcome.companyName) return;
+
+    let features;
+    try {
+      features = buildPowerFeatures_(outcome.companyName, outcome.period);
+    } catch (error) {
+      return;
+    }
+
+    if (!features || !features.statementCount || !toNumber_(features.averageMonthlyDeposits)) return;
+
+    const similarity = powerSimilarity_(current, features);
+    if (similarity < VFC_SIMPLE_CONFIG.MIN_SIMILARITY) return;
+
+    const approvedAmount = Math.max(0, toNumber_(outcome.approvedAmount));
+    const historicalDeposits = Math.max(0, toNumber_(features.averageMonthlyDeposits));
+    const depositRatio = historicalDeposits > 0
+      ? clamp_(currentDeposits / historicalDeposits, 0.60, 1.45)
+      : 1;
+    const isPositive = decision === 'Approved' || decision === 'Conditional';
+
+    cases.push({
+      companyName: outcome.companyName || '',
+      period: outcome.period || '',
+      lenderName: outcome.lenderName || 'Unknown lender',
+      decision: decision,
+      declineReason: outcome.declineReason || '',
+      approvedAmount: approvedAmount,
+      adjustedAmount: isPositive && approvedAmount > 0
+        ? approvedAmount * depositRatio
+        : 0,
+      similarity: similarity,
+      isPositive: isPositive,
+      decisionWeight: decision === 'Conditional' ? 0.85 : 1
+    });
+  });
+
+  cases.sort(function(a, b) {
+    return b.similarity - a.similarity;
+  });
+  return cases;
 }
 
-function calculateStableHistoricalMaximum_(originalAmount, historicalAnchor, features, fundamental, review, top) {
+function simpleHistoricalAmount_(approvals) {
+  if (!approvals || !approvals.length) return 0;
+
+  let weightedTotal = 0;
+  let totalWeight = 0;
+  const weightedRows = [];
+
+  approvals.forEach(function(row) {
+    const weight = Math.pow(Math.max(0.05, row.similarity), 2) * row.decisionWeight;
+    weightedTotal += row.adjustedAmount * weight;
+    totalWeight += weight;
+    weightedRows.push({ value: row.adjustedAmount, weight: weight });
+  });
+
+  const weightedAverage = totalWeight ? weightedTotal / totalWeight : 0;
+  const weightedMedian = simpleWeightedMedian_(weightedRows);
+  return weightedAverage * 0.65 + weightedMedian * 0.35;
+}
+
+function simpleWeightedMedian_(rows) {
+  if (!rows || !rows.length) return 0;
+  const sorted = rows.slice().sort(function(a, b) { return a.value - b.value; });
+  const total = sorted.reduce(function(sum, row) { return sum + row.weight; }, 0);
+  let running = 0;
+  for (let i = 0; i < sorted.length; i++) {
+    running += sorted[i].weight;
+    if (running >= total / 2) return sorted[i].value;
+  }
+  return sorted[sorted.length - 1].value;
+}
+
+function simpleApprovalRate_(cases) {
+  if (!cases || !cases.length) return 0;
+  let positive = 0;
+  let total = 0;
+  cases.forEach(function(row) {
+    const weight = Math.max(0.05, row.similarity);
+    total += weight;
+    if (row.decision === 'Approved') positive += weight;
+    else if (row.decision === 'Conditional') positive += weight * 0.65;
+  });
+  return total ? positive / total : 0;
+}
+
+function simpleBankingAmount_(features, fundamental) {
   const deposits = Math.max(0, toNumber_(features.averageMonthlyDeposits));
-  const fundamentalScore = toNumber_(fundamental.score);
-  const riskScore = toNumber_(review.risk_score || fundamentalScore);
-  const lenderFit = toNumber_(top.compositeScore);
-  const historicalExpected = historicalAnchor > 0 ? historicalAnchor : originalAmount;
+  const score = toNumber_(fundamental.score);
+  const multiple = score >= 82 ? 1.05 :
+    score >= 70 ? 0.90 :
+    score >= 58 ? 0.75 :
+    score >= 45 ? 0.55 : 0.35;
+  return deposits * multiple;
+}
 
-  const currentBankingAmount = deposits * (
-    fundamentalScore >= 82 ? 1.05 :
-    fundamentalScore >= 70 ? 0.95 :
-    fundamentalScore >= 58 ? 0.80 :
-    fundamentalScore >= 45 ? 0.62 : 0.40
-  );
-  const deterministicRiskAmount = historicalExpected * clamp_(riskScore / 75, 0.80, 1.10);
+function simpleRiskAdjustment_(features, fundamental) {
+  let factor = 1;
+  const reasons = [];
 
-  let blended =
-    historicalExpected * VFC_INSTITUTIONAL_CONFIG.HISTORICAL_WEIGHT +
-    currentBankingAmount * VFC_INSTITUTIONAL_CONFIG.CURRENT_BANKING_WEIGHT +
-    deterministicRiskAmount * VFC_INSTITUTIONAL_CONFIG.DETERMINISTIC_RISK_WEIGHT;
-
-  let materialRiskFactor = 1;
-  const materialRisks = [];
   if (toNumber_(features.nsfPerMonth) > 2) {
-    materialRiskFactor -= 0.10;
-    materialRisks.push('more than two NSF events per month');
+    factor *= 0.88;
+    reasons.push('frequent NSF activity');
   }
   if (features.suspectedStacking) {
-    materialRiskFactor -= 0.12;
-    materialRisks.push('possible stacking');
+    factor *= 0.85;
+    reasons.push('possible stacking');
   }
   if (features.negativeBalanceFlag && features.overdraftFlag) {
-    materialRiskFactor -= 0.08;
-    materialRisks.push('negative-balance and overdraft conduct');
+    factor *= 0.90;
+    reasons.push('negative balance and overdraft activity');
   }
   if (toNumber_(features.depositTrend) < -0.20) {
-    materialRiskFactor -= 0.10;
-    materialRisks.push('material deposit decline');
+    factor *= 0.90;
+    reasons.push('material deposit decline');
   }
   if (toNumber_(features.depositVolatility) > 0.65) {
-    materialRiskFactor -= 0.07;
-    materialRisks.push('extreme deposit volatility');
+    factor *= 0.93;
+    reasons.push('high deposit volatility');
   }
   if (toNumber_(fundamental.dataQualityScore) < 50) {
-    materialRiskFactor -= 0.08;
-    materialRisks.push('low data quality');
+    factor *= 0.90;
+    reasons.push('low data quality');
   }
-  materialRiskFactor = clamp_(materialRiskFactor, 0.65, 1.05);
-  blended *= materialRiskFactor;
-
-  const noMaterialDeterioration = materialRiskFactor >= 0.98 && fundamentalScore >= 50;
-  if (noMaterialDeterioration && historicalExpected > 0) {
-    blended = Math.max(blended, historicalExpected * 0.92);
-  }
-  if (noMaterialDeterioration) {
-    blended = Math.max(blended, originalAmount);
-  }
-
-  const marketCap = deposits > 0
-    ? deposits * (fundamentalScore >= 70 ? 1.25 : fundamentalScore >= 58 ? 1.05 : 0.85)
-    : blended;
-  if (marketCap > 0) {
-    blended = Math.min(blended, Math.max(marketCap, historicalExpected * 0.92));
-  }
-
-  let maximumLoanAmount = roundToNearest_(
-    Math.max(0, blended),
-    VFC_INSTITUTIONAL_CONFIG.ROUNDING
-  );
-  if (fundamentalScore < 40 || !deposits) maximumLoanAmount = 0;
-
-  const confidenceScore = clamp_(Math.round(
-    Math.min(100, toNumber_(top.similarCases) / 8 * 100) * 0.35 +
-    Math.min(100, toNumber_(top.similarApprovals) / 6 * 100) * 0.30 +
-    toNumber_(fundamental.dataQualityScore) * 0.20 +
-    Math.min(100, toNumber_(features.monthsCovered) / 6 * 100) * 0.15
-  ), 0, 100);
 
   return {
-    maximumLoanAmount: maximumLoanAmount,
-    historicalExpectedAmount: roundToNearest_(historicalExpected, VFC_INSTITUTIONAL_CONFIG.ROUNDING),
-    currentBankingAmount: roundToNearest_(currentBankingAmount, VFC_INSTITUTIONAL_CONFIG.ROUNDING),
-    materialRiskFactor: round2_(materialRiskFactor),
-    materialRisks: materialRisks,
-    confidenceScore: confidenceScore,
-    calculationNotes: [
-      'Original engine amount: ' + roundToNearest_(originalAmount, VFC_INSTITUTIONAL_CONFIG.ROUNDING),
-      'Historical expected amount: ' + roundToNearest_(historicalExpected, VFC_INSTITUTIONAL_CONFIG.ROUNDING),
-      'Current banking amount: ' + roundToNearest_(currentBankingAmount, VFC_INSTITUTIONAL_CONFIG.ROUNDING),
-      'Deterministic weighting: 70% historical / 20% current banking / 10% risk score',
-      'Material current-risk factor: ' + Math.round(materialRiskFactor * 100) + '%',
-      'Top lender fit: ' + lenderFit + '/100',
-      materialRisks.length
-        ? 'Material risk adjustments: ' + materialRisks.join(', ')
-        : 'No material deterioration adjustment applied.'
-    ]
+    factor: clamp_(factor, 0.65, 1),
+    reasons: reasons
   };
 }
 
-/**
- * Finds the strongest proven benchmark for the exact same company and period.
- * Priority:
- * 1. Actual approved/conditional lender outcome.
- * 2. A saved VFC-HISTORICAL-MAX-4.1 or 4.2 assessment.
- * 3. A prediction outcome created by one of those proven versions.
- */
-function getVerifiedRegressionBenchmark_(companyName, period) {
-  const actualRows = stableReadSheet_('Prediction Outcomes').filter(function(row) {
-    return sameText_(row.companyName, companyName) &&
-      stablePeriodMatches_(row.period, period) &&
-      /approved|conditional/i.test(String(row.actualDecision || '')) &&
-      toNumber_(row.actualApprovedAmount) > 0;
-  });
+function simpleConfidenceScore_(approvals, cases, fundamental, features) {
+  const averageSimilarity = approvals.length
+    ? approvals.reduce(function(sum, row) { return sum + row.similarity; }, 0) / approvals.length
+    : cases.length
+      ? cases.reduce(function(sum, row) { return sum + row.similarity; }, 0) / cases.length
+      : 0;
 
-  if (actualRows.length) {
+  return clamp_(Math.round(
+    Math.min(100, approvals.length / 6 * 100) * 0.40 +
+    Math.min(100, averageSimilarity * 100) * 0.35 +
+    toNumber_(fundamental.dataQualityScore) * 0.15 +
+    Math.min(100, toNumber_(features.monthsCovered) / 6 * 100) * 0.10
+  ), 0, 100);
+}
+
+function simpleBuildLenderRankings_(comparables) {
+  const lenderNames = unique_((comparables || []).map(function(row) {
+    return row.lenderName;
+  }).filter(Boolean));
+
+  return lenderNames.map(function(lenderName) {
+    const rows = comparables.filter(function(row) {
+      return sameText_(row.lenderName, lenderName);
+    }).slice(0, VFC_SIMPLE_CONFIG.MAX_COMPARABLE_CASES);
+
+    const approvals = rows.filter(function(row) {
+      return row.isPositive && row.approvedAmount > 0;
+    });
+    const declines = rows.filter(function(row) {
+      return row.decision === 'Declined';
+    });
+    const approvalRate = simpleApprovalRate_(rows);
+    const averageSimilarity = rows.length
+      ? rows.reduce(function(sum, row) { return sum + row.similarity; }, 0) / rows.length
+      : 0;
+    const score = Math.round(averageSimilarity * 60 + approvalRate * 40);
+    const amounts = approvals.map(function(row) {
+      return row.approvedAmount;
+    }).sort(function(a, b) { return a - b; });
+
     return {
-      amount: roundToNearest_(Math.max.apply(null, actualRows.map(function(row) {
-        return toNumber_(row.actualApprovedAmount);
-      })), VFC_INSTITUTIONAL_CONFIG.ROUNDING),
-      source: 'verified actual lender outcome'
+      lenderName: lenderName,
+      compositeScore: score,
+      observedFit: simpleFitLabel_(score, rows.length),
+      confidence: rows.length >= 6 && approvals.length >= 3 ? 'High' : rows.length >= 3 ? 'Moderate' : 'Low',
+      historicalCases: rows.length,
+      similarCases: rows.length,
+      similarApprovals: approvals.length,
+      similarDeclines: declines.length,
+      observedApprovalRate: rows.length ? Math.round(approvalRate * 100) + '%' : 'N/A',
+      lowApprovedAmount: amounts.length ? amounts[0] : '',
+      medianApprovedAmount: amounts.length ? median_(amounts) : '',
+      highApprovedAmount: amounts.length ? amounts[amounts.length - 1] : '',
+      reasoning: approvals.length + ' of ' + rows.length + ' closest training cases were approved or conditional.',
+      risks: unique_(declines.map(function(row) { return row.declineReason; }).filter(Boolean)).slice(0, 4),
+      conditions: []
     };
-  }
-
-  const provenVersion = /VFC-HISTORICAL-MAX-4\.(1|2)/i;
-  const assessmentRows = stableReadSheet_('Institutional Assessments').filter(function(row) {
-    return sameText_(row.companyName, companyName) &&
-      stablePeriodMatches_(row.period, period) &&
-      provenVersion.test(String(row.modelVersion || '')) &&
-      toNumber_(row.maximumLoanAmount) > 0;
+  }).sort(function(a, b) {
+    return b.compositeScore - a.compositeScore;
   });
-
-  if (assessmentRows.length) {
-    return {
-      amount: roundToNearest_(Math.max.apply(null, assessmentRows.map(function(row) {
-        return toNumber_(row.maximumLoanAmount);
-      })), VFC_INSTITUTIONAL_CONFIG.ROUNDING),
-      source: 'previous proven VFC 4.1/4.2 assessment'
-    };
-  }
-
-  const predictionRows = stableReadSheet_('Prediction Outcomes').filter(function(row) {
-    return sameText_(row.companyName, companyName) &&
-      stablePeriodMatches_(row.period, period) &&
-      provenVersion.test(String(row.modelVersion || '')) &&
-      toNumber_(row.predictedAmount) > 0;
-  });
-
-  if (predictionRows.length) {
-    return {
-      amount: roundToNearest_(Math.max.apply(null, predictionRows.map(function(row) {
-        return toNumber_(row.predictedAmount);
-      })), VFC_INSTITUTIONAL_CONFIG.ROUNDING),
-      source: 'previous proven VFC prediction'
-    };
-  }
-
-  return { amount: 0, source: 'none' };
 }
 
-function stableReadSheet_(sheetName) {
-  try {
-    return getSheetObjects_(sheetName) || [];
-  } catch (error) {
-    return [];
-  }
+function simpleDecision_(value) {
+  const text = String(value || '').trim().toLowerCase();
+  if (text.indexOf('approv') >= 0) return 'Approved';
+  if (text.indexOf('condition') >= 0) return 'Conditional';
+  if (text.indexOf('declin') >= 0 || text.indexOf('reject') >= 0) return 'Declined';
+  return '';
 }
 
-function stablePeriodMatches_(left, right) {
-  if (sameText_(left, right)) return true;
-  return stablePeriodKey_(left) === stablePeriodKey_(right);
+function simpleFitLabel_(score, cases) {
+  if (cases < 2) return 'Insufficient history';
+  return score >= 80 ? 'Strong fit' :
+    score >= 68 ? 'Good fit' :
+    score >= 55 ? 'Caution' : 'Weak fit';
 }
 
-function stablePeriodKey_(value) {
-  return String(value || '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]/g, '');
-}
-
-function confidenceLabel_(scoreValue) {
-  const score = toNumber_(scoreValue);
+function simpleConfidenceLabel_(score) {
   return score >= 80 ? 'High' : score >= 60 ? 'Moderate' : 'Low';
+}
+
+function simplePeriodMatches_(left, right) {
+  if (sameText_(left, right)) return true;
+  const clean = function(value) {
+    return String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  };
+  return clean(left) === clean(right);
 }
 
 function getProductionModelStatus() {
   return {
-    modelVersion: VFC_INSTITUTIONAL_CONFIG.MODEL_VERSION,
-    deterministicProductionSizing: true,
-    openAIChangesLiveAmount: false,
-    patternLearningChangesLiveAmount: false,
-    verifiedRegressionFloorActive: true,
-    resultReturnedBeforeAuditLogging: true
+    modelVersion: VFC_SIMPLE_CONFIG.MODEL_VERSION,
+    activeLayers: 1,
+    amountSource: 'Historical Training Data plus current banking checks',
+    openAIChangesAmount: false,
+    patternLearningActive: false,
+    regressionFloorActive: false,
+    termSizingActive: false,
+    shadowModelActive: false
   };
 }
