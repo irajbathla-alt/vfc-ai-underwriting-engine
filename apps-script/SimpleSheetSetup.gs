@@ -73,11 +73,20 @@ function cleanupUnusedSheets() {
   };
 }
 
-/** Runs the safe legacy cleanup only once for this Apps Script project. */
+/**
+ * Skips work only when cleanup has run and no obsolete sheet has reappeared.
+ * This protects the simple engine if an old manual function is run later.
+ */
 function cleanupUnusedSheetsOnce_() {
-  const properties = PropertiesService.getScriptProperties();
-  if (properties.getProperty(VFC_SHEET_CLEANUP_PROPERTY)) {
-    return { ok: true, skipped: true, message: 'Legacy sheet cleanup was already completed.' };
+  const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  const legacyStillPresent = VFC_UNUSED_SHEETS.some(function(name) {
+    return !!spreadsheet.getSheetByName(name);
+  });
+  const alreadyCleaned = !!PropertiesService.getScriptProperties()
+    .getProperty(VFC_SHEET_CLEANUP_PROPERTY);
+
+  if (alreadyCleaned && !legacyStillPresent) {
+    return { ok: true, skipped: true, message: 'No unused legacy sheets are present.' };
   }
   return cleanupUnusedSheets();
 }
