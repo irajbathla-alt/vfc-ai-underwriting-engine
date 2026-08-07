@@ -22,9 +22,6 @@ function generateInstitutionalAssessmentSafe(companyOrRequest, requestedPeriod) 
   const companyName = request.companyName;
   const period = resolveLatestAssessmentPeriod_(companyName, request.period);
 
-  setupSimpleVFC();
-  cleanupUnusedSheetsOnce_();
-
   let debtSignalRefresh = null;
   if (typeof refreshDebtSignalsForPeriodSafe === 'function') {
     debtSignalRefresh = refreshDebtSignalsForPeriodSafe({
@@ -474,6 +471,6 @@ function getProductionModelStatus() {
     shadowModelActive: false,
     recurringDebtExtractionActive: typeof getValidatedBankingFeatures_ === 'function',
     recurringDebtChangesFormula: false,
-    legacySheetCleanupActive: true
+    legacySheetCleanupActive: false
   };
 }
