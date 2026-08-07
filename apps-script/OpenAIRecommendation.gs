@@ -1,5 +1,5 @@
 const VFC_OPENAI_RECOMMENDATION_CONFIG = {
-  MODEL_VERSION: 'VFC-OPENAI-SHEETS-1.0',
+  MODEL_VERSION: 'VFC-OPENAI-SHEETS-1.1-DEBT-AWARE',
   DEFAULT_MODEL: 'gpt-4.1-mini',
   MAX_COMPARABLE_CASES: 24,
   MIN_SIMILARITY: 0.30,
@@ -12,8 +12,9 @@ const VFC_OPENAI_RECOMMENDATION_CONFIG = {
  * Separate OpenAI recommendation.
  *
  * Reads current banking features and verified historical outcomes from the
- * existing Sheets on every request. It never writes to a Sheet and never
- * changes the production "Our Max" result.
+ * existing Sheets on every request. It never changes the production "Our Max"
+ * formula. When available, it also considers validated statement months,
+ * financing credits, and recurring debt / PAD obligations.
  */
 function generateOpenAIRecommendationSafe(companyOrRequest, requestedPeriod) {
   const request = vfcOaiNormalizeRequest_(companyOrRequest, requestedPeriod);
@@ -54,6 +55,9 @@ function generateOpenAIRecommendationSafe(companyOrRequest, requestedPeriod) {
         deposit_adjusted_amount: row.adjustedAmount,
         similarity_percent: Math.round(row.similarity * 100),
         average_monthly_deposits: row.features.averageMonthlyDeposits,
+        estimated_operating_monthly_deposits: row.features.estimatedOperatingMonthlyDeposits,
+        existing_monthly_debt_service: row.features.existingMonthlyDebtService,
+        debt_service_to_deposits_ratio: row.features.debtServiceToDepositsRatio,
         deposit_withdrawal_ratio: row.features.depositWithdrawalRatio,
         nsf_per_month: row.features.nsfPerMonth,
         negative_balance: row.features.negativeBalanceFlag,
@@ -66,17 +70,24 @@ function generateOpenAIRecommendationSafe(companyOrRequest, requestedPeriod) {
   const instruction = [
     'You are the VFC experimental underwriting analyst.',
     'Use only the supplied current banking profile and verified historical cases.',
-    'Do not invent lender policies, lender criteria, or facts not in the data.',
+    'Do not invent lender policies, lender criteria, outstanding balances, payoff amounts, or facts not in the data.',
     'This recommendation must remain separate from the production Our Max calculation.',
     'Use approved and conditional cases to estimate the amount.',
     'Do not treat a decline as a zero-dollar approval; use declines only for approval probability and risk analysis.',
     'Prefer the most similar cases and explain the recommendation in plain language.',
     'Keep the recommended amount reasonably supported by deposit-adjusted historical approvals.',
-    'Return the best-supported lender from the lender names present in the comparable cases.'
+    'Return the best-supported lender from the lender names present in the comparable cases.',
+    'Treat confirmed recurring financing debt service as a direct capacity constraint when it is supplied.',
+    'Consider the observed payment frequency and monthly equivalent of active debt obligations.',
+    'Do not assume that a detected financing advance equals the current outstanding balance.',
+    'Financing advances are not operating revenue. When estimated operating monthly deposits are provided, use them together with gross deposits to understand recurring business cash flow.',
+    'Tax/government PADs, insurance-finance payments, credit-card payments, and unclear recurring PADs are separate from confirmed MCA/loan debt unless the supplied category proves otherwise.'
   ].join(' ');
 
   const raw = vfcOaiCallOpenAI_(instruction, promptData);
   const protectedResult = vfcOaiApplySanityChecks_(raw, current, cases, positiveCases);
+  const debtProfile = current && current.debtProfile ? current.debtProfile : {};
+  const inputAudit = current && current.inputQualityAudit ? current.inputQualityAudit : {};
 
   return JSON.parse(JSON.stringify({
     ok: true,
@@ -97,6 +108,17 @@ function generateOpenAIRecommendationSafe(companyOrRequest, requestedPeriod) {
       keyRisks: protectedResult.keyRisks,
       sanityCapApplied: protectedResult.sanityCapApplied
     },
+    bankingInputsUsed: {
+      grossAverageMonthlyDeposits: vfcOaiNumber_(current.averageMonthlyDeposits),
+      estimatedOperatingMonthlyDeposits: vfcOaiNumber_(current.estimatedOperatingMonthlyDeposits),
+      detectedFinancingCredits: vfcOaiNumber_(current.detectedFinancingCredits),
+      existingMonthlyDebtService: vfcOaiNumber_(current.existingMonthlyDebtService),
+      otherRecurringMonthlyObligations: vfcOaiNumber_(current.otherRecurringMonthlyObligations),
+      debtServiceToDepositsRatio: vfcOaiNumber_(current.debtServiceToDepositsRatio),
+      activeDebtObligations: Array.isArray(debtProfile.activeDebtObligations) ? debtProfile.activeDebtObligations : [],
+      otherRecurringObligations: Array.isArray(debtProfile.otherRecurringObligations) ? debtProfile.otherRecurringObligations : [],
+      inputQualityWarnings: Array.isArray(inputAudit.warnings) ? inputAudit.warnings : []
+    },
     trainingDataRead: {
       totalHistoricalOutcomes: outcomes.length,
       validComparableCases: cases.length,
@@ -104,11 +126,13 @@ function generateOpenAIRecommendationSafe(companyOrRequest, requestedPeriod) {
       ignoredCases: built.ignoredCases.length
     },
     dataSentToOpenAI: {
-      structuredMetricsOnly: true,
+      recommendationRequestStructuredMetricsOnly: true,
       historicalCompanyNamesSent: false,
-      bankStatementTextSent: false,
-      accountNumbersSent: false,
-      declineNotesSent: false
+      recommendationRequestBankStatementTextSent: false,
+      recommendationRequestAccountNumbersSent: false,
+      declineNotesSent: false,
+      debtExtractionUsesStatementText: true,
+      accountNumbersRedactedBeforeDebtExtraction: true
     },
     note: 'OpenAI recommendation only. It does not change Our Max and is not a lender approval or guarantee.'
   }));
@@ -131,6 +155,8 @@ function getOpenAIRecommendationStatus() {
   return {
     modelVersion: VFC_OPENAI_RECOMMENDATION_CONFIG.MODEL_VERSION,
     readsLiveSheetsEveryRun: true,
+    readsValidatedBankingInputs: typeof getValidatedBankingFeatures_ === 'function',
+    usesRecurringDebtService: true,
     writesToSheets: false,
     changesOurMax: false,
     defaultOpenAIModel: VFC_OPENAI_RECOMMENDATION_CONFIG.DEFAULT_MODEL,
@@ -187,7 +213,7 @@ function vfcOaiCallOpenAI_(instruction, promptData) {
         format: {
           type: 'json_schema',
           name: 'vfc_openai_recommendation',
-          description: 'A separate experimental underwriting recommendation based only on supplied VFC historical outcomes.',
+          description: 'A separate experimental underwriting recommendation based only on supplied VFC historical outcomes and validated banking inputs.',
           strict: true,
           schema: schema
         }
@@ -377,6 +403,9 @@ function vfcOaiHistoricalOutcomes_() {
 }
 
 function vfcOaiBuildFeatures_(companyName, period) {
+  if (typeof getValidatedBankingFeatures_ === 'function') {
+    return getValidatedBankingFeatures_(companyName, period);
+  }
   if (typeof buildPowerFeatures_ === 'function') {
     return buildPowerFeatures_(companyName, period);
   }
@@ -435,8 +464,42 @@ function vfcOaiValidateHistorical_(features) {
 }
 
 function vfcOaiCompactFeatures_(features) {
+  const debtProfile = features && features.debtProfile ? features.debtProfile : {};
+  const activeDebt = Array.isArray(debtProfile.activeDebtObligations)
+    ? debtProfile.activeDebtObligations.slice(0, 10).map(function(item) {
+        return {
+          counterparty: String(item.counterparty || ''),
+          category: String(item.category || ''),
+          paymentAmount: vfcOaiRound_(vfcOaiNumber_(item.paymentAmount), 1),
+          frequency: String(item.frequency || ''),
+          monthlyEquivalent: vfcOaiRound_(vfcOaiNumber_(item.monthlyEquivalent), 1),
+          occurrences: vfcOaiNumber_(item.occurrences),
+          confidence: String(item.confidence || '')
+        };
+      })
+    : [];
+  const otherObligations = Array.isArray(debtProfile.otherRecurringObligations)
+    ? debtProfile.otherRecurringObligations.slice(0, 8).map(function(item) {
+        return {
+          counterparty: String(item.counterparty || ''),
+          category: String(item.category || ''),
+          paymentAmount: vfcOaiRound_(vfcOaiNumber_(item.paymentAmount), 1),
+          frequency: String(item.frequency || ''),
+          monthlyEquivalent: vfcOaiRound_(vfcOaiNumber_(item.monthlyEquivalent), 1),
+          confidence: String(item.confidence || '')
+        };
+      })
+    : [];
+
   return {
     averageMonthlyDeposits: vfcOaiRound_(vfcOaiNumber_(features.averageMonthlyDeposits), 1),
+    estimatedOperatingMonthlyDeposits: vfcOaiRound_(vfcOaiNumber_(features.estimatedOperatingMonthlyDeposits), 1),
+    detectedFinancingCredits: vfcOaiRound_(vfcOaiNumber_(features.detectedFinancingCredits), 1),
+    existingMonthlyDebtService: vfcOaiRound_(vfcOaiNumber_(features.existingMonthlyDebtService), 1),
+    otherRecurringMonthlyObligations: vfcOaiRound_(vfcOaiNumber_(features.otherRecurringMonthlyObligations), 1),
+    debtServiceToDepositsRatio: vfcOaiRound_(vfcOaiNumber_(features.debtServiceToDepositsRatio), 0.0001),
+    activeDebtObligations: activeDebt,
+    otherRecurringObligations: otherObligations,
     totalDeposits: vfcOaiRound_(vfcOaiNumber_(features.totalDeposits), 1),
     totalWithdrawals: vfcOaiRound_(vfcOaiNumber_(features.totalWithdrawals), 1),
     depositWithdrawalRatio: vfcOaiRound_(vfcOaiNumber_(features.depositWithdrawalRatio), 0.01),
