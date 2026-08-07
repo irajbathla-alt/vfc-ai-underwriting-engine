@@ -1,6 +1,6 @@
 const VFC_BANKING_INPUT_CONFIG = {
-  MODEL_VERSION: 'VFC-BANKING-INPUT-QUALITY-2.1-FIXED-HEADERS',
-  SIGNAL_PREFIX: 'VFC_BANKING_V3:',
+  MODEL_VERSION: 'VFC-BANKING-INPUT-QUALITY-2.2-DATE-BLOCKS',
+  SIGNAL_PREFIX: 'VFC_BANKING_V4:',
   ACTIVE_LOOKBACK_DAYS: 45,
   LATEST_BATCH_GAP_MINUTES: 10
 };
@@ -34,6 +34,7 @@ function getBankingInputQualityStatus() {
     verifiesStatementHeaderTotals:true,
     extractsRecurringDebtPayments:true,
     extractsFinancingCredits:true,
+    transactionDateBlocks:true,
     debtExtractionUsesOpenAI:false,
     createsNewSheets:false,
     changesProductionFormula:false
@@ -109,7 +110,7 @@ function vfcBiqRefresh_(companyName, period) {
 
   rows.forEach(function(row) {
     const cached = vfcBiqParseCell_(row.possibleMcaOrLoanPayments);
-    if (cached && cached.version >= 3 && cached.headerSummary && vfcBiqNum_(cached.headerSummary.totalDeposits) > 0) {
+    if (cached && cached.version >= 4 && cached.headerSummary && vfcBiqNum_(cached.headerSummary.totalDeposits) > 0) {
       filesSkipped++;
       return;
     }
@@ -121,7 +122,7 @@ function vfcBiqRefresh_(companyName, period) {
     try {
       const text = extractTextFromPdf_(upload.fileId);
       const parsed = vfcBiqParseStatement_(text, row);
-      const payload = {version:3, analyzedAt:new Date().toISOString(), fileName:row.fileName, headerSummary:parsed.headerSummary, debtPayments:parsed.debtPayments, financingCredits:parsed.financingCredits};
+      const payload = {version:4, analyzedAt:new Date().toISOString(), fileName:row.fileName, headerSummary:parsed.headerSummary, debtPayments:parsed.debtPayments, financingCredits:parsed.financingCredits};
       summarySheet.getRange(row.rowNumber, row.signalColumn).setValue(VFC_BANKING_INPUT_CONFIG.SIGNAL_PREFIX + JSON.stringify(payload));
       filesAnalyzed++;
     } catch (e) {
@@ -188,20 +189,47 @@ function vfcBiqHeader_(text, fallback) {
 function vfcBiqTransactions_(text) {
   const lines=String(text||'').replace(/\r/g,'\n').split(/\n+/).map(function(x){return x.replace(/\s+/g,' ').trim();}).filter(Boolean);
   const ym=text.match(/\b(20\d{2})\b/), year=ym?Number(ym[1]):new Date().getFullYear();
-  let date=''; const debt=[], credits=[];
-  for(let i=0;i<lines.length;i++){
-    const d=vfcBiqDateLine_(lines[i],year); if(d) date=d;
-    const w=[lines[i],lines[i+1]||'',lines[i+2]||''].join(' ');
-    vfcBiqCap_(debt,date,w,/loan\s+payment\b.{0,120}?([0-9]{1,3}(?:,[0-9]{3})*\.\d{2}|[0-9]+\.\d{2})/i,'TERM_LOAN',vfcBiqLoan_(w),'High');
-    vfcBiqCap_(debt,date,w,/(?:merch\s+pad|merchant\s+(?:growth\s+)?pad)\b.{0,120}?([0-9]{1,3}(?:,[0-9]{3})*\.\d{2}|[0-9]+\.\d{2})/i,'MCA','Merchant Growth / MERCH PAD','High');
-    vfcBiqCap_(debt,date,w,/commercial\s+loans?.{0,150}?business\s+cr\s+eft.{0,90}?([0-9]{1,3}(?:,[0-9]{3})*\.\d{2}|[0-9]+\.\d{2})/i,'COMMERCIAL_LOAN','Commercial Loans','High');
-    vfcBiqCap_(debt,date,w,/(?:a-?kan\/?ipfs|\bipfs\b|premium\s+finance).{0,100}?([0-9]{1,3}(?:,[0-9]{3})*\.\d{2}|[0-9]+\.\d{2})/i,'INSURANCE_FINANCE','A-KAN/IPFS','High');
-    vfcBiqCap_(debt,date,w,/(?:cra|ccra)\s+canada.{0,100}?([0-9]{1,3}(?:,[0-9]{3})*\.\d{2}|[0-9]+\.\d{2})/i,'TAX_GOVERNMENT',/ccra/i.test(w)?'CCRA Canada':'CRA Canada','High');
-    if(/\bpad\b/i.test(w)&&!/merch\s+pad|merchant\s+(?:growth\s+)?pad|ipfs|cra|ccra/i.test(w)) vfcBiqCap_(debt,date,w,/\bpad\b.{0,120}?([0-9]{1,3}(?:,[0-9]{3})*\.\d{2}|[0-9]+\.\d{2})/i,'OTHER_RECURRING_PAD',vfcBiqPad_(w),'Moderate');
-    if(!/merch\s+pad|payment|debit/i.test(w)) vfcBiqCap_(credits,date,w,/merchant\s+growth\b.{0,100}?([0-9]{1,3}(?:,[0-9]{3})*\.\d{2}|[0-9]+\.\d{2})/i,'MCA_ADVANCE','Merchant Growth','High');
-    vfcBiqCap_(credits,date,w,/bcc\s+bf\s+rs\s*<?deftpymt>?\b.{0,100}?([0-9]{1,3}(?:,[0-9]{3})*\.\d{2}|[0-9]+\.\d{2})/i,'UNKNOWN_FINANCING_CREDIT','Possible Commercial Financing','Moderate');
+  const debt=[], credits=[];
+  let currentDate='', block=[];
+
+  function flushBlock() {
+    if (!block.length || !currentDate) { block=[]; return; }
+    const w=block.join(' ');
+    vfcBiqCapAll_(debt,currentDate,w,/loan\s+payment\b.{0,120}?([0-9]{1,3}(?:,[0-9]{3})*\.\d{2}|[0-9]+\.\d{2})/gi,'TERM_LOAN',vfcBiqLoan_(w),'High');
+    vfcBiqCapAll_(debt,currentDate,w,/(?:merch\s+pad|merchant\s+(?:growth\s+)?pad)\b.{0,90}?([0-9]{1,3}(?:,[0-9]{3})*\.\d{2}|[0-9]+\.\d{2})/gi,'MCA','Merchant Growth / MERCH PAD','High');
+    vfcBiqCapAll_(debt,currentDate,w,/commercial\s+loans?.{0,120}?business\s+cr\s+eft.{0,70}?([0-9]{1,3}(?:,[0-9]{3})*\.\d{2}|[0-9]+\.\d{2})/gi,'COMMERCIAL_LOAN','Commercial Loans','High');
+    vfcBiqCapAll_(debt,currentDate,w,/(?:a-?kan\/?ipfs|\bipfs\b|premium\s+finance).{0,80}?([0-9]{1,3}(?:,[0-9]{3})*\.\d{2}|[0-9]+\.\d{2})/gi,'INSURANCE_FINANCE','A-KAN/IPFS','High');
+    vfcBiqCapAll_(debt,currentDate,w,/(?:cra|ccra)\s+canada.{0,70}?([0-9]{1,3}(?:,[0-9]{3})*\.\d{2}|[0-9]+\.\d{2})/gi,'TAX_GOVERNMENT',/ccra/i.test(w)?'CCRA Canada':'CRA Canada','High');
+    if(/\bpad\b/i.test(w)) vfcBiqCapAll_(debt,currentDate,w,/\bpad\b(?!\s+(?:cra|ccra)\b).{0,80}?([0-9]{1,3}(?:,[0-9]{3})*\.\d{2}|[0-9]+\.\d{2})/gi,'OTHER_RECURRING_PAD',vfcBiqPad_(w),'Moderate');
+    vfcBiqCapAll_(credits,currentDate,w,/(?:investment\s+)?merchant\s+growth(?!\s*(?:\/\s*)?merch\s+pad)\b.{0,70}?([0-9]{1,3}(?:,[0-9]{3})*\.\d{2}|[0-9]+\.\d{2})/gi,'MCA_ADVANCE','Merchant Growth','High');
+    vfcBiqCapAll_(credits,currentDate,w,/bcc\s+bf\s+rs\s*<?deftpymt>?\b.{0,70}?([0-9]{1,3}(?:,[0-9]{3})*\.\d{2}|[0-9]+\.\d{2})/gi,'UNKNOWN_FINANCING_CREDIT','Possible Commercial Financing','Moderate');
+    block=[];
   }
+
+  for(let i=0;i<lines.length;i++) {
+    const d=vfcBiqDateLine_(lines[i],year);
+    if(d) {
+      flushBlock();
+      currentDate=d;
+      block=[lines[i]];
+    } else if(currentDate) {
+      block.push(lines[i]);
+    }
+  }
+  flushBlock();
   return {debtPayments:vfcBiqDedupe_(debt), financingCredits:vfcBiqDedupe_(credits)};
+}
+
+function vfcBiqCapAll_(arr,date,text,re,category,counterparty,confidence){
+  const s=String(text||'');
+  re.lastIndex=0;
+  let m;
+  while((m=re.exec(s))!==null){
+    const amount=vfcBiqNum_(m[1]);
+    if(amount>0) arr.push({date:date,description:s.substring(Math.max(0,m.index-25),Math.min(s.length,m.index+155)),counterparty:counterparty,amount:vfcBiqRound_(amount,0.01),category:category,confidence:confidence});
+    if(m.index===re.lastIndex) re.lastIndex++;
+  }
+  re.lastIndex=0;
 }
 
 function vfcBiqCap_(arr,date,text,re,category,counterparty,confidence){ const m=String(text||'').match(re); if(!m)return; const amount=vfcBiqNum_(m[1]); if(amount>0) arr.push({date:date,description:String(text).substring(0,180),counterparty:counterparty,amount:vfcBiqRound_(amount,0.01),category:category,confidence:confidence}); }
