@@ -95,7 +95,12 @@ function getValidatedBankingFeatures_(companyName, period) {
     warnings.push('Financing credits were detected and shown separately from estimated operating deposits.');
   }
 
-  const mcaOrLoanDetected = debtProfile.activeDebtObligations.length > 0 ? 1 : vfcBiqFlag_(base.mcaPaymentFlag);
+  const structuredDebtSignalsAvailable = audit.uniqueRows.some(function(row) {
+    return !!vfcBiqParseSignalCell_(row.possibleMcaOrLoanPayments);
+  });
+  const mcaOrLoanDetected = structuredDebtSignalsAvailable
+    ? (debtProfile.activeDebtObligations.length > 0 ? 1 : 0)
+    : vfcBiqFlag_(base.mcaPaymentFlag);
 
   return Object.assign({}, base, {
     statementCount: audit.uniqueRows.length,
@@ -130,6 +135,7 @@ function getValidatedBankingFeatures_(companyName, period) {
       originalMonthsCovered: vfcBiqNumber_(base.monthsCovered),
       grossAverageMonthlyDeposits: vfcBiqRound_(grossMonthlyDeposits, 0.01),
       estimatedOperatingMonthlyDeposits: vfcBiqRound_(operatingMonthlyDeposits, 0.01),
+      structuredDebtSignalsAvailable: structuredDebtSignalsAvailable,
       warnings: warnings
     }
   });
