@@ -1,5 +1,5 @@
 const VFC_SIMPLE_CONFIG = {
-  MODEL_VERSION: 'VFC-SIMPLE-HISTORICAL-7.1-CLEAN',
+  MODEL_VERSION: 'VFC-SIMPLE-HISTORICAL-7.2-INPUT-QUALITY',
   MAX_COMPARABLE_CASES: 12,
   MAX_APPROVAL_CASES: 8,
   MIN_SIMILARITY: 0.40,
@@ -11,7 +11,7 @@ const VFC_SIMPLE_CONFIG = {
  * Single production underwriting path.
  *
  * Flow:
- * uploaded statements -> extracted banking features -> closest historical
+ * uploaded statements -> validated banking features -> closest historical
  * training outcomes -> maximum recommended loan.
  *
  * There is no OpenAI amount adjustment, pattern model, regression floor,
@@ -25,7 +25,17 @@ function generateInstitutionalAssessmentSafe(companyOrRequest, requestedPeriod) 
   setupSimpleVFC();
   cleanupUnusedSheetsOnce_();
 
-  const current = buildPowerFeatures_(companyName, period);
+  let debtSignalRefresh = null;
+  if (typeof refreshDebtSignalsForPeriodSafe === 'function') {
+    debtSignalRefresh = refreshDebtSignalsForPeriodSafe({
+      companyName: companyName,
+      period: period
+    });
+  }
+
+  const current = typeof getValidatedBankingFeatures_ === 'function'
+    ? getValidatedBankingFeatures_(companyName, period)
+    : buildPowerFeatures_(companyName, period);
   if (!current || !current.statementCount) {
     throw new Error('No bank-statement summaries were found for this company and period.');
   }
@@ -130,10 +140,20 @@ function generateInstitutionalAssessmentSafe(companyOrRequest, requestedPeriod) 
     'Current banking amount: ' + roundToNearest_(bankingAmount, VFC_SIMPLE_CONFIG.ROUNDING),
     'Observed approval rate among closest cases: ' + Math.round(approvalRate * 100) + '%',
     'Current banking-risk factor: ' + Math.round(risk.factor * 100) + '%',
+    'Validated months reviewed: ' + toNumber_(current.monthsCovered),
+    'Validated average monthly deposits: ' + roundToNearest_(deposits, 1),
+    'Detected recurring financing debt service: ' + roundToNearest_(toNumber_(current.existingMonthlyDebtService), 1),
     risk.reasons.length
       ? 'Banking-risk adjustments: ' + risk.reasons.join(', ')
       : 'No material banking-risk reduction applied.'
   ];
+
+  const inputWarnings = current.inputQualityAudit && Array.isArray(current.inputQualityAudit.warnings)
+    ? current.inputQualityAudit.warnings
+    : [];
+  inputWarnings.forEach(function(note) {
+    calculationNotes.push('Input quality: ' + note);
+  });
 
   const lendingCapacity = {
     recommendedAmount: maximumLoanAmount,
@@ -179,6 +199,19 @@ function generateInstitutionalAssessmentSafe(companyOrRequest, requestedPeriod) 
       businessHealthScore: score,
       riskGrade: fundamental.grade || '',
       averageMonthlyDeposits: deposits,
+      estimatedOperatingMonthlyDeposits: toNumber_(current.estimatedOperatingMonthlyDeposits),
+      existingMonthlyDebtService: toNumber_(current.existingMonthlyDebtService),
+      otherRecurringMonthlyObligations: toNumber_(current.otherRecurringMonthlyObligations),
+      debtServiceToDepositsRatio: toNumber_(current.debtServiceToDepositsRatio),
+      detectedFinancingCredits: toNumber_(current.detectedFinancingCredits),
+      activeDebtObligations: current.debtProfile && Array.isArray(current.debtProfile.activeDebtObligations)
+        ? current.debtProfile.activeDebtObligations
+        : [],
+      otherRecurringObligations: current.debtProfile && Array.isArray(current.debtProfile.otherRecurringObligations)
+        ? current.debtProfile.otherRecurringObligations
+        : [],
+      inputQualityWarnings: inputWarnings,
+      debtSignalRefreshStatus: debtSignalRefresh || {},
       historicalExpectedAmount: roundToNearest_(historicalAmount, VFC_SIMPLE_CONFIG.ROUNDING),
       currentBankingAmount: roundToNearest_(bankingAmount, VFC_SIMPLE_CONFIG.ROUNDING),
       comparableCases: closestCases.length,
@@ -193,7 +226,7 @@ function generateInstitutionalAssessmentSafe(companyOrRequest, requestedPeriod) 
         ? 'Maximum recommended loan'
         : 'No automated loan amount recommended',
       methodologyNote:
-        'One simple model is active: closest historical training outcomes are adjusted to the current business deposits and checked against current banking conduct. No AI amount adjustment, regression floor, pattern learner, term sizing or shadow model is used.'
+        'One simple model is active: closest historical training outcomes are adjusted to validated current business deposits and checked against current banking conduct. Recurring debt/PAD amounts are extracted for visibility and OpenAI review but no new debt-service multiplier has been added to Our Max.'
     },
     disclaimer:
       'VFC internal decision support only. This recommendation is based on uploaded bank statements and recorded historical lender outcomes and is not a lender approval or guarantee.'
@@ -210,7 +243,9 @@ function simpleBuildComparableCases_(current, outcomes) {
 
     let features;
     try {
-      features = buildPowerFeatures_(outcome.companyName, outcome.period);
+      features = typeof getValidatedBankingFeatures_ === 'function'
+        ? getValidatedBankingFeatures_(outcome.companyName, outcome.period)
+        : buildPowerFeatures_(outcome.companyName, outcome.period);
     } catch (error) {
       return;
     }
@@ -431,12 +466,14 @@ function getProductionModelStatus() {
   return {
     modelVersion: VFC_SIMPLE_CONFIG.MODEL_VERSION,
     activeLayers: 1,
-    amountSource: 'Historical Training Data plus current banking checks',
+    amountSource: 'Historical Training Data plus validated current banking checks',
     openAIChangesAmount: false,
     patternLearningActive: false,
     regressionFloorActive: false,
     termSizingActive: false,
     shadowModelActive: false,
+    recurringDebtExtractionActive: typeof getValidatedBankingFeatures_ === 'function',
+    recurringDebtChangesFormula: false,
     legacySheetCleanupActive: true
   };
 }
