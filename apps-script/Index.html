@@ -18,7 +18,7 @@
     .status{white-space:pre-wrap;background:#fafafa;border:1px solid #eceef0;border-radius:10px;padding:10px;margin-top:12px;font-size:11px}.status.error{color:var(--red);border-color:#f0caca;background:#fff8f8}
     .hero{background:#f4fbf7;border:1px solid #d7eee2;border-radius:15px;padding:22px;text-align:center}.hero .label{font-size:12px;color:var(--muted)}.hero .amount{font-size:46px;font-weight:700;color:var(--green);margin:6px 0}
     .ai-panel{margin-top:14px;background:#f7fbff;border:1px solid #d8e8f7;border-radius:15px;padding:20px}.ai-panel.error{background:#fff8f8;border-color:#f0caca}.ai-title{font-family:Georgia,serif;font-size:19px}.ai-amount{font-size:38px;font-weight:700;color:var(--blue);margin:7px 0}.ai-label{font-size:11px;color:var(--muted)}
-    .banking-panel{margin-top:14px;background:#fffdf7;border:1px solid #eee4c9;border-radius:15px;padding:18px}.banking-title{font-family:Georgia,serif;font-size:19px}.obligation{border-top:1px solid #ece6d8;padding:10px 0}.obligation:first-of-type{border-top:0}.obligation-head{display:flex;justify-content:space-between;gap:12px}.obligation-name{font-weight:600;font-size:12px}.obligation-amount{font-weight:700;font-size:12px}.quality-warning{font-size:10px;line-height:1.45;color:#7a5a16;margin-top:5px}
+    .banking-panel{margin-top:14px;background:#fffdf7;border:1px solid #eee4c9;border-radius:15px;padding:18px}.banking-title{font-family:Georgia,serif;font-size:19px}.obligation{border-top:1px solid #ece6d8;padding:10px 0}.obligation:first-of-type{border-top:0}.obligation-head{display:flex;justify-content:space-between;gap:12px}.obligation-name{font-weight:600;font-size:12px}.obligation-amount{font-weight:700;font-size:12px}.quality-warning{font-size:10px;line-height:1.45;color:#7a5a16;margin-top:5px}.info-only{background:#fbfbfb;border:1px solid #ececec;border-radius:11px;padding:10px 12px;margin-top:9px}
     .dashboard{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:12px 0}.tile{background:#f7f7f7;border-radius:10px;padding:12px;text-align:center}.tile strong{display:block;font-size:17px}.tile span{font-size:9px;color:var(--muted)}
     .section-title{font-family:Georgia,serif;font-size:18px;margin:18px 0 7px}.ranking,.comparable{border:1px solid var(--line);border-radius:11px;padding:12px;margin:9px 0}.ranking-head{display:flex;justify-content:space-between}.lender{font-family:Georgia,serif;font-size:17px}.score{font-size:18px;font-weight:600;color:var(--blue)}
     .badges{display:flex;gap:6px;flex-wrap:wrap;margin:7px 0}.badge{padding:4px 8px;border-radius:999px;background:#f1f2f3;font-size:10px}.metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}.metric{background:#f7f7f7;border-radius:8px;padding:8px;text-align:center}.metric strong{display:block;font-size:13px}.metric span{font-size:9px;color:var(--muted)}
@@ -235,6 +235,11 @@ function renderBankingInputDetails(data){
   const audit=features.inputQualityAudit||{};
   const obligations=Array.isArray(debtProfile.activeDebtObligations)?debtProfile.activeDebtObligations:[];
   const other=Array.isArray(debtProfile.otherRecurringObligations)?debtProfile.otherRecurringObligations:[];
+  const taxes=Array.isArray(debtProfile.taxGovernmentPads)?debtProfile.taxGovernmentPads:[];
+  const informational=other.concat(taxes);
+  const informationalMonthly=informational.reduce(function(sum,item){
+    return sum+(firstValidNumber(item&&item.monthlyEquivalent)||0);
+  },0);
   const warnings=Array.isArray(audit.warnings)?audit.warnings:[];
   const operating=firstValidNumber(assessment.estimatedOperatingMonthlyDeposits,features.estimatedOperatingMonthlyDeposits);
   const debt=firstValidNumber(assessment.existingMonthlyDebtService,features.existingMonthlyDebtService)||0;
@@ -259,9 +264,12 @@ function renderBankingInputDetails(data){
     html+='<div class="note">No recurring financing obligation was confirmed from the extracted bank-statement transactions.</div>';
   }
 
-  if(other.length){
-    html+='<div class="section-title">Other Recurring PAD / Finance Obligations</div>';
-    other.forEach(function(item){
+  if(informational.length){
+    html+='<div class="section-title">Other Recurring Obligations — Informational Only</div>'+
+      '<div class="info-only">'+
+        '<div class="note"><strong>Observed recurring cash-flow obligations: '+money(informationalMonthly)+'/month.</strong> These are shown for underwriting context only. They are not included in Confirmed Monthly Debt and do not change Our Max.</div>'+
+      '</div>';
+    informational.forEach(function(item){
       html+=obligationRow(item);
     });
   }
