@@ -1,5 +1,5 @@
 const VFC_SIMPLE_CONFIG = {
-  MODEL_VERSION: 'VFC-SIMPLE-HISTORICAL-7.2-INPUT-QUALITY',
+  MODEL_VERSION: 'VFC-SIMPLE-HISTORICAL-8.0-STABLE-INPUTS',
   MAX_COMPARABLE_CASES: 12,
   MAX_APPROVAL_CASES: 8,
   MIN_SIMILARITY: 0.40,
@@ -9,30 +9,19 @@ const VFC_SIMPLE_CONFIG = {
 
 /**
  * Single production underwriting path.
- *
- * Flow:
- * uploaded statements -> validated banking features -> closest historical
- * training outcomes -> maximum recommended loan.
- *
- * There is no OpenAI amount adjustment, pattern model, regression floor,
- * term-based sizing, shadow calculation, or accuracy-layer adjustment.
+ * Current uploaded statements are validated once by BankingInputQuality.gs.
+ * Historical training cases use stored historical features and never trigger
+ * live PDF verification.
  */
 function generateInstitutionalAssessmentSafe(companyOrRequest, requestedPeriod) {
   const request = normalizeAssessmentRequest_(companyOrRequest, requestedPeriod);
   const companyName = request.companyName;
   const period = resolveLatestAssessmentPeriod_(companyName, request.period);
 
-  let debtSignalRefresh = null;
-  if (typeof refreshDebtSignalsForPeriodSafe === 'function') {
-    debtSignalRefresh = refreshDebtSignalsForPeriodSafe({
-      companyName: companyName,
-      period: period
-    });
-  }
-
   const current = typeof getValidatedBankingFeatures_ === 'function'
     ? getValidatedBankingFeatures_(companyName, period)
     : buildPowerFeatures_(companyName, period);
+
   if (!current || !current.statementCount) {
     throw new Error('No bank-statement summaries were found for this company and period.');
   }
@@ -88,6 +77,7 @@ function generateInstitutionalAssessmentSafe(companyOrRequest, requestedPeriod) 
   const deposits = Math.max(0, toNumber_(current.averageMonthlyDeposits));
   const score = toNumber_(fundamental.score);
   const marketCap = deposits * (score >= 75 ? 1.25 : score >= 60 ? 1.05 : 0.85);
+
   if (marketCap > 0) {
     maximumLoanAmount = Math.min(
       maximumLoanAmount,
@@ -101,6 +91,7 @@ function generateInstitutionalAssessmentSafe(companyOrRequest, requestedPeriod) 
   );
 
   if (score < 40 || !deposits) maximumLoanAmount = 0;
+
   if (
     maximumLoanAmount > 0 &&
     maximumLoanAmount < VFC_SIMPLE_CONFIG.MIN_AMOUNT &&
@@ -148,6 +139,7 @@ function generateInstitutionalAssessmentSafe(companyOrRequest, requestedPeriod) 
   const inputWarnings = current.inputQualityAudit && Array.isArray(current.inputQualityAudit.warnings)
     ? current.inputQualityAudit.warnings
     : [];
+
   inputWarnings.forEach(function(note) {
     calculationNotes.push('Input quality: ' + note);
   });
@@ -164,12 +156,11 @@ function generateInstitutionalAssessmentSafe(companyOrRequest, requestedPeriod) 
   };
 
   const underwritingSummary = {
-    summary: maximumLoanAmount > 0 ? 'Maximum recommended loan' : 'Manual review required',
+    summary: maximumLoanAmount > 0 ? 'Maximum recommended loan' : 'No automated loan amount recommended',
     recommended_amount: maximumLoanAmount,
     stretch_amount: maximumLoanAmount,
     strongest_lender: rankings.length ? rankings[0].lenderName : '',
-    explanation:
-      'The recommendation is based on the closest historical lender outcomes in the Training Data and the current bank-statement profile.',
+    explanation: 'The recommendation is based on the closest stored historical lender outcomes and the current verified bank-statement profile.',
     fundamental_score: score,
     risk_grade: fundamental.grade || '',
     key_strengths: fundamental.strengths || [],
@@ -208,7 +199,12 @@ function generateInstitutionalAssessmentSafe(companyOrRequest, requestedPeriod) 
         ? current.debtProfile.otherRecurringObligations
         : [],
       inputQualityWarnings: inputWarnings,
-      debtSignalRefreshStatus: debtSignalRefresh || {},
+      debtSignalRefreshStatus: {
+        ok: true,
+        modelVersion: current.inputQualityAudit && current.inputQualityAudit.modelVersion
+          ? current.inputQualityAudit.modelVersion
+          : ''
+      },
       historicalExpectedAmount: roundToNearest_(historicalAmount, VFC_SIMPLE_CONFIG.ROUNDING),
       currentBankingAmount: roundToNearest_(bankingAmount, VFC_SIMPLE_CONFIG.ROUNDING),
       comparableCases: closestCases.length,
@@ -223,7 +219,7 @@ function generateInstitutionalAssessmentSafe(companyOrRequest, requestedPeriod) 
         ? 'Maximum recommended loan'
         : 'No automated loan amount recommended',
       methodologyNote:
-        'One simple model is active: closest historical training outcomes are adjusted to validated current business deposits and checked against current banking conduct. Recurring debt/PAD amounts are extracted for visibility and OpenAI review but no new debt-service multiplier has been added to Our Max.'
+        'One production model is active. Current statements use locked, reconciled banking inputs; historical comparison uses stored training features and does not re-read historical PDFs. Recurring debt/PAD amounts are extracted for visibility and OpenAI review; no separate debt-service multiplier is added to Our Max.'
     },
     disclaimer:
       'VFC internal decision support only. This recommendation is based on uploaded bank statements and recorded historical lender outcomes and is not a lender approval or guarantee.'
@@ -238,15 +234,7 @@ function simpleBuildComparableCases_(current, outcomes) {
     const decision = simpleDecision_(outcome.decision);
     if (!decision || !outcome.companyName) return;
 
-    let features;
-    try {
-      features = typeof getValidatedBankingFeatures_ === 'function'
-        ? getValidatedBankingFeatures_(outcome.companyName, outcome.period)
-        : buildPowerFeatures_(outcome.companyName, outcome.period);
-    } catch (error) {
-      return;
-    }
-
+    const features = simpleHistoricalFeatures_(outcome.companyName, outcome.period);
     if (!features || !features.statementCount || !toNumber_(features.averageMonthlyDeposits)) return;
 
     const similarity = powerSimilarity_(current, features);
@@ -275,10 +263,49 @@ function simpleBuildComparableCases_(current, outcomes) {
     });
   });
 
-  cases.sort(function(a, b) {
-    return b.similarity - a.similarity;
-  });
+  cases.sort(function(a, b) { return b.similarity - a.similarity; });
   return cases;
+}
+
+function simpleHistoricalFeatures_(companyName, period) {
+  let power = null;
+  try {
+    power = typeof buildPowerFeatures_ === 'function'
+      ? buildPowerFeatures_(companyName, period)
+      : null;
+  } catch (error) {
+    power = null;
+  }
+
+  let stored = null;
+  if (typeof getSheetObjects_ === 'function') {
+    const rows = getSheetObjects_('Structured Features').filter(function(row) {
+      return sameText_(row.companyName, companyName) && simplePeriodMatches_(row.period, period);
+    });
+    if (rows.length) stored = rows[rows.length - 1];
+  }
+
+  if (!stored) return power;
+
+  const months = Math.max(1, toNumber_(stored.monthsCovered));
+  return Object.assign({}, power || {}, {
+    companyName: companyName,
+    period: period,
+    statementCount: toNumber_(stored.statementCount),
+    monthsCovered: months,
+    totalDeposits: toNumber_(stored.totalDeposits),
+    averageMonthlyDeposits: toNumber_(stored.averageMonthlyDeposits),
+    totalWithdrawals: toNumber_(stored.totalWithdrawals),
+    depositWithdrawalRatio: toNumber_(stored.depositWithdrawalRatio),
+    nsfCount: toNumber_(stored.nsfCount),
+    nsfPerMonth: toNumber_(stored.nsfCount) / months,
+    negativeBalanceFlag: toNumber_(stored.negativeBalanceFlag) ? 1 : 0,
+    mcaPaymentFlag: toNumber_(stored.mcaPaymentFlag) ? 1 : 0,
+    depositVolatility: power ? toNumber_(power.depositVolatility) : 0,
+    depositTrend: power ? toNumber_(power.depositTrend) : 0,
+    suspectedStacking: power ? toNumber_(power.suspectedStacking) : 0,
+    overdraftFlag: power ? toNumber_(power.overdraftFlag) : 0
+  });
 }
 
 function simpleHistoricalAmount_(approvals) {
@@ -316,12 +343,14 @@ function simpleApprovalRate_(cases) {
   if (!cases || !cases.length) return 0;
   let positive = 0;
   let total = 0;
+
   cases.forEach(function(row) {
     const weight = Math.max(0.05, row.similarity);
     total += weight;
     if (row.decision === 'Approved') positive += weight;
     else if (row.decision === 'Conditional') positive += weight * 0.65;
   });
+
   return total ? positive / total : 0;
 }
 
@@ -434,8 +463,8 @@ function simpleBuildLenderRankings_(comparables) {
 
 function simpleDecision_(value) {
   const text = String(value || '').trim().toLowerCase();
-  if (text.indexOf('approv') >= 0) return 'Approved';
   if (text.indexOf('condition') >= 0) return 'Conditional';
+  if (text.indexOf('approv') >= 0) return 'Approved';
   if (text.indexOf('declin') >= 0 || text.indexOf('reject') >= 0) return 'Declined';
   return '';
 }
@@ -463,7 +492,7 @@ function getProductionModelStatus() {
   return {
     modelVersion: VFC_SIMPLE_CONFIG.MODEL_VERSION,
     activeLayers: 1,
-    amountSource: 'Historical Training Data plus validated current banking checks',
+    amountSource: 'Stored Historical Training Data plus locked current banking inputs',
     openAIChangesAmount: false,
     patternLearningActive: false,
     regressionFloorActive: false,
@@ -471,6 +500,7 @@ function getProductionModelStatus() {
     shadowModelActive: false,
     recurringDebtExtractionActive: typeof getValidatedBankingFeatures_ === 'function',
     recurringDebtChangesFormula: false,
+    historicalPdfReprocessingActive: false,
     legacySheetCleanupActive: false
   };
 }
