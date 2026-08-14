@@ -1,5 +1,5 @@
 const VFC_BANK = {
-  VERSION: 'VFC-BANKING-STABLE-12.0-AUTO-LOCKED',
+  VERSION: 'VFC-BANKING-STABLE-12.1-AUTO-LOCKED',
   PREFIX: 'VFC_BANK_LOCKED_V1:',
   LEGACY_PREFIXES: [
     'VFC_BANK_AUTO_V2:',
@@ -624,6 +624,8 @@ function vfcBankBuild_(base, rows) {
   let latest = null;
   const monthlyDeposits = [];
   const monthlyWithdrawals = [];
+  const openingBalances = [];
+  const closingBalances = [];
   const audit = [];
   const verifiedRows = [];
 
@@ -636,6 +638,8 @@ function vfcBankBuild_(base, rows) {
     withdrawals += payload.totalWithdrawals;
     monthlyDeposits.push(payload.totalDeposits);
     monthlyWithdrawals.push(payload.totalWithdrawals);
+    openingBalances.push(payload.openingBalance);
+    closingBalances.push(payload.closingBalance);
     nsf += Math.max(0, vfcBankNum_(payload.nsfCount));
     if (payload.negativeBalanceDetected) negative = 1;
 
@@ -677,6 +681,8 @@ function vfcBankBuild_(base, rows) {
     nsfCount: nsf,
     nsfPerMonth: vfcBankRound_(nsf / Math.max(1, months), .01),
     negativeBalanceFlag: negative,
+    averageOpeningBalance: vfcBankRound_(vfcBankSum_(openingBalances) / Math.max(1, openingBalances.length), .01),
+    averageClosingBalance: vfcBankRound_(vfcBankSum_(closingBalances) / Math.max(1, closingBalances.length), .01),
     mcaPaymentFlag: debt.activeDebtObligations.length ? 1 : 0,
     monthlyDeposits: monthlyDeposits,
     monthlyWithdrawals: monthlyWithdrawals,
