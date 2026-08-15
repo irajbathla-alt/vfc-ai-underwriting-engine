@@ -1,5 +1,5 @@
 const VFC_SIMPLE_CONFIG = {
-  MODEL_VERSION: 'VFC-SIMPLE-HISTORICAL-7.2-INPUT-QUALITY',
+  MODEL_VERSION: 'VFC-SIMPLE-HISTORICAL-8.2-CURRENT-ONLY-BANKING',
   MAX_COMPARABLE_CASES: 12,
   MAX_APPROVAL_CASES: 8,
   MIN_SIMILARITY: 0.40,
@@ -22,13 +22,11 @@ function generateInstitutionalAssessmentSafe(companyOrRequest, requestedPeriod) 
   const companyName = request.companyName;
   const period = resolveLatestAssessmentPeriod_(companyName, request.period);
 
-  let debtSignalRefresh = null;
-  if (typeof refreshDebtSignalsForPeriodSafe === 'function') {
-    debtSignalRefresh = refreshDebtSignalsForPeriodSafe({
-      companyName: companyName,
-      period: period
-    });
-  }
+  const debtSignalRefresh = {
+    ok: true,
+    currentBorrowerOnly: true,
+    historicalPdfReprocessing: false
+  };
 
   const current = typeof getValidatedBankingFeatures_ === 'function'
     ? getValidatedBankingFeatures_(companyName, period)
@@ -240,9 +238,9 @@ function simpleBuildComparableCases_(current, outcomes) {
 
     let features;
     try {
-      features = typeof getValidatedBankingFeatures_ === 'function'
-        ? getValidatedBankingFeatures_(outcome.companyName, outcome.period)
-        : buildPowerFeatures_(outcome.companyName, outcome.period);
+      features = typeof buildPowerFeatures_ === 'function'
+        ? buildPowerFeatures_(outcome.companyName, outcome.period)
+        : buildFeaturesForCase_(outcome.companyName, outcome.period);
     } catch (error) {
       return;
     }
