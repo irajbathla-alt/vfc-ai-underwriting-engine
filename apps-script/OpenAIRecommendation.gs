@@ -1,12 +1,12 @@
 const VFC_OPENAI_RECOMMENDATION_CONFIG = {
-  MODEL_VERSION: 'VFC-OPENAI-STABLE-2.0-CURRENT-ONLY',
+  MODEL_VERSION: 'VFC-OPENAI-STABLE-2.1-FAST-HISTORY',
   DEFAULT_MODEL: 'gpt-4.1-mini',
-  MAX_COMPARABLE_CASES: 24,
+  MAX_COMPARABLE_CASES: 12,
   MIN_SIMILARITY: 0.30,
   ROUNDING: 500,
   MAX_AVERAGE_MONTHLY_DEPOSITS: 5000000,
   MAX_APPROVED_AMOUNT: 5000000,
-  CACHE_PREFIX: 'VFC_OAI_STABLE_2:'
+  CACHE_PREFIX: 'VFC_OAI_STABLE_21:'
 };
 
 function generateOpenAIRecommendationSafe(companyOrRequest, requestedPeriod) {
@@ -169,6 +169,7 @@ function vfcOaiBuildComparableCases_(current, outcomes) {
   const validCases = [];
   const ignoredCases = [];
   const currentDeposits = vfcOaiNumber_(current.averageMonthlyDeposits);
+  const historicalIndex = vfcOaiHistoricalFeatureIndex_();
 
   (outcomes || []).forEach(function(outcome) {
     const decision = vfcOaiDecision_(outcome.decision);
@@ -176,7 +177,7 @@ function vfcOaiBuildComparableCases_(current, outcomes) {
 
     let features;
     try {
-      features = vfcOaiBuildHistoricalFeatures_(outcome.companyName, outcome.period);
+      features = vfcOaiBuildHistoricalFeatures_(outcome.companyName, outcome.period, historicalIndex);
     } catch (error) {
       features = null;
     }
@@ -239,14 +240,56 @@ function vfcOaiBuildCurrentFeatures_(companyName, period) {
   throw new Error('Current banking-feature function was not found.');
 }
 
-function vfcOaiBuildHistoricalFeatures_(companyName, period) {
-  if (typeof buildPowerFeatures_ === 'function') {
-    return buildPowerFeatures_(companyName, period);
+function vfcOaiHistoricalFeatureIndex_() {
+  const rows = typeof getSheetObjects_ === 'function'
+    ? getSheetObjects_('Structured Features')
+    : [];
+  const map = {};
+
+  rows.forEach(function(row) {
+    const companyName = String(row.companyName || '').trim();
+    const period = String(row.period || '').trim();
+    if (!companyName || !period) return;
+
+    const months = Math.max(1, vfcOaiNumber_(row.monthsCovered));
+    const nsf = vfcOaiNumber_(row.nsfCount);
+    map[vfcOaiHistoryKey_(companyName, period)] = {
+      companyName: companyName,
+      period: period,
+      statementCount: vfcOaiNumber_(row.statementCount),
+      monthsCovered: months,
+      totalDeposits: vfcOaiNumber_(row.totalDeposits),
+      averageMonthlyDeposits: vfcOaiNumber_(row.averageMonthlyDeposits),
+      totalWithdrawals: vfcOaiNumber_(row.totalWithdrawals),
+      depositWithdrawalRatio: vfcOaiNumber_(row.depositWithdrawalRatio),
+      nsfCount: nsf,
+      nsfPerMonth: nsf / months,
+      negativeBalanceFlag: vfcOaiFlag_(row.negativeBalanceFlag),
+      mcaPaymentFlag: vfcOaiFlag_(row.mcaPaymentFlag),
+      summaryText: String(row.summaryText || '')
+    };
+  });
+
+  return map;
+}
+
+function vfcOaiBuildHistoricalFeatures_(companyName, period, historicalIndex) {
+  const key = vfcOaiHistoryKey_(companyName, period);
+  if (historicalIndex && historicalIndex[key]) {
+    return historicalIndex[key];
   }
+
+  // Safe sheet-only fallback for older records that predate Structured Features.
+  // Never invoke the live banking verifier or reopen historical PDFs here.
   if (typeof buildFeaturesForCase_ === 'function') {
     return buildFeaturesForCase_(companyName, period);
   }
-  throw new Error('Historical stored-feature function was not found.');
+  return null;
+}
+
+function vfcOaiHistoryKey_(companyName, period) {
+  return String(companyName || '').trim().toLowerCase() + '|' +
+    String(period || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
 }
 
 function vfcOaiHistoricalOutcomes_() {
@@ -344,10 +387,6 @@ function vfcOaiCompactFeatures_(features) {
 }
 
 function vfcOaiSimilarity_(current, historical) {
-  if (typeof powerSimilarity_ === 'function') {
-    return vfcOaiClamp_(powerSimilarity_(current, historical),0,1);
-  }
-
   function sim(a,b,floorScale) {
     a=vfcOaiNumber_(a);
     b=vfcOaiNumber_(b);
@@ -357,11 +396,10 @@ function vfcOaiSimilarity_(current, historical) {
 
   return vfcOaiClamp_(
     sim(current.averageMonthlyDeposits,historical.averageMonthlyDeposits)*0.45 +
-    sim(current.depositWithdrawalRatio,historical.depositWithdrawalRatio,2)*0.15 +
-    sim(current.nsfPerMonth||current.nsfCount,historical.nsfPerMonth||historical.nsfCount,3)*0.15 +
-    (vfcOaiFlag_(current.negativeBalanceFlag)===vfcOaiFlag_(historical.negativeBalanceFlag)?1:0)*0.10 +
-    (vfcOaiFlag_(current.mcaPaymentFlag)===vfcOaiFlag_(historical.mcaPaymentFlag)?1:0)*0.10 +
-    sim(current.monthsCovered,historical.monthsCovered,6)*0.05,
+    sim(current.nsfPerMonth||current.nsfCount,historical.nsfPerMonth||historical.nsfCount,5)*0.20 +
+    sim(current.depositWithdrawalRatio,historical.depositWithdrawalRatio,2)*0.10 +
+    (vfcOaiFlag_(current.negativeBalanceFlag)===vfcOaiFlag_(historical.negativeBalanceFlag)?1:0)*0.15 +
+    (vfcOaiFlag_(current.mcaPaymentFlag)===vfcOaiFlag_(historical.mcaPaymentFlag)?1:0)*0.10,
     0,1
   );
 }
