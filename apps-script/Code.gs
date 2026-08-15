@@ -58,7 +58,9 @@ function uploadStatementBatch(companyName, files) {
 
     const tempFile = tempFolder.createFile(blob);
     const text = extractTextFromPdf_(tempFile.getId());
-    const summary = summarizeSingleBankStatement_(text, companyName, fileName);
+    let summary = summarizeSingleBankStatement_(text, companyName, fileName);
+    summary = vfcLockPrintedStatementFacts_(summary, text);
+
     const documentType = String(summary && summary.document_type || '')
       .trim().toUpperCase().replace(/\s+/g, '_');
     if (summary) summary.document_type = documentType;
@@ -408,6 +410,110 @@ function summarizeSingleBankStatement_(text, companyName, fileName) {
     String(text || '').substring(0,60000)
   ].join('\n');
   return callOpenAIJson_(prompt);
+}
+
+/**
+ * Locks statement period and account-summary totals to facts printed by the bank.
+ * AI still extracts the ledger, but it cannot change the statement month or
+ * replace printed account-summary totals when a reconciled quartet is visible.
+ */
+function vfcLockPrintedStatementFacts_(summary, text) {
+  summary = summary || {};
+  const facts = vfcExtractPrintedStatementFacts_(text);
+
+  if (facts.startDate) summary.statement_start_date = facts.startDate;
+  if (facts.endDate) summary.statement_end_date = facts.endDate;
+
+  if (facts.totalsVerified) {
+    summary.opening_balance = facts.opening;
+    summary.closing_balance = facts.closing;
+    summary.total_deposits = facts.deposits;
+    summary.total_withdrawals = facts.withdrawals;
+  }
+
+  return summary;
+}
+
+function vfcExtractPrintedStatementFacts_(text) {
+  const source = String(text || '').replace(/\u00a0/g, ' ');
+  const out = {
+    startDate:'', endDate:'',
+    opening:null, closing:null, deposits:null, withdrawals:null,
+    totalsVerified:false
+  };
+
+  const monthRange = source.match(/([A-Za-z]{3,9}\s+\d{1,2},\s+\d{4})\s+(?:to|through|[-–—])\s+([A-Za-z]{3,9}\s+\d{1,2},\s+\d{4})/i);
+  const isoRange = source.match(/(\d{4}-\d{2}-\d{2})\s+(?:to|through|[-–—])\s+(\d{4}-\d{2}-\d{2})/i);
+  const range = monthRange || isoRange;
+  if (range) {
+    out.startDate = vfcPrintedIsoDate_(range[1]);
+    out.endDate = vfcPrintedIsoDate_(range[2]);
+  }
+
+  out.opening = vfcPrintedMoneyAfter_(source, [
+    /Opening\s+balance(?:\s+on\s+[^\n]+?)?\s+([+\-]?\s*\$?\s*\(?\-?\$?[\d,]+(?:\.\d{2})?\)?)/i,
+    /Beginning\s+balance\s+([+\-]?\s*\$?\s*\(?\-?\$?[\d,]+(?:\.\d{2})?\)?)/i
+  ]);
+
+  out.closing = vfcPrintedMoneyAfter_(source, [
+    /Closing\s+balance(?:\s+on\s+[^\n=]+?)?\s*(?:=)?\s*([+\-]?\s*\$?\s*\(?\-?\$?[\d,]+(?:\.\d{2})?\)?)/i,
+    /Ending\s+balance\s+([+\-]?\s*\$?\s*\(?\-?\$?[\d,]+(?:\.\d{2})?\)?)/i
+  ]);
+
+  out.deposits = vfcPrintedMoneyAfter_(source, [
+    /Total\s+deposits\s*(?:&|and)\s*credits(?:\s*\(\d+\))?\s*([+\-]?\s*\$?\s*[\d,]+(?:\.\d{2})?)/i,
+    /Total\s+credits(?:\s*\(\d+\))?\s*([+\-]?\s*\$?\s*[\d,]+(?:\.\d{2})?)/i,
+    /Total\s+deposits(?:\s*\(\d+\))?\s*([+\-]?\s*\$?\s*[\d,]+(?:\.\d{2})?)/i
+  ]);
+
+  out.withdrawals = vfcPrintedMoneyAfter_(source, [
+    /Total\s+cheques?\s*(?:&|and)\s*debits(?:\s*\(\d+\))?\s*([+\-]?\s*\$?\s*[\d,]+(?:\.\d{2})?)/i,
+    /Total\s+withdrawals(?:\s*\(\d+\))?\s*([+\-]?\s*\$?\s*[\d,]+(?:\.\d{2})?)/i,
+    /Total\s+debits(?:\s*\(\d+\))?\s*([+\-]?\s*\$?\s*[\d,]+(?:\.\d{2})?)/i
+  ]);
+
+  if (out.deposits !== null) out.deposits = Math.abs(out.deposits);
+  if (out.withdrawals !== null) out.withdrawals = Math.abs(out.withdrawals);
+
+  if (
+    out.opening !== null && out.closing !== null &&
+    out.deposits !== null && out.withdrawals !== null
+  ) {
+    const diff = (out.opening + out.deposits - out.withdrawals) - out.closing;
+    out.totalsVerified = Math.abs(diff) <= 5;
+  }
+
+  return out;
+}
+
+function vfcPrintedMoneyAfter_(source, patterns) {
+  for (let i=0; i<patterns.length; i++) {
+    const match = source.match(patterns[i]);
+    if (!match || !match[1]) continue;
+    const value = vfcPrintedMoney_(match[1]);
+    if (value !== null) return value;
+  }
+  return null;
+}
+
+function vfcPrintedMoney_(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+  const negative = /^\s*-/.test(raw) || /-\s*\$/.test(raw) || /^\s*\(/.test(raw);
+  const cleaned = raw.replace(/[^0-9.]/g, '');
+  if (!cleaned) return null;
+  const number = parseFloat(cleaned);
+  if (!isFinite(number)) return null;
+  return negative ? -number : number;
+}
+
+function vfcPrintedIsoDate_(value) {
+  if (!value) return '';
+  const direct = String(value).match(/^\d{4}-\d{2}-\d{2}$/);
+  if (direct) return direct[0];
+  const date = new Date(value);
+  if (isNaN(date.getTime())) return '';
+  return Utilities.formatDate(date, Session.getScriptTimeZone(), 'yyyy-MM-dd');
 }
 
 function summarizeBatch_(items, companyName, detectedPeriod) {
