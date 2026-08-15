@@ -450,13 +450,15 @@ function vfcExtractPrintedStatementFacts_(text) {
     out.endDate = vfcPrintedIsoDate_(range[2]);
   }
 
+  const printedDate = '(?:[A-Za-z]{3,9}\\s+\\d{1,2},\\s+\\d{4}|\\d{4}-\\d{2}-\\d{2})';
+
   out.opening = vfcPrintedMoneyAfter_(source, [
-    /Opening\s+balance(?:\s+on\s+[^\n]+?)?\s+([+\-]?\s*\$?\s*\(?\-?\$?[\d,]+(?:\.\d{2})?\)?)/i,
+    new RegExp('Opening\\s+balance(?:\\s+on\\s+' + printedDate + ')?\\s+([+\\-]?\\s*\\$?\\s*\\(?\\-?\\$?[\\d,]+(?:\\.\\d{2})?\\)?)','i'),
     /Beginning\s+balance\s+([+\-]?\s*\$?\s*\(?\-?\$?[\d,]+(?:\.\d{2})?\)?)/i
   ]);
 
   out.closing = vfcPrintedMoneyAfter_(source, [
-    /Closing\s+balance(?:\s+on\s+[^\n=]+?)?\s*(?:=)?\s*([+\-]?\s*\$?\s*\(?\-?\$?[\d,]+(?:\.\d{2})?\)?)/i,
+    new RegExp('Closing\\s+balance(?:\\s+on\\s+' + printedDate + ')?\\s*(?:=)?\\s*([+\\-]?\\s*\\$?\\s*\\(?\\-?\\$?[\\d,]+(?:\\.\\d{2})?\\)?)','i'),
     /Ending\s+balance\s+([+\-]?\s*\$?\s*\(?\-?\$?[\d,]+(?:\.\d{2})?\)?)/i
   ]);
 
