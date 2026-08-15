@@ -25,7 +25,7 @@ function setupVFC() {
     'Observed Lender Behaviour': ['Behaviour ID','Lender Name','Company Name','Period','Decision','Approved Amount','Decline Reason','Observed Pattern Note','Created At'],
     'Training Records': ['Training ID','Company Name','Period','Lender Name','Decision','Approved Amount','Decline Reason','Bank Summary','Key Findings','Risks','Missing Info','Created At'],
     'Structured Features': ['Feature ID','Company Name','Period','Statement Count','Months Covered','Total Deposits','Average Monthly Deposits','Total Withdrawals','Deposit Withdrawal Ratio','NSF Count','Negative Balance Flag','MCA Payment Flag','Summary Text','Updated At'],
-    'Underwriting Assessments': ['Assessment ID','Model Version','Company Name','Period','Lender Name','Observed Fit','Observed Score','Confidence','Historical Cases','Similar Cases','Similar Approvals','Similar Declines','Observed Approval Rate','Low Approved Amount','High Approved Amount','Median Approved Amount','Reasoning','Risks','Created At'],
+    'Underwriting Assessments': ['Assessment ID','Model Version','Company Name','Period','Lender Name','Observed Fit','Observed Score','Confidence','Historical Cases','Similar Cases','SimilarApprovals','SimilarDeclines','Observed Approval Rate','Low Approved Amount','High Approved Amount','Median Approved Amount','Reasoning','Risks','Created At'],
     'AI Recommendations': ['Recommendation ID','Company Name','Period','Recommended Lender','Fit Level','Reasoning','Risks','Missing Info','Created At'],
     'Deal Outcomes': ['Outcome ID','Company Name','Period','Selected Lender','AI Recommended Lender','Final Result','Funded Amount','Funded Date','Why This Lender Won','Admin Notes','Created At']
   };
@@ -59,6 +59,13 @@ function uploadStatementBatch(companyName, files) {
     const tempFile = tempFolder.createFile(blob);
     const text = extractTextFromPdf_(tempFile.getId());
     const summary = summarizeSingleBankStatement_(text, companyName, fileName);
+    if (
+      summary &&
+      summary.document_type === 'BANK_STATEMENT' &&
+      typeof vfcBankCreateIntakePayload_ === 'function'
+    ) {
+      summary.possible_mca_or_loan_payments = vfcBankCreateIntakePayload_(summary, fileName);
+    }
     const startDate = parseDateSafe_(summary.statement_start_date);
     const endDate = parseDateSafe_(summary.statement_end_date);
     if (startDate) startDates.push(startDate);
@@ -118,7 +125,6 @@ function saveLenderDecision(payload) {
   return { ok:true, message:'Historical lender outcome saved to the VFC training dataset.' };
 }
 
-/** Builds/rebuilds structured metrics for all historical company-period records. */
 function rebuildStructuredFeatures() {
   setupVFC();
   const pairs = {};
@@ -139,7 +145,6 @@ function rebuildStructuredFeatures() {
   return { ok:true, recordsUpdated:updated, message:'Structured historical features rebuilt.' };
 }
 
-/** Main V1 underwriting function. Uses only VFC historical outcomes, not invented lender rules. */
 function generateVfcAssessment(companyName, period) {
   setupVFC();
   const current = buildFeaturesForCase_(companyName, period);
@@ -371,9 +376,31 @@ function extractTextFromPdf_(fileId) {
 }
 
 function summarizeSingleBankStatement_(text, companyName, fileName) {
-  const prompt = 'You are the VFC AI Bank Statement Reader. Return JSON only.\nCompany: ' + companyName + '\nFile: ' + fileName +
-    '\nReturn fields: document_type, bank_name, account_holder, statement_start_date, statement_end_date, opening_balance, closing_balance, total_deposits, total_withdrawals, nsf_count, negative_balance_detected, possible_mca_or_loan_payments, summary, risks, missing_info.' +
-    '\nUse YYYY-MM-DD dates. Do not invent figures. Return risks, missing_info, and possible_mca_or_loan_payments as readable strings, not arrays. If not a bank statement set document_type to NOT_BANK_STATEMENT.\nDocument text:\n' + String(text || '').substring(0,60000);
+  const prompt = [
+    'You are the VFC AI Bank Statement Reader. Return JSON only.',
+    'Company: ' + companyName,
+    'File: ' + fileName,
+    '',
+    'Return these fields:',
+    'document_type, bank_name, account_holder, statement_start_date, statement_end_date, opening_balance, closing_balance, total_deposits, total_withdrawals, nsf_count, negative_balance_detected, possible_mca_or_loan_payments, banking_transactions, summary, risks, missing_info.',
+    '',
+    'BANKING TRANSACTIONS is an array of factual ledger rows only:',
+    '{date:"YYYY-MM-DD", description:"exact visible description", counterparty:"short counterparty", direction:"DEBIT" or "CREDIT", amount:number}.',
+    '',
+    'Rules:',
+    '1. The printed bank column controls direction. Deposits/Credits = CREDIT. Cheques/Debits = DEBIT. Never infer direction from wording.',
+    '2. Extract financing/loan/PAD/MCA/advance/funding/capital transactions, loan interest, recurring PADs, tax/government payments, insurance/premium finance and credit-card payments.',
+    '3. Also extract incoming credits of $5,000 or more when the description/counterparty could plausibly be financing; classification will be done later by deterministic code.',
+    '4. Do not classify or calculate recurrence, monthly debt, or underwriting capacity. Extract facts only.',
+    '5. Do not duplicate cheque-image pages. Do not attach a nearby amount to another row.',
+    '6. Header totals must come from the statement summary/header, not from transaction summing.',
+    '7. Use YYYY-MM-DD dates. Do not invent figures. If uncertain, omit the transaction.',
+    '8. If not a bank statement, set document_type to NOT_BANK_STATEMENT and banking_transactions to an empty array.',
+    '9. Return risks, missing_info and possible_mca_or_loan_payments as readable strings.',
+    '',
+    'Document text:',
+    String(text || '').substring(0,60000)
+  ].join('\n');
   return callOpenAIJson_(prompt);
 }
 
