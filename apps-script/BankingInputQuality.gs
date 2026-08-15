@@ -1,6 +1,6 @@
 const VFC_BANKING_PURE = {
-  VERSION: 'VFC-BANKING-PURE-3.2-INTAKE-LEDGER',
-  PREFIX: 'VFC_BANK_PURE_V32:',
+  VERSION: 'VFC-BANKING-PURE-3.3-VERIFIED-INTAKE',
+  PREFIX: 'VFC_BANK_PURE_V33:',
   MAX_STATEMENTS: 12,
   DEBT_LOOKBACK: 6,
   MAX_TEXT_CHARS: 50000,
@@ -68,8 +68,18 @@ function vfcBankCreateIntakePayload_(summary, fileName) {
     deposits !== null && withdrawals !== null
   ) ? vfcBankRound_((opening + deposits - withdrawals) - closing, .01) : null;
 
+  if (
+    opening === null || closing === null || deposits === null || withdrawals === null ||
+    diff === null || Math.abs(diff) > VFC_BANKING_PURE.RECONCILE_TOLERANCE
+  ) {
+    throw new Error('Statement header totals did not reconcile for ' + String(fileName || 'bank statement') + '.');
+  }
+  if (!Array.isArray(summary.banking_transactions)) {
+    throw new Error('Banking ledger extraction was incomplete for ' + String(fileName || 'bank statement') + '.');
+  }
+
   const payload = {
-    version: 32,
+    version: 33,
     modelVersion: VFC_BANKING_PURE.VERSION,
     fileName: String(fileName || ''),
     bankName: String(summary.bank_name || 'Unknown'),
@@ -252,7 +262,7 @@ function vfcBankPrepareRows_(rows){
         }
 
         p={
-          version:32,
+          version:33,
           modelVersion:VFC_BANKING_PURE.VERSION,
           fileName:row.fileName,
           bankName:row.bank||'Unknown',
@@ -458,7 +468,7 @@ function vfcBankIsFinancingCredit_(t,debtGroups){
     return true;
   }
 
-  if(/\bLOAN\b/.test(d)&&!(/\b(RETURN|TRF|TRANSFER|CLIENT REQUEST)\b/.test(d))){
+  if(/\bLOAN\b/.test(d)&&!/\b(RETURN|TRF|TRANSFER|CLIENT REQUEST)\b/.test(d)){
     return true;
   }
 
@@ -588,10 +598,12 @@ function vfcBankTotals_(r){
 }
 
 function vfcBankPayloadUsable_(p,recent){
-  if(!p||p.version!==32||p.modelVersion!==VFC_BANKING_PURE.VERSION)return false;
-  if(p.totalDeposits===null||p.totalWithdrawals===null)return false;
+  if(!p||p.version!==33||p.modelVersion!==VFC_BANKING_PURE.VERSION)return false;
+  if(p.openingBalance===null||p.closingBalance===null||p.totalDeposits===null||p.totalWithdrawals===null)return false;
   if(!(p.totalDeposits>=0)||!(p.totalWithdrawals>=0))return false;
+  if(p.reconciliationDifference===null||Math.abs(vfcBankNumber_(p.reconciliationDifference))>VFC_BANKING_PURE.RECONCILE_TOLERANCE)return false;
   if(recent&&!p.transactionsVerified)return false;
+  if(recent&&!Array.isArray(p.transactions))return false;
   return true;
 }
 
