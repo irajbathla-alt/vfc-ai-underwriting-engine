@@ -25,7 +25,7 @@ function setupVFC() {
     'Observed Lender Behaviour': ['Behaviour ID','Lender Name','Company Name','Period','Decision','Approved Amount','Decline Reason','Observed Pattern Note','Created At'],
     'Training Records': ['Training ID','Company Name','Period','Lender Name','Decision','Approved Amount','Decline Reason','Bank Summary','Key Findings','Risks','Missing Info','Created At'],
     'Structured Features': ['Feature ID','Company Name','Period','Statement Count','Months Covered','Total Deposits','Average Monthly Deposits','Total Withdrawals','Deposit Withdrawal Ratio','NSF Count','Negative Balance Flag','MCA Payment Flag','Summary Text','Updated At'],
-    'Underwriting Assessments': ['Assessment ID','Model Version','Company Name','Period','Lender Name','Observed Fit','Observed Score','Confidence','Historical Cases','Similar Cases','SimilarApprovals','SimilarDeclines','Observed Approval Rate','Low Approved Amount','High Approved Amount','Median Approved Amount','Reasoning','Risks','Created At'],
+    'Underwriting Assessments': ['Assessment ID','Model Version','Company Name','Period','Lender Name','Observed Fit','Observed Score','Confidence','Historical Cases','Similar Cases','Similar Approvals','Similar Declines','Observed Approval Rate','Low Approved Amount','High Approved Amount','Median Approved Amount','Reasoning','Risks','Created At'],
     'AI Recommendations': ['Recommendation ID','Company Name','Period','Recommended Lender','Fit Level','Reasoning','Risks','Missing Info','Created At'],
     'Deal Outcomes': ['Outcome ID','Company Name','Period','Selected Lender','AI Recommended Lender','Final Result','Funded Amount','Funded Date','Why This Lender Won','Admin Notes','Created At']
   };
