@@ -1,11 +1,10 @@
 const VFC_BANKING_PURE = {
-  VERSION: 'VFC-BANKING-PURE-3.0-LEDGER',
-  PREFIX: 'VFC_BANK_PURE_V3:',
+  VERSION: 'VFC-BANKING-PURE-3.1-SINGLE-PASS',
+  PREFIX: 'VFC_BANK_PURE_V31:',
   MAX_STATEMENTS: 12,
   DEBT_LOOKBACK: 6,
-  RECONCILE_TOLERANCE: 5,
-  MAX_TEXT_CHARS: 70000,
-  MIN_FINANCING_CREDIT: 1000
+  MAX_TEXT_CHARS: 50000,
+  RECONCILE_TOLERANCE: 5
 };
 
 function getBankingInputQualityStatus() {
@@ -13,333 +12,219 @@ function getBankingInputQualityStatus() {
     modelVersion: VFC_BANKING_PURE.VERSION,
     automatic: true,
     manualRefreshRequired: false,
+    singlePassDuringAssessment: true,
     bankAgnostic: true,
     usesIntakeHeaderTotals: true,
     transactionDirectionLocked: true,
-    recurrenceCalculatedLocally: true,
     creditsNeverCountAsDebt: true,
     revolvingSweepSeparated: true,
     historicalTrainingPdfReprocessingRequired: false
   };
 }
 
-function getValidatedBankingFeatures_(companyName, period) {
-  const base = vfcLedgerBaseFeatures_(companyName, period);
-  if (!base) return null;
-  const rows = vfcLedgerSelectedRows_(companyName, period);
-  if (!rows.length) return base;
-
-  const ensured = vfcLedgerEnsureStatements_(rows);
-  if (ensured.errors.length) {
-    throw new Error('Unable to read uploaded bank statement(s): ' + ensured.errors.join(' | '));
-  }
-  return vfcLedgerBuildFeatures_(base, ensured.rows);
-}
-
 function refreshDebtSignalsForPeriodSafe(companyOrRequest, requestedPeriod) {
   try {
-    const req = vfcLedgerRequest_(companyOrRequest, requestedPeriod);
-    const period = req.period || (typeof resolveLatestAssessmentPeriod_ === 'function'
-      ? resolveLatestAssessmentPeriod_(req.companyName, req.period)
-      : req.period);
-    const features = getValidatedBankingFeatures_(req.companyName, period);
-    if (!features) throw new Error('No banking features found.');
-    return {
-      ok: true,
-      modelVersion: VFC_BANKING_PURE.VERSION,
-      companyName: req.companyName,
-      period: period,
-      errors: [],
-      debtProfile: features.debtProfile || {},
-      inputQualityAudit: features.inputQualityAudit || {}
-    };
+    const req = vfcBankRequest_(companyOrRequest, requestedPeriod);
+    return { ok:true, modelVersion:VFC_BANKING_PURE.VERSION, companyName:req.companyName, period:req.period || requestedPeriod || '', deferredToAssessment:true, errors:[] };
   } catch (e) {
     return { ok:false, modelVersion:VFC_BANKING_PURE.VERSION, errors:[String(e && e.message || e)] };
   }
 }
 
 function refreshLatestDebtSignals() {
-  const rows = vfcLedgerSummaryRows_('', '');
+  const rows = vfcBankSummaryRows_('', '');
   if (!rows.length) throw new Error('No bank statements found.');
-  rows.sort(function(a,b){ return vfcLedgerTime_(a.createdAt)-vfcLedgerTime_(b.createdAt); });
+  rows.sort(function(a,b){ return vfcBankTime_(a.createdAt)-vfcBankTime_(b.createdAt); });
   const last = rows[rows.length-1];
-  const result = refreshDebtSignalsForPeriodSafe({companyName:last.companyName,period:last.period});
-  console.log(JSON.stringify(result,null,2));
+  const result = getValidatedBankingFeatures_(last.companyName,last.period);
+  console.log(JSON.stringify(result && result.debtProfile ? result.debtProfile : result,null,2));
   return result;
 }
+function diagnoseLatestBankingInputs(){ return refreshLatestDebtSignals(); }
 
-function diagnoseLatestBankingInputs() { return refreshLatestDebtSignals(); }
+function getValidatedBankingFeatures_(companyName, period) {
+  const base = typeof buildPowerFeatures_ === 'function' ? buildPowerFeatures_(companyName,period) :
+    (typeof buildFeaturesForCase_ === 'function' ? buildFeaturesForCase_(companyName,period) : null);
+  if (!base) return null;
 
-/* ========================= statement selection ========================= */
+  const rows = vfcBankSelectedRows_(companyName,period);
+  if (!rows.length) return base;
 
-function vfcLedgerSelectedRows_(companyName, period) {
-  const all = vfcLedgerSummaryRows_(companyName, period);
-  if (!all.length) return [];
-  const byStatement = {};
-  all.forEach(function(row){
-    const key = vfcLedgerStatementKey_(row);
-    const old = byStatement[key];
-    if (!old || vfcLedgerTime_(row.createdAt) >= vfcLedgerTime_(old.createdAt)) byStatement[key]=row;
+  const prepared = vfcBankPrepareRows_(rows);
+  if (prepared.errors.length) throw new Error('Unable to verify uploaded bank statement(s): ' + prepared.errors.join(' | '));
+
+  let totalDeposits=0,totalWithdrawals=0,nsf=0,negative=0;
+  const monthlyDeposits=[],monthlyWithdrawals=[],audit=[];
+  prepared.rows.forEach(function(x){
+    const p=x.payload;
+    totalDeposits += p.totalDeposits;
+    totalWithdrawals += p.totalWithdrawals;
+    monthlyDeposits.push(p.totalDeposits);
+    monthlyWithdrawals.push(p.totalWithdrawals);
+    nsf += Math.max(0,p.nsfCount||0);
+    if (p.negativeBalanceDetected) negative=1;
+    audit.push({fileName:x.row.fileName,bank:p.bankName,start:p.statementStartDate,end:p.statementEndDate,totalDeposits:p.totalDeposits,totalWithdrawals:p.totalWithdrawals,reconciliationDifference:p.reconciliationDifference,transactionsVerified:p.transactionsVerified});
   });
-  const rows = Object.keys(byStatement).map(function(k){return byStatement[k];});
-  rows.sort(function(a,b){
-    const ad=vfcLedgerDate_(a.endDate)||vfcLedgerDate_(a.startDate)||new Date(0);
-    const bd=vfcLedgerDate_(b.endDate)||vfcLedgerDate_(b.startDate)||new Date(0);
-    return ad-bd;
+
+  const recent = prepared.rows.slice(Math.max(0,prepared.rows.length-VFC_BANKING_PURE.DEBT_LOOKBACK));
+  const debt = vfcBankDebtProfile_(recent);
+  const months = Math.max(1,prepared.rows.length);
+  const grossMonthly = totalDeposits/months;
+  const operatingTotal = Math.max(0,totalDeposits-debt.financingCreditsTotal);
+  const operatingMonthly = operatingTotal/months;
+
+  return Object.assign({},base,{
+    statementCount: prepared.rows.length,
+    monthsCovered: months,
+    totalDeposits:vfcBankRound_(totalDeposits,.01),
+    averageMonthlyDeposits:vfcBankRound_(grossMonthly,.01),
+    totalWithdrawals:vfcBankRound_(totalWithdrawals,.01),
+    depositWithdrawalRatio: totalWithdrawals ? vfcBankRound_(totalDeposits/totalWithdrawals,.01) : 0,
+    nsfCount:nsf,
+    nsfPerMonth:vfcBankRound_(nsf/months,.01),
+    negativeBalanceFlag:negative,
+    mcaPaymentFlag:debt.activeDebtObligations.length?1:0,
+    monthlyDeposits:monthlyDeposits,
+    monthlyWithdrawals:monthlyWithdrawals,
+    estimatedOperatingTotalDeposits:vfcBankRound_(operatingTotal,.01),
+    estimatedOperatingMonthlyDeposits:vfcBankRound_(operatingMonthly,.01),
+    detectedFinancingCredits:vfcBankRound_(debt.financingCreditsTotal,.01),
+    existingMonthlyDebtService:vfcBankRound_(debt.confirmedMonthlyDebtService,.01),
+    otherRecurringMonthlyObligations:vfcBankRound_(debt.otherRecurringMonthlyObligations,.01),
+    debtServiceToDepositsRatio:grossMonthly?vfcBankRound_(debt.confirmedMonthlyDebtService/grossMonthly,.0001):0,
+    debtProfile:debt,
+    inputQualityAudit:{modelVersion:VFC_BANKING_PURE.VERSION,statementAudit:audit,warnings:debt.warnings}
   });
+}
+
+function vfcBankSelectedRows_(companyName,period){
+  const all=vfcBankSummaryRows_(companyName,period); if(!all.length)return[];
+  const map={};
+  all.forEach(function(r){const k=vfcBankStatementKey_(r);const old=map[k];if(!old||vfcBankTime_(r.createdAt)>=vfcBankTime_(old.createdAt))map[k]=r;});
+  const rows=Object.keys(map).map(function(k){return map[k];});
+  rows.sort(function(a,b){return (vfcBankDate_(a.endDate)||vfcBankDate_(a.startDate)||new Date(0))-(vfcBankDate_(b.endDate)||vfcBankDate_(b.startDate)||new Date(0));});
   return rows.slice(Math.max(0,rows.length-VFC_BANKING_PURE.MAX_STATEMENTS));
 }
 
-function vfcLedgerSummaryRows_(companyName, period) {
-  const ss=SpreadsheetApp.getActiveSpreadsheet();
-  const sh=ss.getSheetByName('PDF Summaries');
+function vfcBankSummaryRows_(companyName,period){
+  const sh=SpreadsheetApp.getActiveSpreadsheet().getSheetByName('PDF Summaries');
   if(!sh||sh.getLastRow()<2)return[];
-  const values=sh.getDataRange().getValues();
-  const headers=values[0].map(vfcLedgerHeader_); const idx={};
-  headers.forEach(function(h,i){idx[h]=i;});
-  function val(r,name){const i=idx[vfcLedgerHeader_(name)];return i===undefined?'':r[i];}
+  const values=sh.getDataRange().getValues(), headers=values[0].map(vfcBankHeader_), idx={}; headers.forEach(function(h,i){idx[h]=i;});
+  function val(r,n){const i=idx[vfcBankHeader_(n)];return i===undefined?'':r[i];}
   const out=[];
   for(let i=1;i<values.length;i++){
-    const r=values[i];
-    const company=String(val(r,'Company Name')||'').trim();
-    const detected=String(val(r,'Detected Period')||'').trim();
-    if(companyName&&!vfcLedgerSame_(company,companyName))continue;
-    if(period&&!vfcLedgerSame_(detected,period))continue;
-    out.push({
-      rowNumber:i+1,
-      signalColumn:idx[vfcLedgerHeader_('Possible MCA Or Loan Payments')]===undefined?-1:idx[vfcLedgerHeader_('Possible MCA Or Loan Payments')]+1,
-      uploadId:String(val(r,'Upload ID')||'').trim(), companyName:company, period:detected,
-      fileName:String(val(r,'File Name')||'').trim(), bank:String(val(r,'Bank Name')||'').trim(),
-      startDate:val(r,'Statement Start Date'), endDate:val(r,'Statement End Date'),
-      opening:vfcLedgerNullable_(val(r,'Opening Balance')), closing:vfcLedgerNullable_(val(r,'Closing Balance')),
-      deposits:vfcLedgerNullable_(val(r,'Total Deposits')), withdrawals:vfcLedgerNullable_(val(r,'Total Withdrawals')),
-      nsf:vfcLedgerNumber_(val(r,'NSF Count')), negative:vfcLedgerBool_(val(r,'Negative Balance Detected')),
-      signalRaw:String(val(r,'Possible MCA Or Loan Payments')||''), createdAt:val(r,'Created At')
-    });
+    const r=values[i],company=String(val(r,'Company Name')||'').trim(),detected=String(val(r,'Detected Period')||'').trim();
+    if(companyName&&!vfcBankSame_(company,companyName))continue;
+    if(period&&!vfcBankSame_(detected,period))continue;
+    out.push({rowNumber:i+1,signalColumn:idx[vfcBankHeader_('Possible MCA Or Loan Payments')]===undefined?-1:idx[vfcBankHeader_('Possible MCA Or Loan Payments')]+1,
+      uploadId:String(val(r,'Upload ID')||'').trim(),companyName:company,period:detected,fileName:String(val(r,'File Name')||'').trim(),bank:String(val(r,'Bank Name')||'').trim(),
+      startDate:val(r,'Statement Start Date'),endDate:val(r,'Statement End Date'),opening:vfcBankNullable_(val(r,'Opening Balance')),closing:vfcBankNullable_(val(r,'Closing Balance')),
+      deposits:vfcBankNullable_(val(r,'Total Deposits')),withdrawals:vfcBankNullable_(val(r,'Total Withdrawals')),nsf:vfcBankNumber_(val(r,'NSF Count')),
+      negative:vfcBankBool_(val(r,'Negative Balance Detected')),signalRaw:String(val(r,'Possible MCA Or Loan Payments')||''),createdAt:val(r,'Created At')});
   }
   return out;
 }
 
-/* ========================= upload resolution ========================= */
-
-function vfcLedgerUploadIndex_() {
-  const rows = typeof getSheetObjects_==='function' ? getSheetObjects_('Uploads') : [];
-  const index={byId:{},byExact:{},byCompanyFile:{},byFile:{}};
-  rows.forEach(function(r){
-    const uploadId=String(r.uploadId||r['Upload ID']||'').trim();
-    const company=String(r.companyName||r['Company Name']||'').trim();
-    const period=String(r.detectedPeriod||r.period||r['Detected Period']||'').trim();
-    const fileName=String(r.fileName||r['File Name']||'').trim();
-    let fileId=String(r.fileId||r['File ID']||'').trim();
-    const fileLink=String(r.fileLink||r.fileUrl||r['File Link']||'').trim();
-    if(!fileId&&fileLink){const m=fileLink.match(/[-\w]{20,}/);if(m)fileId=m[0];}
-    if(!fileId)return;
-    const item={uploadId:uploadId,companyName:company,period:period,fileName:fileName,fileId:fileId,createdAt:r.createdAt||r['Created At']||''};
-    if(uploadId)index.byId[uploadId]=item;
-    const exact=vfcLedgerNorm_(company)+'|'+vfcLedgerNorm_(period)+'|'+vfcLedgerNorm_(fileName);
-    const cf=vfcLedgerNorm_(company)+'|'+vfcLedgerNorm_(fileName);
-    const f=vfcLedgerNorm_(fileName);
-    vfcLedgerKeepNewest_(index.byExact,exact,item);
-    vfcLedgerKeepNewest_(index.byCompanyFile,cf,item);
-    vfcLedgerKeepNewest_(index.byFile,f,item);
-  });
-  return index;
-}
-
-function vfcLedgerResolveUpload_(row,index){
-  if(row.uploadId&&index.byId[row.uploadId])return index.byId[row.uploadId];
-  const exact=vfcLedgerNorm_(row.companyName)+'|'+vfcLedgerNorm_(row.period)+'|'+vfcLedgerNorm_(row.fileName);
-  if(index.byExact[exact])return index.byExact[exact];
-  const cf=vfcLedgerNorm_(row.companyName)+'|'+vfcLedgerNorm_(row.fileName);
-  if(index.byCompanyFile[cf])return index.byCompanyFile[cf];
-  return index.byFile[vfcLedgerNorm_(row.fileName)]||null;
-}
-
-function vfcLedgerKeepNewest_(map,key,item){
-  if(!key)return; const old=map[key];
-  if(!old||vfcLedgerTime_(item.createdAt)>=vfcLedgerTime_(old.createdAt))map[key]=item;
-}
-
-/* ========================= extraction / cache ========================= */
-
-function vfcLedgerEnsureStatements_(rows){
-  const ss=SpreadsheetApp.getActiveSpreadsheet(); const sh=ss.getSheetByName('PDF Summaries');
-  const uploads=vfcLedgerUploadIndex_(); const out=[]; const errors=[];
+function vfcBankPrepareRows_(rows){
+  const uploads=vfcBankUploadIndex_(), sh=SpreadsheetApp.getActiveSpreadsheet().getSheetByName('PDF Summaries'), out=[], errors=[];
   rows.forEach(function(row,index){
     const recent=index>=Math.max(0,rows.length-VFC_BANKING_PURE.DEBT_LOOKBACK);
-    let payload=vfcLedgerParse_(row.signalRaw);
-    if(!vfcLedgerPayloadUsable_(payload,recent)){
+    let p=vfcBankParsePayload_(row.signalRaw);
+    if(!vfcBankPayloadUsable_(p,recent)){
       try{
-        payload=vfcLedgerExtract_(row,vfcLedgerResolveUpload_(row,uploads),recent);
-        if(row.signalColumn>0)sh.getRange(row.rowNumber,row.signalColumn).setValue(VFC_BANKING_PURE.PREFIX+JSON.stringify(payload));
+        const totals=vfcBankTotals_(row); if(!totals.ok)throw new Error('statement totals do not reconcile');
+        let transactions=[];
+        if(recent){
+          const upload=vfcBankResolveUpload_(row,uploads); if(!upload||!upload.fileId)throw new Error('uploaded PDF file ID not found');
+          const text=extractTextFromPdf_(upload.fileId);
+          const raw=vfcBankExtractTransactions_(text,row);
+          transactions=vfcBankNormalizeTransactions_(raw.transactions||[]);
+        }
+        p={version:31,modelVersion:VFC_BANKING_PURE.VERSION,fileName:row.fileName,bankName:row.bank||'Unknown',statementStartDate:vfcBankIso_(row.startDate),statementEndDate:vfcBankIso_(row.endDate),
+          openingBalance:totals.opening,closingBalance:totals.closing,totalDeposits:totals.deposits,totalWithdrawals:totals.withdrawals,reconciliationDifference:totals.diff,
+          nsfCount:Math.max(0,row.nsf||0),negativeBalanceDetected:!!row.negative,transactionsVerified:recent,transactions:transactions,analyzedAt:new Date().toISOString()};
+        if(row.signalColumn>0)sh.getRange(row.rowNumber,row.signalColumn).setValue(VFC_BANKING_PURE.PREFIX+JSON.stringify(p));
       }catch(e){errors.push(row.fileName+': '+String(e&&e.message||e));return;}
     }
-    out.push({row:row,payload:payload});
+    out.push({row:row,payload:p});
   });
   return{rows:out,errors:errors};
 }
 
-function vfcLedgerExtract_(row,upload,needTransactions){
-  const totals=vfcLedgerStoredTotals_(row);
-  if(!totals.ok)throw new Error('statement summary totals do not reconcile');
-  let transactions=[];
-  if(needTransactions){
-    if(!upload||!upload.fileId)throw new Error('could not resolve uploaded PDF from intake records');
-    const text=extractTextFromPdf_(upload.fileId);
-    const raw=vfcLedgerExtractTransactionsAI_(text,row);
-    transactions=vfcLedgerNormalizeTransactions_(raw.transactions||[]);
-  }
-  return{
-    version:3,modelVersion:VFC_BANKING_PURE.VERSION,fileName:row.fileName,bankName:row.bank||'Unknown',
-    statementStartDate:vfcLedgerIso_(row.startDate),statementEndDate:vfcLedgerIso_(row.endDate),
-    openingBalance:totals.opening,closingBalance:totals.closing,totalDeposits:totals.deposits,totalWithdrawals:totals.withdrawals,
-    reconciliationDifference:totals.diff,totalsSource:'INTAKE_RECONCILED',nsfCount:Math.max(0,row.nsf||0),negativeBalanceDetected:!!row.negative,
-    transactionsVerified:needTransactions,transactions:transactions,analyzedAt:new Date().toISOString()
-  };
-}
-
-function vfcLedgerExtractTransactionsAI_(text,row){
+function vfcBankExtractTransactions_(text,row){
   const prompt=[
-    'You are reading a business bank statement ledger. Return JSON only with one key: transactions.',
-    'Each transaction must be: {date:"YYYY-MM-DD",description:"exact visible description",counterparty:"short payee/funder",direction:"DEBIT" or "CREDIT",amount:number}.',
-    '',
-    'FACT EXTRACTION ONLY. Do not underwrite, infer recurrence, infer monthly debt, or guess lender rules.',
-    'The bank column is authoritative. If printed under Deposits/Credits, direction=CREDIT. If printed under Cheques/Debits, direction=DEBIT.',
-    'A description containing PAD or PAYMENT can still be CREDIT. Direction comes from the column, never the wording.',
-    '',
-    'Extract every transaction that is potentially relevant to financing or recurring obligations:',
-    '- LOAN, LOAN CREDIT, LOAN PAYMENT, LOAN INTEREST, ADVANCE, FUNDING, FINANCING, MCA, CAPITAL',
-    '- PAD / PRE-AUTH / MERCH / MERCHANT / BDC / JOURNEY / ONDECK',
-    '- CRA / CCRA / GST / HST / TAX / EMPTX / TXINS',
-    '- INSURANCE / IPFS / PREMIUM FINANCE / CREDIT CARD',
-    '- any incoming credit >= $5,000 whose description itself suggests financing, lender funding, capital, investment, advance or loan.',
-    '',
-    'Do not extract ordinary supplier cheques, payroll, customer deposits, ordinary e-transfers, utilities, gas/fuel, telephone or bank fees unless the description also clearly matches a financing/tax/insurance rule above.',
-    'Never copy a nearby amount. Use the exact amount on that transaction row. Do not duplicate cheque-image pages.',
-    'If unclear, omit the transaction rather than guessing.',
-    '',
-    'Statement metadata: '+JSON.stringify({fileName:row.fileName,start:vfcLedgerIso_(row.startDate),end:vfcLedgerIso_(row.endDate),bank:row.bank}),
-    '',
+    'Return JSON only with key transactions.',
+    'Each transaction: {date:"YYYY-MM-DD",description:"exact description",counterparty:"short name",direction:"DEBIT" or "CREDIT",amount:number}.',
+    'FACT EXTRACTION ONLY. Bank column controls direction. Deposits/Credits=CREDIT; Cheques/Debits=DEBIT. Wording never overrides the column.',
+    'Extract financing/loan/PAD/MCA/capital/advance/funding transactions, BDC, Journey/OnDeck, Merchant/Merch PAD, loan interest, tax/CRA/CCRA/GST/HST/EMPTX/TXINS, insurance/IPFS/premium finance and credit-card payments.',
+    'Do not extract ordinary suppliers, payroll, customer receipts, utilities, fuel/gas, phone, bank fees or ordinary transfers unless clearly financing/tax/insurance.',
+    'Never duplicate cheque-image pages. If uncertain, omit.',
+    'Metadata:'+JSON.stringify({fileName:row.fileName,start:vfcBankIso_(row.startDate),end:vfcBankIso_(row.endDate),bank:row.bank}),
     'STATEMENT TEXT:',String(text||'').substring(0,VFC_BANKING_PURE.MAX_TEXT_CHARS)
   ].join('\n');
   return callOpenAIJson_(prompt)||{};
 }
 
-function vfcLedgerNormalizeTransactions_(items){
-  if(!Array.isArray(items))return[]; const out=[],seen={};
-  items.forEach(function(x){x=x||{};const date=vfcLedgerIso_(x.date),desc=String(x.description||'').replace(/\s+/g,' ').trim(),dir=String(x.direction||'').toUpperCase(),amount=vfcLedgerPositive_(x.amount);if(!date||!desc||(dir!=='DEBIT'&&dir!=='CREDIT')||!(amount>0))return;
-    const t={date:date,description:desc.substring(0,240),counterparty:String(x.counterparty||desc).replace(/\s+/g,' ').trim().substring(0,140),direction:dir,amount:vfcLedgerRound_(amount,.01)};
-    const k=[t.date,t.direction,t.amount,t.description.toUpperCase()].join('|');if(!seen[k]){seen[k]=1;out.push(t);}
-  });return out;
-}
-
-/* ========================= deterministic banking logic ========================= */
-
-function vfcLedgerBuildFeatures_(base,verifiedRows){
-  let totalDeposits=0,totalWithdrawals=0,nsf=0,negative=0;const monthlyDeposits=[],monthlyWithdrawals=[],openings=[],closings=[],audit=[];
-  verifiedRows.forEach(function(x){const p=x.payload;totalDeposits+=p.totalDeposits;totalWithdrawals+=p.totalWithdrawals;monthlyDeposits.push(p.totalDeposits);monthlyWithdrawals.push(p.totalWithdrawals);openings.push(p.openingBalance);closings.push(p.closingBalance);nsf+=Math.max(0,p.nsfCount||0);if(p.negativeBalanceDetected)negative=1;audit.push({fileName:x.row.fileName,bank:p.bankName,statementStartDate:p.statementStartDate,statementEndDate:p.statementEndDate,totalDeposits:p.totalDeposits,totalWithdrawals:p.totalWithdrawals,openingBalance:p.openingBalance,closingBalance:p.closingBalance,reconciliationDifference:p.reconciliationDifference,transactionsVerified:p.transactionsVerified,verified:true});});
-  const recent=verifiedRows.slice(Math.max(0,verifiedRows.length-VFC_BANKING_PURE.DEBT_LOOKBACK));
-  const debt=vfcLedgerDebtProfile_(recent);const months=Math.max(1,verifiedRows.length);const grossMonthly=totalDeposits/months;const operatingTotal=Math.max(0,totalDeposits-debt.financingCreditsTotal);const operatingMonthly=operatingTotal/months;
-  const warnings=[];if(debt.revolvingFinancingActivity.length)warnings.push('Revolving loan sweep activity detected. Draws are financing credits; sweep repayments are not treated as fixed monthly debt.');if(debt.newFinancingObserved.length)warnings.push('New financing was observed but did not have enough repayment history to become confirmed recurring monthly debt.');
-  return Object.assign({},base,{statementCount:verifiedRows.length,monthsCovered:verifiedRows.length,totalDeposits:vfcLedgerRound_(totalDeposits,.01),averageMonthlyDeposits:vfcLedgerRound_(grossMonthly,.01),totalWithdrawals:vfcLedgerRound_(totalWithdrawals,.01),depositWithdrawalRatio:totalWithdrawals?vfcLedgerRound_(totalDeposits/totalWithdrawals,.01):0,nsfCount:nsf,nsfPerMonth:vfcLedgerRound_(nsf/months,.01),negativeBalanceFlag:negative,mcaPaymentFlag:debt.activeDebtObligations.length?1:0,monthlyDeposits:monthlyDeposits,monthlyWithdrawals:monthlyWithdrawals,depositVolatility:vfcLedgerRound_(vfcLedgerCv_(monthlyDeposits),.01),depositTrend:vfcLedgerRound_(vfcLedgerTrend_(monthlyDeposits),.01),averageOpeningBalance:vfcLedgerRound_(vfcLedgerSum_(openings)/openings.length,.01),averageClosingBalance:vfcLedgerRound_(vfcLedgerSum_(closings)/closings.length,.01),estimatedOperatingTotalDeposits:vfcLedgerRound_(operatingTotal,.01),estimatedOperatingMonthlyDeposits:vfcLedgerRound_(operatingMonthly,.01),detectedFinancingCredits:vfcLedgerRound_(debt.financingCreditsTotal,.01),existingMonthlyDebtService:vfcLedgerRound_(debt.confirmedMonthlyDebtService,.01),informationalRecurringMonthlyObligations:vfcLedgerRound_(debt.informationalMonthlyObligations,.01),otherRecurringMonthlyObligations:vfcLedgerRound_(debt.informationalMonthlyObligations,.01),debtServiceToDepositsRatio:grossMonthly?vfcLedgerRound_(debt.confirmedMonthlyDebtService/grossMonthly,.0001):0,debtProfile:debt,inputQualityAudit:{modelVersion:VFC_BANKING_PURE.VERSION,verified:true,selectedStatementRows:verifiedRows.length,grossAverageMonthlyDeposits:vfcLedgerRound_(grossMonthly,.01),estimatedOperatingMonthlyDeposits:vfcLedgerRound_(operatingMonthly,.01),statementAudit:audit,warnings:warnings}});
-}
-
-function vfcLedgerDebtProfile_(recentRows){
-  const months=Math.max(1,recentRows.length);let tx=[];recentRows.forEach(function(x){(x.payload.transactions||[]).forEach(function(t){tx.push(Object.assign({statementEnd:x.payload.statementEndDate},t));});});tx=vfcLedgerDedupe_(tx);
-  const debits=tx.filter(function(t){return t.direction==='DEBIT';});const credits=tx.filter(function(t){return t.direction==='CREDIT';});
-  const classified=debits.map(vfcLedgerClassifyDebit_).filter(Boolean);const groups={};classified.forEach(function(t){const k=t.family+'|'+t.key;if(!groups[k])groups[k]={family:t.family,key:t.key,label:t.label,items:[]};groups[k].items.push(t);});
-  const genericLoanCredits=credits.filter(function(c){return /^\s*LOAN\s+CREDIT\b/i.test(c.description);});
-  const genericLoanDebits=classified.filter(function(d){return d.key==='GENERIC_LOAN_PAYMENT';});
-  const revolvingSweep=genericLoanCredits.length>=4&&genericLoanDebits.length>=4;
-  const summaries=Object.keys(groups).map(function(k){return vfcLedgerSummarizeGroup_(groups[k],months);}).filter(Boolean);
-  const active=[],tax=[],other=[],observedOnce=[],revolving=[];
-  summaries.forEach(function(g){
-    if(revolvingSweep&&g.key==='GENERIC_LOAN_PAYMENT'){revolving.push(g);return;}
-    if(!g.recurring){observedOnce.push(g);return;}
-    if(g.family==='FINANCING'||g.family==='MCA'||g.family==='PAD')active.push(g);
-    else if(g.family==='TAX')tax.push(g);else other.push(g);
+function vfcBankDebtProfile_(recent){
+  const tx=[]; recent.forEach(function(x){(x.payload.transactions||[]).forEach(function(t){tx.push(t);});});
+  const financingCredits=[], debtGroups={}, otherGroups={}, genericLoanCredits=[],genericLoanPayments=[];
+  tx.forEach(function(t){
+    const d=String(t.description||'').toUpperCase(), dir=t.direction, amount=vfcBankNumber_(t.amount); if(!(amount>0))return;
+    if(dir==='CREDIT'){
+      if(/\bLOAN CREDIT\b|\bLOAN\b|\bADVANCE\b|\bFUND(?:ING)?\b|\bCAPITAL\b|\bMERCHANT GROWTH\b|\bBDC\b|\bJOURNEY\b|\bONDECK\b/.test(d)) financingCredits.push(Object.assign({},t,{classification:'FINANCING_CREDIT'}));
+      if(/\bLOAN CREDIT\b/.test(d))genericLoanCredits.push(t);
+      return;
+    }
+    if(dir!=='DEBIT')return;
+    if(/^LOAN PAYMENT\b/.test(d)&&!/NO\.|NUMBER|#/.test(d)){genericLoanPayments.push(t);return;}
+    if(/SUPERPASS|HYDRO|FORTIS|GAS BILL|TELUS|ROGERS|PHONE|PAY-FILE|BANK FEE/.test(d))return;
+    if(/CRA|CCRA|GST|HST|TAX|EMPTX|TXINS|INSURANCE|IPFS|PREMIUM FINANCE/.test(d)){vfcBankAddGroup_(otherGroups,t,'OTHER');return;}
+    if(/\bPAD\b|\bMCA\b|MERCH|MERCHANT|BDC|JOURNEY|ONDECK|LOAN PAYMENT|LOAN INTEREST|FINANC|ADVANCE/.test(d))vfcBankAddGroup_(debtGroups,t,'DEBT');
   });
-  const creditResult=vfcLedgerFinancingCredits_(credits,classified);
-  const newFinancing=[];
-  creditResult.confirmed.forEach(function(c){const payment=vfcLedgerBestRelatedObserved_(c,observedOnce);if(payment)newFinancing.push({credit:c,observedPayment:payment});});
-  const confirmedMonthly=active.reduce(function(s,g){return s+g.monthlyEquivalent;},0);const infoMonthly=tax.concat(other).reduce(function(s,g){return s+g.monthlyEquivalent;},0);
-  return{confirmedMonthlyDebtService:vfcLedgerRound_(confirmedMonthly,.01),informationalMonthlyObligations:vfcLedgerRound_(infoMonthly,.01),activeDebtObligations:active,revolvingFinancingActivity:revolving,taxGovernmentPads:tax,otherRecurringObligations:other,observedOnce:observedOnce,newFinancingObserved:newFinancing,allDetectedObligations:summaries,financingCredits:creditResult.confirmed,possibleFinancingCredits:creditResult.possible,financingCreditsTotal:vfcLedgerRound_(creditResult.total,.01),note:'Direction comes from the bank column. Credits never count as debt. Recurring debt equals actual observed debit cash flow averaged across the recent statement window. Revolving loan sweeps are separated from fixed debt.'};
-}
 
-function vfcLedgerClassifyDebit_(t){
-  const s=String(t.description||'').toUpperCase();
-  if(/\bFEE\b|SERVICE\s+CHARGE|NSF|OVERDRAFT\s+INTEREST|PAYMENT\s+COVERAGE/.test(s))return null;
-  if(/SUPERPASS|GAS\s+BILL|HYDRO|FORTIS|TELUS|UTILITY|PETROLEUM|FUEL/.test(s))return null;
-  let family='',key='',label=t.counterparty||t.description;
-  if(/\bCRA\b|\bCCRA\b|GST|HST|COMMERCIAL\s+TAXES|EMPTX|TXINS|TXBAL|\bTAX\b/.test(s))family='TAX';
-  else if(/INSURANCE|\bIPFS\b|PREMIUM\s+FIN/.test(s))family='OTHER';
-  else if(/CREDIT\s+CARD|VISA\s+(ROYAL|TD|BNS)|RBC\s+CREDIT\s+CARD/.test(s))family='OTHER';
-  else if(/MERCH\s+PAD|MERCHANT\s+GROWTH|\bMCA\b/.test(s))family='MCA';
-  else if(/\bPAD\b|PRE[- ]?AUTH/.test(s))family='PAD';
-  else if(/LOAN\s+PAYMENT|LOAN\s+PYMT|LOAN\s+PMT|LOAN\s+INTEREST|\bFINANC/.test(s))family='FINANCING';
-  else return null;
-  if(/^\s*LOAN\s+PAYMENT\s*$/i.test(String(t.description||'')))key='GENERIC_LOAN_PAYMENT';
-  else{const no=s.match(/(?:NO\.?|NUMBER)\s*([0-9-]{5,})/);if(no)key=(/INTEREST/.test(s)?'LOAN_INTEREST_':'LOAN_')+no[1].replace(/[^0-9]/g,'');else key=vfcLedgerCounterpartyKey_(t.counterparty||t.description);}
-  return Object.assign({},t,{family:family,key:key,label:label});
-}
-
-function vfcLedgerSummarizeGroup_(g,monthsInWindow){
-  const items=(g.items||[]).slice().sort(function(a,b){return vfcLedgerDate_(a.date)-vfcLedgerDate_(b.date);});if(!items.length)return null;
-  const monthSet={};items.forEach(function(i){monthSet[String(i.date).slice(0,7)]=1;});const distinctMonths=Object.keys(monthSet).length,occurrences=items.length;
-  const recurring=distinctMonths>=2&&occurrences>=2;const sum=items.reduce(function(s,i){return s+i.amount;},0);const monthly=recurring?sum/Math.max(1,monthsInWindow):0;
-  const gaps=[];for(let i=1;i<items.length;i++)gaps.push((vfcLedgerDate_(items[i].date)-vfcLedgerDate_(items[i-1].date))/86400000);const gap=gaps.length?vfcLedgerMedian_(gaps):0;
-  let frequency='Observed';if(distinctMonths>=2&&occurrences===distinctMonths)frequency='Monthly';else if(gap>=5&&gap<=10)frequency='Weekly / multiple monthly';else if(gap>=11&&gap<=20)frequency='Biweekly / multiple monthly';else if(recurring)frequency='Multiple monthly';
-  return{family:g.family,key:g.key,counterparty:g.label,description:g.label,category:g.family==='FINANCING'?'LOAN':g.family,paymentAmount:vfcLedgerRound_(vfcLedgerMedian_(items.map(function(i){return i.amount;})),.01),frequency:frequency,monthlyEquivalent:vfcLedgerRound_(monthly,.01),occurrences:occurrences,distinctMonths:distinctMonths,firstSeen:items[0].date,lastSeen:items[items.length-1].date,active:recurring,recurring:recurring,confidence:distinctMonths>=3?'High':(recurring?'Moderate':'Low'),observedTotal:vfcLedgerRound_(sum,.01)};
-}
-
-function vfcLedgerFinancingCredits_(credits,classifiedDebits){
-  const confirmed=[],possible=[];
-  credits.forEach(function(c){const s=String(c.description||'').toUpperCase(),amount=vfcLedgerPositive_(c.amount);if(!(amount>=VFC_BANKING_PURE.MIN_FINANCING_CREDIT))return;
-    const explicit=/^\s*LOAN\s+CREDIT\b|LOAN\s+ADVANCE|LOAN\s+RETURN|FINANCING|FUNDING|CASH\s+ADVANCE|MERCHANT\s+CASH\s+ADVANCE|\bMCA\b/.test(s);
-    const namedFinance=/\bBDC\b|MERCHANT\s+GROWTH|JOURNEY|ONDECK|CAPITAL|FUNDING|FINANCE/.test(s);
-    const correlated=vfcLedgerCreditHasPaymentMatch_(c,classifiedDebits);
-    const item={date:c.date,description:c.description,counterparty:c.counterparty,amount:c.amount,direction:'CREDIT',confidence:(explicit||correlated)?'High':'Moderate'};
-    if(explicit||(amount>=5000&&namedFinance&&correlated))confirmed.push(item);
-    else if(amount>=5000&&(namedFinance||correlated||/INVESTMENT|LOAN|ADVANCE/.test(s)))possible.push(item);
+  const active=[], observed=[], other=[];
+  Object.keys(debtGroups).forEach(function(k){
+    const g=debtGroups[k], months=vfcBankDistinctMonths_(g.items), occ=g.items.length, total=g.items.reduce(function(s,t){return s+t.amount;},0);
+    const monthly=total/Math.max(1,recent.length);
+    const item=vfcBankGroupItem_(g,monthly,occ,months);
+    if(occ>=2&&months>=2)active.push(item);else observed.push(item);
   });
-  const conf=vfcLedgerDedupe_(confirmed),poss=vfcLedgerDedupe_(possible);return{confirmed:conf,possible:poss,total:conf.reduce(function(s,x){return s+x.amount;},0)};
+  Object.keys(otherGroups).forEach(function(k){const g=otherGroups[k],total=g.items.reduce(function(s,t){return s+t.amount;},0);other.push(vfcBankGroupItem_(g,total/Math.max(1,recent.length),g.items.length,vfcBankDistinctMonths_(g.items)));});
+
+  const creditTotal=financingCredits.reduce(function(s,t){return s+t.amount;},0);
+  const confirmed=active.reduce(function(s,x){return s+x.monthlyEquivalent;},0);
+  const otherMonthly=other.reduce(function(s,x){return s+x.monthlyEquivalent;},0);
+  const sweep=genericLoanCredits.length&&genericLoanPayments.length?[{type:'REVOLVING_LOAN_SWEEP',creditOccurrences:genericLoanCredits.length,paymentOccurrences:genericLoanPayments.length,totalCredits:vfcBankRound_(genericLoanCredits.reduce(function(s,t){return s+t.amount;},0),.01),totalPayments:vfcBankRound_(genericLoanPayments.reduce(function(s,t){return s+t.amount;},0),.01),includedInMonthlyDebt:false}]:[];
+  const warnings=[]; if(sweep.length)warnings.push('Generic LOAN CREDIT/LOAN PAYMENT activity is treated as revolving sweep activity, not fixed monthly debt.');
+  return{confirmedMonthlyDebtService:vfcBankRound_(confirmed,.01),otherRecurringMonthlyObligations:vfcBankRound_(otherMonthly,.01),financingCreditsTotal:vfcBankRound_(creditTotal,.01),activeDebtObligations:active,otherRecurringObligations:other,financingCredits:financingCredits,newFinancingObserved:observed,revolvingFinancingActivity:sweep,warnings:warnings};
 }
 
-function vfcLedgerCreditHasPaymentMatch_(credit,debits){
-  const ct=vfcLedgerTokens_(credit.counterparty||credit.description);if(!ct.length)return false;
-  return(debits||[]).some(function(d){const dt=vfcLedgerTokens_(d.counterparty||d.description);if(!dt.length)return false;let m=0;ct.forEach(function(a){if(dt.some(function(b){return a===b||(a.length>=4&&b.length>=4&&(a.indexOf(b)===0||b.indexOf(a)===0));}))m++;});return m/Math.min(ct.length,dt.length)>=0.5;});
-}
+function vfcBankAddGroup_(map,t,type){const key=vfcBankCounterpartyKey_(t);if(!map[key])map[key]={key:key,type:type,items:[]};map[key].items.push(t);}
+function vfcBankGroupItem_(g,monthly,occ,months){const vals=g.items.map(function(t){return t.amount;}).sort(function(a,b){return a-b;});return{counterparty:g.items[0].counterparty||g.items[0].description,description:g.items[0].description,category:g.type,paymentAmount:vfcBankRound_(vfcBankMedian_(vals),.01),frequency:'Observed cash flow',monthlyEquivalent:vfcBankRound_(monthly,.01),occurrences:occ,monthsObserved:months,firstSeen:g.items.map(function(t){return t.date;}).sort()[0],lastSeen:g.items.map(function(t){return t.date;}).sort().slice(-1)[0],active:true,confidence:(occ>=3&&months>=2)?'High':'Moderate'};}
+function vfcBankCounterpartyKey_(t){let s=String(t.counterparty||t.description||'').toUpperCase();if(/MERCH/.test(s))return'MERCHANT';if(/BDC/.test(s))return'BDC';if(/JOURNEY|ONDECK/.test(s))return'JOURNEY_ONDECK';const m=s.match(/NO\.?\s*\d+/);if(m)return'LOAN_'+m[0].replace(/\s+/g,'');return s.replace(/\b(PAD|PAYMENT|LOAN|BUSINESS|INVESTMENT|FINANCING|INTEREST)\b/g,' ').replace(/[^A-Z0-9]+/g,' ').trim().substring(0,60)||'UNKNOWN';}
+function vfcBankDistinctMonths_(items){const s={};items.forEach(function(t){if(/^\d{4}-\d{2}/.test(t.date))s[t.date.slice(0,7)]=1;});return Object.keys(s).length;}
 
-function vfcLedgerBestRelatedObserved_(credit,observed){
-  const ct=vfcLedgerTokens_(credit.counterparty||credit.description);let best=null,bestScore=0;(observed||[]).forEach(function(g){const gt=vfcLedgerTokens_(g.counterparty||g.description);if(!ct.length||!gt.length)return;let m=0;ct.forEach(function(a){if(gt.some(function(b){return a===b||(a.length>=4&&b.length>=4&&(a.indexOf(b)===0||b.indexOf(a)===0));}))m++;});const score=m/Math.min(ct.length,gt.length);if(score>bestScore){bestScore=score;best=g;}});return bestScore>=0.5?best:null;
-}
+function vfcBankNormalizeTransactions_(items){if(!Array.isArray(items))return[];const out=[],seen={};items.forEach(function(x){x=x||{};const date=vfcBankIso_(x.date),desc=String(x.description||'').replace(/\s+/g,' ').trim(),dir=String(x.direction||'').toUpperCase(),amount=vfcBankPositive_(x.amount);if(!date||!desc||(dir!=='DEBIT'&&dir!=='CREDIT')||!(amount>0))return;const t={date:date,description:desc.substring(0,240),counterparty:String(x.counterparty||desc).replace(/\s+/g,' ').trim().substring(0,140),direction:dir,amount:vfcBankRound_(amount,.01)};const k=[t.date,t.direction,t.amount,t.description.toUpperCase()].join('|');if(!seen[k]){seen[k]=1;out.push(t);}});return out;}
 
-/* ========================= totals / cache ========================= */
+function vfcBankTotals_(r){const o=r.opening,c=r.closing,d=r.deposits,w=r.withdrawals;if(o===null||c===null||d===null||w===null||!(d>=0)||!(w>=0))return{ok:false};const diff=vfcBankRound_((o+d-w)-c,.01);return{ok:Math.abs(diff)<=VFC_BANKING_PURE.RECONCILE_TOLERANCE,opening:o,closing:c,deposits:d,withdrawals:w,diff:diff};}
+function vfcBankPayloadUsable_(p,recent){return!!(p&&p.version===31&&p.modelVersion===VFC_BANKING_PURE.VERSION&&p.totalDeposits>=0&&p.totalWithdrawals>=0&&(!recent||p.transactionsVerified));}
+function vfcBankParsePayload_(raw){raw=String(raw||'').trim();if(raw.indexOf(VFC_BANKING_PURE.PREFIX)!==0)return null;try{return JSON.parse(raw.slice(VFC_BANKING_PURE.PREFIX.length));}catch(e){return null;}}
 
-function vfcLedgerStoredTotals_(row){if(row.opening===null||row.closing===null||row.deposits===null||row.withdrawals===null)return{ok:false};const diff=Math.abs((row.opening+row.deposits-row.withdrawals)-row.closing);if(diff>VFC_BANKING_PURE.RECONCILE_TOLERANCE)return{ok:false,diff:diff};return{ok:true,opening:row.opening,closing:row.closing,deposits:row.deposits,withdrawals:row.withdrawals,diff:diff};}
-function vfcLedgerPayloadUsable_(p,recent){if(!p||p.modelVersion!==VFC_BANKING_PURE.VERSION)return false;if(!(vfcLedgerPositive_(p.totalDeposits)>0)||p.totalWithdrawals<0)return false;if(recent&&!p.transactionsVerified)return false;return true;}
-function vfcLedgerParse_(s){s=String(s||'');if(s.indexOf(VFC_BANKING_PURE.PREFIX)!==0)return null;try{return JSON.parse(s.slice(VFC_BANKING_PURE.PREFIX.length));}catch(e){return null;}}
+function vfcBankUploadIndex_(){const rows=typeof getSheetObjects_==='function'?getSheetObjects_('Uploads'):[],idx={byId:{},byExact:{},byCompanyFile:{},byFile:{}};rows.forEach(function(r){const uploadId=String(r.uploadId||'').trim(),company=String(r.companyName||'').trim(),period=String(r.detectedPeriod||'').trim(),fileName=String(r.fileName||'').trim();let fileId=String(r.fileId||'').trim();const link=String(r.fileLink||'').trim();if(!fileId&&link){const m=link.match(/[-\w]{20,}/);if(m)fileId=m[0];}if(!fileId)return;const item={uploadId:uploadId,companyName:company,period:period,fileName:fileName,fileId:fileId,createdAt:r.createdAt||''};if(uploadId)idx.byId[uploadId]=item;vfcBankKeepNewest_(idx.byExact,vfcBankNorm_(company)+'|'+vfcBankNorm_(period)+'|'+vfcBankNorm_(fileName),item);vfcBankKeepNewest_(idx.byCompanyFile,vfcBankNorm_(company)+'|'+vfcBankNorm_(fileName),item);vfcBankKeepNewest_(idx.byFile,vfcBankNorm_(fileName),item);});return idx;}
+function vfcBankResolveUpload_(r,idx){if(r.uploadId&&idx.byId[r.uploadId])return idx.byId[r.uploadId];return idx.byExact[vfcBankNorm_(r.companyName)+'|'+vfcBankNorm_(r.period)+'|'+vfcBankNorm_(r.fileName)]||idx.byCompanyFile[vfcBankNorm_(r.companyName)+'|'+vfcBankNorm_(r.fileName)]||idx.byFile[vfcBankNorm_(r.fileName)]||null;}
+function vfcBankKeepNewest_(map,key,item){if(!key)return;const old=map[key];if(!old||vfcBankTime_(item.createdAt)>=vfcBankTime_(old.createdAt))map[key]=item;}
 
-/* ========================= helpers ========================= */
-
-function vfcLedgerBaseFeatures_(companyName,period){if(typeof buildPowerFeatures_==='function')return buildPowerFeatures_(companyName,period);if(typeof buildFeaturesForCase_==='function')return buildFeaturesForCase_(companyName,period);return null;}
-function vfcLedgerRequest_(a,p){if(a&&typeof a==='object')return{companyName:String(a.companyName||'').trim(),period:String(a.period||p||'').trim()};return{companyName:String(a||'').trim(),period:String(p||'').trim()};}
-function vfcLedgerStatementKey_(r){const s=vfcLedgerIso_(r.startDate),e=vfcLedgerIso_(r.endDate);return(s&&e?s+'|'+e:vfcLedgerNorm_(r.fileName))+'|'+vfcLedgerNorm_(r.bank);}
-function vfcLedgerHeader_(s){return String(s||'').toLowerCase().replace(/[^a-z0-9]+/g,'');}
-function vfcLedgerNorm_(s){return String(s||'').trim().toLowerCase().replace(/\s+/g,' ');}
-function vfcLedgerSame_(a,b){return vfcLedgerNorm_(a)===vfcLedgerNorm_(b);}
-function vfcLedgerNumber_(v){const n=Number(String(v==null?'':v).replace(/[^0-9.-]/g,''));return Number.isFinite(n)?n:0;}
-function vfcLedgerNullable_(v){if(v===null||v===undefined||v==='')return null;const n=Number(String(v).replace(/[^0-9.-]/g,''));return Number.isFinite(n)?n:null;}
-function vfcLedgerPositive_(v){return Math.max(0,vfcLedgerNumber_(v));}
-function vfcLedgerBool_(v){return /^(true|yes|y|1)$/i.test(String(v||'').trim())||/negative/i.test(String(v||''));}
-function vfcLedgerRound_(v,step){step=step||.01;return Math.round(v/step)*step;}
-function vfcLedgerDate_(v){if(!v)return null;const d=v instanceof Date?v:new Date(v);return isNaN(d.getTime())?null:d;}
-function vfcLedgerIso_(v){const d=vfcLedgerDate_(v);if(!d)return String(v||'').match(/^\d{4}-\d{2}-\d{2}$/)?String(v):'';return Utilities.formatDate(d,Session.getScriptTimeZone()||'GMT','yyyy-MM-dd');}
-function vfcLedgerTime_(v){const d=vfcLedgerDate_(v);return d?d.getTime():0;}
-function vfcLedgerSum_(a){return(a||[]).reduce(function(s,x){return s+vfcLedgerNumber_(x);},0);}
-function vfcLedgerMedian_(a){const x=(a||[]).slice().sort(function(m,n){return m-n;});if(!x.length)return 0;const k=Math.floor(x.length/2);return x.length%2?x[k]:(x[k-1]+x[k])/2;}
-function vfcLedgerCv_(a){if(!a||!a.length)return 0;const mean=vfcLedgerSum_(a)/a.length;if(!mean)return 0;const variance=a.reduce(function(s,x){return s+Math.pow(x-mean,2);},0)/a.length;return Math.sqrt(variance)/mean;}
-function vfcLedgerTrend_(a){if(!a||a.length<2)return 0;const first=a.slice(0,Math.ceil(a.length/2)),last=a.slice(Math.floor(a.length/2));const f=vfcLedgerSum_(first)/first.length,l=vfcLedgerSum_(last)/last.length;return f?(l-f)/f:0;}
-function vfcLedgerDedupe_(a){const out=[],seen={};(a||[]).forEach(function(t){const k=[t.date,t.direction,t.amount,String(t.description||'').toUpperCase()].join('|');if(!seen[k]){seen[k]=1;out.push(t);}});return out;}
-function vfcLedgerTokens_(s){const stop={BUSINESS:1,INVESTMENT:1,PAD:1,PAYMENT:1,LOAN:1,CREDIT:1,DEBIT:1,THE:1,INC:1,LTD:1,CORP:1,CORPORATION:1,COMPANY:1};return String(s||'').toUpperCase().replace(/[^A-Z0-9 ]/g,' ').split(/\s+/).filter(function(x){return x.length>=3&&!stop[x]&&!/^\d+$/.test(x);});}
-function vfcLedgerCounterpartyKey_(s){const t=vfcLedgerTokens_(s);return t.slice(0,4).join('_')||String(s||'').toUpperCase().replace(/[^A-Z0-9]+/g,'_').slice(0,60);}
+function vfcBankRequest_(x,p){if(typeof x==='string')return{companyName:String(x).trim(),period:String(p||'').trim()};x=x||{};return{companyName:String(x.companyName||x.company||'').trim(),period:String(x.period||p||'').trim()};}
+function vfcBankStatementKey_(r){const s=vfcBankIso_(r.startDate),e=vfcBankIso_(r.endDate);return s&&e?s+'|'+e:vfcBankNorm_(r.fileName);}
+function vfcBankHeader_(v){return String(v||'').trim().toLowerCase().replace(/[^a-z0-9]+/g,'');}
+function vfcBankSame_(a,b){return vfcBankNorm_(a)===vfcBankNorm_(b);}
+function vfcBankNorm_(v){return String(v||'').trim().toLowerCase().replace(/\s+/g,' ');}
+function vfcBankNullable_(v){if(v===null||v===undefined||String(v).trim()==='')return null;const n=vfcBankNumber_(v);return isFinite(n)?n:null;}
+function vfcBankNumber_(v){if(typeof v==='number')return isFinite(v)?v:0;const n=parseFloat(String(v||'').replace(/[^0-9.\-]/g,''));return isFinite(n)?n:0;}
+function vfcBankPositive_(v){return Math.max(0,vfcBankNumber_(v));}
+function vfcBankBool_(v){return /yes|true|detected|negative|1/i.test(String(v||''));}
+function vfcBankRound_(v,step){step=step||1;return Math.round((Number(v)||0)/step)*step;}
+function vfcBankDate_(v){if(!v)return null;const d=new Date(v);return isNaN(d.getTime())?null:d;}
+function vfcBankIso_(v){const d=vfcBankDate_(v);if(!d)return'';return Utilities.formatDate(d,Session.getScriptTimeZone(),'yyyy-MM-dd');}
+function vfcBankTime_(v){const d=vfcBankDate_(v);return d?d.getTime():0;}
+function vfcBankMedian_(a){if(!a.length)return 0;const m=Math.floor(a.length/2);return a.length%2?a[m]:(a[m-1]+a[m])/2;}
