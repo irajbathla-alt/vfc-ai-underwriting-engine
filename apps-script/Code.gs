@@ -59,12 +59,16 @@ function uploadStatementBatch(companyName, files) {
     const tempFile = tempFolder.createFile(blob);
     const text = extractTextFromPdf_(tempFile.getId());
     const summary = summarizeSingleBankStatement_(text, companyName, fileName);
-    if (
-      summary &&
-      summary.document_type === 'BANK_STATEMENT' &&
-      typeof vfcBankCreateIntakePayload_ === 'function'
-    ) {
-      summary.possible_mca_or_loan_payments = vfcBankCreateIntakePayload_(summary, fileName);
+    const documentType = String(summary && summary.document_type || '')
+      .trim().toUpperCase().replace(/\s+/g, '_');
+    if (summary) summary.document_type = documentType;
+    if (documentType === 'BANK_STATEMENT') {
+      if (!Array.isArray(summary.banking_transactions)) {
+        throw new Error('Banking ledger extraction was incomplete for ' + fileName + '.');
+      }
+      if (typeof vfcBankCreateIntakePayload_ === 'function') {
+        summary.possible_mca_or_loan_payments = vfcBankCreateIntakePayload_(summary, fileName);
+      }
     }
     const startDate = parseDateSafe_(summary.statement_start_date);
     const endDate = parseDateSafe_(summary.statement_end_date);
@@ -125,6 +129,7 @@ function saveLenderDecision(payload) {
   return { ok:true, message:'Historical lender outcome saved to the VFC training dataset.' };
 }
 
+/** Builds/rebuilds structured metrics for all historical company-period records. */
 function rebuildStructuredFeatures() {
   setupVFC();
   const pairs = {};
@@ -145,6 +150,7 @@ function rebuildStructuredFeatures() {
   return { ok:true, recordsUpdated:updated, message:'Structured historical features rebuilt.' };
 }
 
+/** Main V1 underwriting function. Uses only VFC historical outcomes, not invented lender rules. */
 function generateVfcAssessment(companyName, period) {
   setupVFC();
   const current = buildFeaturesForCase_(companyName, period);
@@ -405,7 +411,16 @@ function summarizeSingleBankStatement_(text, companyName, fileName) {
 }
 
 function summarizeBatch_(items, companyName, detectedPeriod) {
-  const combined = items.map(item => 'FILE: ' + item.fileName + '\nSUMMARY: ' + JSON.stringify(item.summary)).join('\n\n');
+  const combined = items.map(item => {
+    const source = item.summary || {};
+    const slim = {};
+    [
+      'document_type','bank_name','account_holder','statement_start_date','statement_end_date',
+      'opening_balance','closing_balance','total_deposits','total_withdrawals','nsf_count',
+      'negative_balance_detected','summary','risks','missing_info'
+    ].forEach(key => { if (source[key] !== undefined) slim[key] = source[key]; });
+    return 'FILE: ' + item.fileName + '\nSUMMARY: ' + JSON.stringify(slim);
+  }).join('\n\n');
   const prompt = 'You are the VFC AI Batch Bank Statement Summarizer. Return JSON only with combined_summary, key_findings, risks, missing_info. ' +
     'Return every field as a readable string, not an array. Do not approve or decline and do not invent figures.\nCompany: ' + companyName + '\nDetected period: ' + detectedPeriod + '\nPDF summaries:\n' + combined;
   return callOpenAIJson_(prompt);
