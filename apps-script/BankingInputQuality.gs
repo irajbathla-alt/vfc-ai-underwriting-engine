@@ -1,7 +1,7 @@
 const VFC_BANKING_V43 = {
-  VERSION: 'VFC-BANKING-PURE-4.3-CLEAN-OCCURRENCES',
-  PREFIX: 'VFC_BANK_PURE_V43:',
-  LEGACY_PREFIXES: ['VFC_BANK_PURE_V42:','VFC_BANK_PURE_V41:','VFC_BANK_PURE_V40:','VFC_BANK_PURE_V35:','VFC_BANK_PURE_V34:'],
+  VERSION: 'VFC-BANKING-PURE-4.4-CONTINUATION-DATES',
+  PREFIX: 'VFC_BANK_PURE_V44:',
+  LEGACY_PREFIXES: ['VFC_BANK_PURE_V43:','VFC_BANK_PURE_V42:','VFC_BANK_PURE_V41:','VFC_BANK_PURE_V40:','VFC_BANK_PURE_V35:','VFC_BANK_PURE_V34:'],
   MAX_STATEMENTS: 12,
   DEBT_LOOKBACK: 6,
   RECONCILE_TOLERANCE: 5,
@@ -17,6 +17,7 @@ function getBankingInputQualityStatus() {
     bankAgnostic: true,
     monthlyEquivalentUsesStatementPeriods: true,
     explicitDebtLinesDeterministicallyVerified: true,
+    continuationLineDatesCarriedForward: true,
     duplicateOccurrencesRemovedBeforeMonthlyMath: true,
     recurringGroupingUsesNameAndAmount: true,
     visibleLabelsUsePrintedDescriptions: true,
@@ -52,7 +53,7 @@ function vfcBankCreateIntakePayload_(summary, fileName) {
   const diff=(opening!==null&&closing!==null&&deposits!==null&&withdrawals!==null)
     ? vfc43Round_((opening+deposits-withdrawals)-closing,.01) : null;
   const payload={
-    version:43,modelVersion:VFC_BANKING_V43.VERSION,fileName:String(fileName||''),bankName:String(summary.bank_name||'Unknown'),
+    version:44,modelVersion:VFC_BANKING_V43.VERSION,fileName:String(fileName||''),bankName:String(summary.bank_name||'Unknown'),
     statementStartDate:vfc43Iso_(summary.statement_start_date),statementEndDate:vfc43Iso_(summary.statement_end_date),
     openingBalance:opening,closingBalance:closing,totalDeposits:deposits,totalWithdrawals:withdrawals,reconciliationDifference:diff,
     nsfCount:Math.max(0,vfc43Number_(summary.nsf_count)),negativeBalanceDetected:vfc43Bool_(summary.negative_balance_detected),
@@ -139,7 +140,7 @@ function vfc43PrepareRows_(rows){
     try{
       const totals=vfc43Totals_(row); if(!totals.ok)throw new Error('statement totals do not reconcile');
       if(!payload){
-        payload={version:43,modelVersion:VFC_BANKING_V43.VERSION,fileName:row.fileName,bankName:row.bank||'Unknown',statementStartDate:vfc43Iso_(row.startDate),statementEndDate:vfc43Iso_(row.endDate),
+        payload={version:44,modelVersion:VFC_BANKING_V43.VERSION,fileName:row.fileName,bankName:row.bank||'Unknown',statementStartDate:vfc43Iso_(row.startDate),statementEndDate:vfc43Iso_(row.endDate),
           openingBalance:totals.opening,closingBalance:totals.closing,totalDeposits:totals.deposits,totalWithdrawals:totals.withdrawals,reconciliationDifference:totals.diff,
           nsfCount:Math.max(0,row.nsf||0),negativeBalanceDetected:!!row.negative,transactionsVerified:!recent,transactions:[],explicitScanVerified:!recent,source:'TOTALS_ONLY'};
         changed=true;
@@ -148,13 +149,13 @@ function vfc43PrepareRows_(rows){
       payload.statementStartDate=vfc43Iso_(row.startDate)||payload.statementStartDate;payload.statementEndDate=vfc43Iso_(row.endDate)||payload.statementEndDate;
       payload.transactions=vfc43SemanticDedupe_(vfc43NormalizeTransactions_(payload.transactions||[]));
 
-      if(recent && (!payload.explicitScanVerified || Number(payload.version||0)<43)){
+      if(recent && (!payload.explicitScanVerified || Number(payload.version||0)<44)){
         const upload=vfc43ResolveUpload_(row,uploads); if(!upload||!upload.fileId)throw new Error('uploaded PDF file ID not found');
         const text=extractTextFromPdf_(upload.fileId);
         const direct=vfc43DirectExplicitTransactions_(text,payload);
         payload.transactions=vfc43ReplaceExplicitTransactions_(payload.transactions,direct);
-        payload.transactionsVerified=true; payload.explicitScanVerified=true; payload.version=43; payload.modelVersion=VFC_BANKING_V43.VERSION;
-        payload.source='INTAKE_LEDGER+V43_CLEAN_EXPLICIT_SCAN'; changed=true;
+        payload.transactionsVerified=true; payload.explicitScanVerified=true; payload.version=44; payload.modelVersion=VFC_BANKING_V43.VERSION;
+        payload.source='INTAKE_LEDGER+V44_CONTINUATION_SCAN'; changed=true;
       }
       if(recent && !Array.isArray(payload.transactions)) throw new Error('verified transaction ledger is missing');
       payload.transactions=vfc43SemanticDedupe_(payload.transactions||[]);
@@ -169,22 +170,29 @@ function vfc43PrepareRows_(rows){
 
 function vfc43DirectExplicitTransactions_(text,payload){
   const lines=String(text||'').replace(/\u00a0/g,' ').split(/\r?\n/),out=[];
+  let currentDate='';
   for(let i=0;i<lines.length;i++){
     const line=String(lines[i]||'').replace(/\s+/g,' ').trim(); if(!line)continue;
-    const parsed=vfc43ParseDatedExplicitLine_(line,payload); if(parsed)out.push(parsed);
+    const dated=vfc43ExtractLineDate_(line,payload);
+    if(dated.date) currentDate=dated.date;
+    const parsed=vfc43ParseExplicitBody_(dated.body,currentDate); if(parsed)out.push(parsed);
   }
   return vfc43SemanticDedupe_(out);
 }
 
-function vfc43ParseDatedExplicitLine_(line,payload){
-  let date='',body=line;
+function vfc43ExtractLineDate_(line,payload){
   let m=line.match(/^(\d{1,2})\s+([A-Za-z]{3})\s+(.+)$/);
-  if(m){date=vfc43ActivityDate_(m[1],m[2],payload.statementStartDate,payload.statementEndDate);body=m[3];}
-  if(!date){m=line.match(/^([A-Za-z]{3})\s+(\d{1,2})\s+(.+)$/);if(m){date=vfc43ActivityDate_(m[2],m[1],payload.statementStartDate,payload.statementEndDate);body=m[3];}}
-  if(!date){m=line.match(/^(\d{4}-\d{2}-\d{2})\s+(.+)$/);if(m){date=m[1];body=m[2];}}
-  if(!date)return null;
+  if(m)return{date:vfc43ActivityDate_(m[1],m[2],payload.statementStartDate,payload.statementEndDate),body:m[3]};
+  m=line.match(/^([A-Za-z]{3})\s+(\d{1,2})\s+(.+)$/);
+  if(m)return{date:vfc43ActivityDate_(m[2],m[1],payload.statementStartDate,payload.statementEndDate),body:m[3]};
+  m=line.match(/^(\d{4}-\d{2}-\d{2})\s+(.+)$/);
+  if(m)return{date:m[1],body:m[2]};
+  return{date:'',body:line};
+}
 
-  const upper=body.toUpperCase();
+function vfc43ParseExplicitBody_(body,date){
+  if(!date)return null;
+  const upper=String(body||'').toUpperCase();
   const markers=['LOAN PAYMENT','LOAN INTEREST','COMM EQUIP RENT/LSE','COMMERCIAL EQUIP RENT/LSE','EQUIPMENT RENT/LSE','EQUIP RENT/LSE','EQUIPMENT LEASE','EQUIP LEASE','LEASE PAYMENT','EQUIPMENT FINANCE','EQUIPMENT FINANCING','EQUIPMENT RENT','EQUIP RENT'];
   let at=-1;
   markers.forEach(function(marker){const j=upper.indexOf(marker);if(j>=0&&(at<0||j<at))at=j;});
