@@ -141,73 +141,121 @@ function refreshDebtSignalsForPeriodSafe(companyOrRequest, requestedPeriod) {
 }
 
 function refreshLatestDebtSignals() {
-  const rows=vfcPureSummaryRows_('','');
-  if(!rows.length) throw new Error('No bank statements found.');
-  rows.sort(function(a,b){return vfcPureTime_(a.createdAt)-vfcPureTime_(b.createdAt);});
-  const last=rows[rows.length-1];
-  const result=refreshDebtSignalsForPeriodSafe({companyName:last.companyName,period:last.period});
-  console.log(JSON.stringify(result,null,2));
+  const rows = vfcPureSummaryRows_('', '');
+  if (!rows.length) throw new Error('No bank statements found.');
+  rows.sort(function(a,b){ return vfcPureTime_(a.createdAt) - vfcPureTime_(b.createdAt); });
+  const last = rows[rows.length - 1];
+  const result = refreshDebtSignalsForPeriodSafe({ companyName:last.companyName, period:last.period });
+  console.log(JSON.stringify(result, null, 2));
   return result;
 }
-function diagnoseLatestBankingInputs(){return refreshLatestDebtSignals();}
 
-function vfcPureSelectedRows_(companyName,period) {
-  const all=vfcPureSummaryRows_(companyName,period);
-  if(!all.length)return[];
-  const map={};
-  all.forEach(function(row){const key=vfcPureStatementKey_(row),current=map[key];if(!current||vfcPureTime_(row.createdAt)>=vfcPureTime_(current.createdAt))map[key]=row;});
-  const rows=Object.keys(map).map(function(k){return map[k];});
-  rows.sort(function(a,b){const ad=vfcPureDate_(a.endDate)||vfcPureDate_(a.startDate)||new Date(0),bd=vfcPureDate_(b.endDate)||vfcPureDate_(b.startDate)||new Date(0);if(ad.getTime()!==bd.getTime())return ad-bd;return String(a.fileName||'').localeCompare(String(b.fileName||''));});
-  return rows.slice(Math.max(0,rows.length-VFC_BANK_ENGINE.MAX_STATEMENTS));
+function diagnoseLatestBankingInputs() { return refreshLatestDebtSignals(); }
+
+function vfcPureSelectedRows_(companyName, period) {
+  const all = vfcPureSummaryRows_(companyName, period);
+  if (!all.length) return [];
+  const map = {};
+  all.forEach(function(row) {
+    const key = vfcPureStatementKey_(row);
+    const current = map[key];
+    if (!current || vfcPureTime_(row.createdAt) >= vfcPureTime_(current.createdAt)) map[key] = row;
+  });
+  const rows = Object.keys(map).map(function(k){ return map[k]; });
+  rows.sort(function(a,b) {
+    const ad = vfcPureDate_(a.endDate) || vfcPureDate_(a.startDate) || new Date(0);
+    const bd = vfcPureDate_(b.endDate) || vfcPureDate_(b.startDate) || new Date(0);
+    if (ad.getTime() !== bd.getTime()) return ad - bd;
+    return String(a.fileName||'').localeCompare(String(b.fileName||''));
+  });
+  return rows.slice(Math.max(0, rows.length - VFC_BANK_ENGINE.MAX_STATEMENTS));
 }
 
-function vfcPureSummaryRows_(companyName,period) {
-  const ss=SpreadsheetApp.getActiveSpreadsheet(),sh=ss.getSheetByName('PDF Summaries');
-  if(!sh||sh.getLastRow()<2)return[];
-  const values=sh.getDataRange().getValues(),headers=values[0].map(vfcPureHeader_),idx={};
-  headers.forEach(function(h,i){idx[h]=i;});
-  function val(r,name){const i=idx[vfcPureHeader_(name)];return i===undefined?'':r[i];}
-  const out=[];
-  for(let i=1;i<values.length;i++){
-    const r=values[i],company=String(val(r,'Company Name')||'').trim(),detected=String(val(r,'Detected Period')||'').trim();
-    if(companyName&&!vfcPureSame_(company,companyName))continue;
-    if(period&&!vfcPureSame_(detected,period))continue;
+function vfcPureSummaryRows_(companyName, period) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sh = ss.getSheetByName('PDF Summaries');
+  if (!sh || sh.getLastRow() < 2) return [];
+  const values = sh.getDataRange().getValues();
+  const headers = values[0].map(vfcPureHeader_);
+  const idx = {};
+  headers.forEach(function(h,i){ idx[h]=i; });
+  function val(r, name) { const i = idx[vfcPureHeader_(name)]; return i === undefined ? '' : r[i]; }
+  const out = [];
+  for (let i=1;i<values.length;i++) {
+    const r = values[i];
+    const company = String(val(r,'Company Name') || '').trim();
+    const detected = String(val(r,'Detected Period') || '').trim();
+    if (companyName && !vfcPureSame_(company, companyName)) continue;
+    if (period && !vfcPureSame_(detected, period)) continue;
     out.push({
       rowNumber:i+1,
-      signalColumn:(idx[vfcPureHeader_('Possible MCA Or Loan Payments')]===undefined?-1:idx[vfcPureHeader_('Possible MCA Or Loan Payments')]+1),
-      uploadId:String(val(r,'Upload ID')||''),companyName:company,period:detected,fileName:String(val(r,'File Name')||''),bank:String(val(r,'Bank Name')||''),
-      startDate:val(r,'Statement Start Date'),endDate:val(r,'Statement End Date'),opening:vfcPureNullableNumber_(val(r,'Opening Balance')),closing:vfcPureNullableNumber_(val(r,'Closing Balance')),
-      deposits:vfcPureNullableNumber_(val(r,'Total Deposits')),withdrawals:vfcPureNullableNumber_(val(r,'Total Withdrawals')),nsf:vfcPureNumber_(val(r,'NSF Count')),
-      negative:vfcPureBool_(val(r,'Negative Balance Detected')),signalRaw:String(val(r,'Possible MCA Or Loan Payments')||''),createdAt:val(r,'Created At')
+      signalColumn:(idx[vfcPureHeader_('Possible MCA Or Loan Payments')] === undefined ? -1 : idx[vfcPureHeader_('Possible MCA Or Loan Payments')]+1),
+      uploadId:String(val(r,'Upload ID') || ''), companyName:company, period:detected,
+      fileName:String(val(r,'File Name') || ''), bank:String(val(r,'Bank Name') || ''),
+      startDate:val(r,'Statement Start Date'), endDate:val(r,'Statement End Date'),
+      opening:vfcPureNullableNumber_(val(r,'Opening Balance')), closing:vfcPureNullableNumber_(val(r,'Closing Balance')),
+      deposits:vfcPureNullableNumber_(val(r,'Total Deposits')), withdrawals:vfcPureNullableNumber_(val(r,'Total Withdrawals')),
+      nsf:vfcPureNumber_(val(r,'NSF Count')), negative:vfcPureBool_(val(r,'Negative Balance Detected')),
+      signalRaw:String(val(r,'Possible MCA Or Loan Payments') || ''), createdAt:val(r,'Created At')
     });
   }
   return out;
 }
 
 function vfcPureEnsureStatements_(rows) {
-  const ss=SpreadsheetApp.getActiveSpreadsheet(),sh=ss.getSheetByName('PDF Summaries'),uploadMap=vfcPureUploadMap_(),reusable=vfcPureReusableMap_(rows[0]?rows[0].companyName:'',rows[0]?rows[0].period:''),out=[],errors=[];
-  rows.forEach(function(row,index){
-    const recent=index>=Math.max(0,rows.length-VFC_BANK_ENGINE.DEBT_LOOKBACK);
-    let payload=vfcPureParseCache_(row.signalRaw);
-    if(!vfcPurePayloadUsable_(payload,recent)){const prior=reusable[vfcPureStatementKey_(row)];if(vfcPurePayloadUsable_(prior,recent))payload=prior;}
-    if(!vfcPurePayloadUsable_(payload,recent)){
-      try{payload=vfcPureExtractStatement_(row,uploadMap[row.uploadId],recent);}catch(e){errors.push(row.fileName+': '+String(e&&e.message||e));return;}
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sh = ss.getSheetByName('PDF Summaries');
+  const uploadMap = vfcPureUploadMap_();
+  const reusable = vfcPureReusableMap_(rows[0] ? rows[0].companyName : '', rows[0] ? rows[0].period : '');
+  const out = [], errors = [];
+
+  rows.forEach(function(row, index) {
+    const recent = index >= Math.max(0, rows.length - VFC_BANK_ENGINE.DEBT_LOOKBACK);
+    let payload = vfcPureParseCache_(row.signalRaw);
+
+    // Canonical statement facts: once the exact statement was verified, later re-uploads
+    // reuse the same frozen transaction ledger instead of asking AI to reinterpret it.
+    const prior = reusable[vfcPureStatementKey_(row)];
+    if (vfcPurePayloadUsable_(prior, recent)) payload = prior;
+
+    if (!vfcPurePayloadUsable_(payload, recent)) {
+      try { payload = vfcPureExtractStatement_(row, uploadMap[row.uploadId], recent); }
+      catch (e) { errors.push(row.fileName + ': ' + String(e && e.message || e)); return; }
     }
-    payload=vfcPureNormalizePayload_(payload,row);
-    if(row.signalColumn>0){const stableValue=VFC_BANK_ENGINE.CACHE_PREFIX+JSON.stringify(payload);if(String(row.signalRaw||'')!==stableValue)sh.getRange(row.rowNumber,row.signalColumn).setValue(stableValue);}
+
+    payload = vfcPureNormalizePayload_(payload, row);
+    if (row.signalColumn > 0) {
+      const stableValue = VFC_BANK_ENGINE.CACHE_PREFIX + JSON.stringify(payload);
+      if (String(row.signalRaw || '') !== stableValue) sh.getRange(row.rowNumber,row.signalColumn).setValue(stableValue);
+    }
     out.push({row:row,payload:payload});
   });
-  return{rows:out,errors:errors};
+  return {rows:out,errors:errors};
 }
 
-function vfcPureReusableMap_(companyName,period){
-  const all=vfcPureSummaryRows_(companyName,period),map={};
-  all.forEach(function(row){const p=vfcPureParseCache_(row.signalRaw);if(!vfcPurePayloadUsable_(p,false))return;const k=vfcPureStatementKey_(row),old=map[k];if(!old||vfcPurePayloadScore_(p)>vfcPurePayloadScore_(old))map[k]=p;});
+function vfcPureReusableMap_(companyName, period) {
+  const all = vfcPureSummaryRows_(companyName, period);
+  const map = {};
+  all.forEach(function(row) {
+    const p = vfcPureParseCache_(row.signalRaw);
+    if (!vfcPurePayloadUsable_(p, false)) return;
+    const k = vfcPureStatementKey_(row);
+    const old = map[k];
+    if (!old) { map[k] = p; return; }
+    // Prefer the first verified ledger and keep it frozen. A later re-upload cannot
+    // replace it merely because an AI extraction happened to return more rows.
+    if (!old.transactionsVerified && p.transactionsVerified) map[k] = p;
+  });
   return map;
 }
 
-function vfcPureUploadMap_(){
-  const rows=typeof getSheetObjects_==='function'?getSheetObjects_('Uploads'):[],map={};
-  rows.forEach(function(r){const id=String(r.uploadId||r['Upload ID']||'').trim();if(!id)return;map[id]={fileId:String(r.fileId||r['File ID']||'').trim(),fileName:String(r.fileName||r['File Name']||'')};});
+function vfcPureUploadMap_() {
+  const rows = typeof getSheetObjects_ === 'function' ? getSheetObjects_('Uploads') : [];
+  const map = {};
+  rows.forEach(function(r) {
+    const id = String(r.uploadId || r['Upload ID'] || '').trim();
+    if (!id) return;
+    map[id] = {fileId:String(r.fileId || r['File ID'] || '').trim(),fileName:String(r.fileName || r['File Name'] || '')};
+  });
   return map;
 }
