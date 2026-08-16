@@ -10,7 +10,33 @@ function vfcIsKnownFinancingCreditForBank_(bankId,t){switch(String(bankId||'').t
 function vfcBankStrongEntityKey_(key,family){return vfcRbcStrongEntityKey_(key);}
 
 /** One UI entry point. Each bank can later replace only its own upload reader if required. */
-function uploadStatementBatchByBank(bankId,companyName,files){const profile=vfcGetBankProfile_(bankId);if(profile.id==='UNKNOWN')throw new Error('Select a supported bank.');const result=uploadStatementBatch(companyName,files);result.bankProfile=profile.id;result.bankRulesVersion=profile.rulesVersion;result.bankTrainingStatus=profile.status;return result;}
+function uploadStatementBatchByBank(bankId,companyName,files){
+  const profile=vfcGetBankProfile_(bankId);if(profile.id==='UNKNOWN')throw new Error('Select a supported bank.');
+  const result=uploadStatementBatch(companyName,files);
+  // If the exact statement was already seen, restore its first verified frozen ledger.
+  // This prevents a later OpenAI upload read from changing the result for the same PDF facts.
+  if(result&&result.detectedPeriod)vfcFreezeDuplicateStatementFacts_(companyName,result.detectedPeriod);
+  result.bankProfile=profile.id;result.bankRulesVersion=profile.rulesVersion;result.bankTrainingStatus=profile.status;return result;
+}
+
+function vfcFreezeDuplicateStatementFacts_(companyName,period){
+  const sh=SpreadsheetApp.getActiveSpreadsheet().getSheetByName('PDF Summaries');if(!sh||sh.getLastRow()<2)return;
+  const values=sh.getDataRange().getValues(),headers=values[0].map(vfcHeader_),idx={};headers.forEach(function(h,i){idx[h]=i;});
+  const signalCol=idx[vfcHeader_('Possible MCA Or Loan Payments')];if(signalCol===undefined)return;
+  function val(r,n){const i=idx[vfcHeader_(n)];return i===undefined?'':r[i];}
+  const groups={};
+  for(let i=1;i<values.length;i++){
+    const r=values[i];if(!vfcSame_(val(r,'Company Name'),companyName)||!vfcSame_(val(r,'Detected Period'),period))continue;
+    const row={rowNumber:i+1,bank:String(val(r,'Bank Name')||''),startDate:val(r,'Statement Start Date'),endDate:val(r,'Statement End Date'),opening:vfcNumNull_(val(r,'Opening Balance')),closing:vfcNumNull_(val(r,'Closing Balance')),deposits:vfcNumNull_(val(r,'Total Deposits')),withdrawals:vfcNumNull_(val(r,'Total Withdrawals')),signalRaw:String(val(r,'Possible MCA Or Loan Payments')||''),createdAt:val(r,'Created At')};
+    const key=vfcStatementFingerprint_(row);if(!groups[key])groups[key]=[];groups[key].push(row);
+  }
+  Object.keys(groups).forEach(function(key){
+    const rows=groups[key].sort(function(a,b){return vfcTime_(a.createdAt)-vfcTime_(b.createdAt);});let canonical='';
+    for(let i=0;i<rows.length;i++){const p=vfcParseBankCache_(rows[i].signalRaw);if(vfcPayloadUsable_(p)){canonical=rows[i].signalRaw;break;}}
+    if(!canonical)return;
+    rows.forEach(function(r){if(String(r.signalRaw||'')!==canonical)sh.getRange(r.rowNumber,signalCol+1).setValue(canonical);});
+  });
+}
 
 function setupBankTrainingTabs(){
   const ss=SpreadsheetApp.getActiveSpreadsheet(),headers=['Bank','Training Status','Parser / Rules Version','Statement Format Notes','Debit Markers','Credit Markers','Financing Keywords','Recurring Payment Notes','Test Company','Test Period','Expected Gross Deposits','Expected Operating Deposits','Expected Monthly Debt','Expected Financing Credits','Last Validated','Notes'],created=[];
