@@ -1,2 +1,1 @@
-// Legacy filename retained temporarily during the banking-engine refactor.
-// Active banking logic is moving to BankingCore.gs + BankRouter.gs + one file per bank.
+// Deprecated compatibility filename. Active banking code is in BankingCore.gs and BankRouter.gs.
