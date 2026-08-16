@@ -30,10 +30,16 @@ function setupSimpleVFC() {
   });
   getOrCreateRootFolder_();
   seedDefaultLenders_();
+
+  const bankTabs = typeof setupBankTrainingTabs === 'function'
+    ? setupBankTrainingTabs()
+    : {ok:false, created:[], tabs:[]};
+
   return {
     ok: true,
-    message: 'Simple VFC sheet setup complete.',
-    activeSheets: Object.keys(VFC_SIMPLE_SHEET_SCHEMAS)
+    message: 'Simple VFC sheet setup complete, including isolated bank training tabs.',
+    activeSheets: Object.keys(VFC_SIMPLE_SHEET_SCHEMAS),
+    bankTrainingTabs: bankTabs
   };
 }
 
@@ -98,6 +104,7 @@ function getSimpleSheetStatus() {
   });
   return {
     requiredSheets: Object.keys(VFC_SIMPLE_SHEET_SCHEMAS),
+    bankTrainingSheets: typeof getBankParserTabs === 'function' ? getBankParserTabs().map(function(x){return 'BANK_'+x.id;}) : [],
     unusedSheetsStillPresent: VFC_UNUSED_SHEETS.filter(function(name) {
       return existing.indexOf(name) >= 0;
     }),
