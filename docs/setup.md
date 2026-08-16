@@ -1,72 +1,66 @@
 # Setup Guide
 
-## Google Sheet
+## Google Sheet / Apps Script
 
-Create a Google Sheet named `VFC AI Document Engine`.
+Use the Apps Script project attached to the VFC underwriting Google Sheet.
 
-Open the sheet, then go to:
+Core files:
 
-Extensions > Apps Script
-
-## Apps Script files
-
-Copy these files into Apps Script:
-
-- `apps-script/Code.gs`
-- `apps-script/Index.html`
-- `apps-script/appsscript.json`
+- `Code.gs` — upload, OCR, common statement intake and Sheets/Drive plumbing
+- `BankingCore.gs` — frozen banking facts and deterministic recurring-obligation math
+- `BankRouter.gs` — bank selection and isolation
+- `Bank_RBC.gs` — RBC v1.0 trained / locked
+- `Bank_TD.gs` — pending training
+- `Bank_Scotia.gs` — pending training
+- `Bank_BMO.gs` — pending training
+- `Bank_CIBC.gs` — pending training
+- `Bank_CoastCapital.gs` — pending training
+- `InstitutionalUnderwritingLayer.gs` — production Our Max
+- `OpenAIRecommendation.gs` — separate OpenAI recommendation
+- `VFCUnderwritingEngine.gs` — shared underwriting helpers used by the production layer
+- `SimpleSheetSetup.gs` — required Sheets setup
+- `Index.html` — web-app UI
+- `appsscript.json` — Apps Script manifest
 
 ## Enable Drive API
 
-In Apps Script:
-
-1. Open Services
-2. Add a service
-3. Select Drive API
-4. Use version v2
-5. Save
+In Apps Script, open **Services**, add **Drive API**, and use v2.
 
 ## OpenAI key
 
-In Apps Script settings, add Script Property:
+In Apps Script **Project Settings → Script Properties**, add:
 
 `OPENAI_API_KEY`
 
-Paste your OpenAI API key as the value.
-
 ## First run
 
-Run this function once:
+Run:
 
-`setupVFC`
+`setupSimpleVFC()`
 
-It creates these tabs:
+This preserves the core underwriting sheets and creates the isolated bank-training tabs:
 
-- Companies
-- Uploads
-- PDF Summaries
-- Batch Summaries
-- Settings
+- `BANK_RBC`
+- `BANK_TD`
+- `BANK_SCOTIA`
+- `BANK_BMO`
+- `BANK_CIBC`
+- `BANK_COAST_CAPITAL`
 
-## Deploy
+RBC is marked **LOCKED**. The remaining banks are marked **PENDING_TRAINING**.
 
-Deploy > New deployment > Web app
+## RBC repeatability lock
 
-Recommended settings:
+After validating the approved RBC reference case, run:
 
-- Execute as: Me
-- Who has access: Only myself or your organization
+`lockBankRegressionBaseline(companyName, period, 'RBC')`
 
-## Drive folder structure
+After any future engine change, verify it with:
 
-The app creates:
+`verifyBankRegressionBaseline(companyName, period, 'RBC')`
 
-`VFC AI Engine / Company Name / Detected Period`
+The same statement fingerprint reuses its first verified transaction ledger so repeat uploads do not silently change an already-trained banking result.
 
-Example:
+## Deployment
 
-`VFC AI Engine / ABC Pizza Ltd / Jan 2026 to Jun 2026`
-
-## V1 scope
-
-Upload bank statements only. Tax documents are intentionally excluded for now.
+Deploy the Apps Script project as a Web App. The UI provides one bank selector for each isolated bank profile plus Training Data and Assessment sections.
