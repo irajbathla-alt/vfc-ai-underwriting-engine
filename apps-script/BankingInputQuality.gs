@@ -11,14 +11,15 @@
  * VFC_BANKING and vfcBankCreateIntakePayload_().
  */
 
+// Literal values are intentional here: this file can be loaded before the v2 core.
 const VFC_BANKING = {
-  VERSION: VFC_BANK_ENGINE.VERSION,
-  PREFIX: VFC_BANK_ENGINE.CACHE_PREFIX,
+  VERSION: 'VFC-BANKING-BANKED-2.0',
+  PREFIX: 'VFC_BANK_FACTS_V1:',
   PAYLOAD_VERSION: 2,
-  MAX_STATEMENTS: VFC_BANK_ENGINE.MAX_STATEMENTS,
-  DEBT_LOOKBACK: VFC_BANK_ENGINE.DEBT_LOOKBACK,
-  RECONCILE_TOLERANCE: VFC_BANK_ENGINE.RECONCILE_TOLERANCE,
-  ACTIVE_LOOKBACK_DAYS: VFC_BANK_ENGINE.ACTIVE_DAYS
+  MAX_STATEMENTS: 12,
+  DEBT_LOOKBACK: 6,
+  RECONCILE_TOLERANCE: 5,
+  ACTIVE_LOOKBACK_DAYS: 75
 };
 
 /**
@@ -39,7 +40,7 @@ function vfcBankCreateIntakePayload_(summary, fileName) {
   const bankId = vfcDetectBankId_(summary.bank_name || '');
   const payload = {
     version: 2,
-    extractionVersion: VFC_BANK_ENGINE.FACTS_VERSION,
+    extractionVersion: 'VFC-BANK-FACTS-1.0',
     fileName: String(fileName || ''),
     bankId: bankId,
     bankName: String(summary.bank_name || bankId || 'Unknown'),
@@ -57,5 +58,5 @@ function vfcBankCreateIntakePayload_(summary, fileName) {
     transactions: vfcPureNormalizeTransactions_(summary.banking_transactions || [])
   };
 
-  return VFC_BANK_ENGINE.CACHE_PREFIX + JSON.stringify(payload);
+  return VFC_BANKING.PREFIX + JSON.stringify(payload);
 }
