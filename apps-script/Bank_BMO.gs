@@ -4,6 +4,3 @@ function vfcBmoExtractionRules_(){return 'BMO is not trained yet. Extract visibl
 function vfcBmoLockFacts_(summary,text,fileName){return vfcLockPrintedStatementFacts_(summary,text);}
 function vfcBmoClassifyDebit_(t){return vfcGenericConservativeClassifyDebit_(t);}
 function vfcBmoKnownFinancingCredit_(t){return false;}
-
-/** Temporary compatibility for any older client still calling the old BMO function name. */
-function uploadStatementBatchBMO(companyName,files){return uploadStatementBatchByBank('BMO',companyName,files);}
