@@ -3,7 +3,7 @@ const VFC_CONFIG = {
   OPENAI_MODEL: 'gpt-4.1-mini',
   OCR_RETRY_ATTEMPTS: 4,
   OCR_DELAY_MS: 1000,
-  MODEL_VERSION: 'VFC-V1.1-FAST-INTAKE',
+  MODEL_VERSION: 'VFC-V1.2-FAST-SINGLE-FILE',
   MAX_SIMILAR_CASES: 10,
   STATEMENT_TEXT_LIMIT: 50000
 };
@@ -485,3 +485,10 @@ function hasMeaningfulMca_(value){const text=String(cleanCell_(value) || '').tri
 function clamp_(value,min,max){return Math.max(min,Math.min(max,value));}
 function round2_(value){return Math.round((Number(value) || 0)*100)/100;}
 function median_(values){if(!values.length)return '';const middle=Math.floor(values.length/2);return values.length%2?values[middle]:Math.round((values[middle-1]+values[middle])/2*100)/100;}
+
+function numericSimilarity_(a, b, floorScale) {
+  a = toNumber_(a);
+  b = toNumber_(b);
+  const scale = Math.max(Math.abs(a), Math.abs(b), floorScale || 1);
+  return clamp_(1 - Math.abs(a - b) / scale, 0, 1);
+}
