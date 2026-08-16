@@ -17,8 +17,9 @@ function vfcPureVerifiedTotals_(h,row) {
 
 function vfcPurePayloadUsable_(p, recent) {
   if(!p) return false;
-  // Accept both v2 frozen facts and the current v1 cache so deployment does not re-read the same PDFs.
-  const versionOk = p.extractionVersion===VFC_BANK_ENGINE.FACTS_VERSION || p.modelVersion==='VFC-BANKING-PURE-1.0' || p.version===1 || p.version===2;
+  // Accept frozen v2 facts AND v4.x banking caches so the same PDFs are migrated, not re-read by OpenAI.
+  const legacyVersion=Number(p.version||0);
+  const versionOk = p.extractionVersion===VFC_BANK_ENGINE.FACTS_VERSION || /^VFC-BANKING-PURE-/i.test(String(p.modelVersion||'')) || p.version===1 || p.version===2 || (legacyVersion>=34 && legacyVersion<=46);
   if(!versionOk) return false;
   if(!(vfcPurePositive_(p.totalDeposits)>0) || !(vfcPurePositive_(p.totalWithdrawals)>=0)) return false;
   if(recent && !p.transactionsVerified) return false;
@@ -40,15 +41,10 @@ function vfcPureParseCache_(s) {
 
 /* ------------------------- regression / repeatability ------------------------- */
 
-/**
- * Saves a deterministic approved result fingerprint for a company/period/bank.
- * Run this once after an RBC case is approved. TD/BMO/etc. rule changes cannot silently alter it.
- */
 function lockBankRegressionBaseline(companyName, period, bankId) {
   bankId=String(bankId||'RBC').toUpperCase();
   const result=refreshDebtSignalsForPeriodSafe({companyName:companyName,period:period});
   if(!result.ok) throw new Error((result.errors||[]).join(' | '));
-
   const ss=SpreadsheetApp.getActiveSpreadsheet();
   let sh=ss.getSheetByName('BANK_REGRESSION_LOCKS');
   if(!sh) {
@@ -56,12 +52,9 @@ function lockBankRegressionBaseline(companyName, period, bankId) {
     sh.appendRow(['Company Name','Period','Bank','Result Fingerprint','Gross Monthly Deposits','Operating Monthly Deposits','Confirmed Monthly Debt','Financing Credits','Rules Version','Locked At']);
     sh.setFrozenRows(1);
   }
-
   const values=sh.getDataRange().getValues();
   let rowNum=0;
-  for(let i=1;i<values.length;i++) {
-    if(vfcPureSame_(values[i][0],companyName)&&vfcPureSame_(values[i][1],period)&&vfcPureSame_(values[i][2],bankId)){rowNum=i+1;break;}
-  }
+  for(let i=1;i<values.length;i++) if(vfcPureSame_(values[i][0],companyName)&&vfcPureSame_(values[i][1],period)&&vfcPureSame_(values[i][2],bankId)){rowNum=i+1;break;}
   const bf=result.bankingFeatures||{};
   const row=[companyName,period,bankId,result.resultFingerprint,bf.averageMonthlyDeposits||0,bf.estimatedOperatingMonthlyDeposits||0,bf.existingMonthlyDebtService||0,bf.detectedFinancingCredits||0,VFC_BANK_ENGINE.RULES_VERSION,new Date()];
   if(rowNum) sh.getRange(rowNum,1,1,row.length).setValues([row]); else sh.appendRow(row);
@@ -72,8 +65,7 @@ function verifyBankRegressionBaseline(companyName, period, bankId) {
   bankId=String(bankId||'RBC').toUpperCase();
   const result=refreshDebtSignalsForPeriodSafe({companyName:companyName,period:period});
   if(!result.ok) return result;
-  const ss=SpreadsheetApp.getActiveSpreadsheet();
-  const sh=ss.getSheetByName('BANK_REGRESSION_LOCKS');
+  const ss=SpreadsheetApp.getActiveSpreadsheet(),sh=ss.getSheetByName('BANK_REGRESSION_LOCKS');
   if(!sh||sh.getLastRow()<2) return {ok:false,error:'No regression baseline is locked.'};
   const values=sh.getDataRange().getValues();
   for(let i=1;i<values.length;i++) {
@@ -102,8 +94,6 @@ function vfcPureResultFingerprint_(features) {
   return vfcPureDigest_(JSON.stringify(canonical));
 }
 
-/* ------------------------- helpers ------------------------- */
-
 function vfcPureBaseFeatures_(companyName,period){
   if(typeof buildPowerFeatures_==='function') return buildPowerFeatures_(companyName,period);
   if(typeof buildFeaturesForCase_==='function') return buildFeaturesForCase_(companyName,period);
@@ -131,15 +121,6 @@ function vfcPureCounterpartyKey_(s){const tokens=vfcPureTokens_(s);return tokens
 function vfcPureDaysBetween_(a,b){const da=vfcPureDate_(a),db=vfcPureDate_(b);if(!da||!db)return null;return Math.max(0,Math.round((db-da)/86400000));}
 function vfcPureMeanObjectValues_(obj){const ks=Object.keys(obj||{});if(!ks.length)return 0;return ks.reduce(function(s,k){return s+vfcPureNumber_(obj[k]);},0)/ks.length;}
 function vfcPureSortedObject_(obj){const out={};Object.keys(obj||{}).sort().forEach(function(k){out[k]=vfcPureRound_(obj[k],.01);});return out;}
-function vfcPureRecentMonthlyAverage_(monthTotals,count,latestStatementEnd){
-  const keys=Object.keys(monthTotals||{}).sort();
-  if(!keys.length)return 0;
-  // Prefer the latest observed months. This intentionally captures current debt structure after refinances/new advances.
-  const selected=keys.slice(Math.max(0,keys.length-Math.max(1,count||3)));
-  return selected.reduce(function(s,k){return s+vfcPureNumber_(monthTotals[k]);},0)/selected.length;
-}
+function vfcPureRecentMonthlyAverage_(monthTotals,count,latestStatementEnd){const keys=Object.keys(monthTotals||{}).sort();if(!keys.length)return 0;const selected=keys.slice(Math.max(0,keys.length-Math.max(1,count||3)));return selected.reduce(function(s,k){return s+vfcPureNumber_(monthTotals[k]);},0)/selected.length;}
 function vfcPureObligationSort_(a,b){if((b.monthlyEquivalent||0)!==(a.monthlyEquivalent||0))return (b.monthlyEquivalent||0)-(a.monthlyEquivalent||0);return String(a.counterparty||'').localeCompare(String(b.counterparty||''));}
-function vfcPureDigest_(s){
-  const bytes=Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256,String(s||''),Utilities.Charset.UTF_8);
-  return bytes.map(function(b){const v=(b<0?b+256:b).toString(16);return v.length===1?'0'+v:v;}).join('').substring(0,24);
-}
+function vfcPureDigest_(s){const bytes=Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256,String(s||''),Utilities.Charset.UTF_8);return bytes.map(function(b){const v=(b<0?b+256:b).toString(16);return v.length===1?'0'+v:v;}).join('').substring(0,24);}
