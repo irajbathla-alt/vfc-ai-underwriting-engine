@@ -43,6 +43,16 @@
       <h2>Add Historical Outcome</h2>
       <div class="intro">Upload the reviewed statements and record the lender's actual decision. New records are used automatically in the next assessment.</div>
       <div class="field"><label>Company Name</label><input id="trainCompanyName"></div>
+      <div class="field">
+        <label>Bank Format</label>
+        <select id="trainBankProfile">
+          <option value="">Select bank format</option>
+          <option value="RBC">RBC</option>
+          <option value="BMO">BMO</option>
+          <option value="AUTO">Other / Auto</option>
+        </select>
+        <div class="note">RBC and BMO use isolated statement-format readers. Other / Auto uses the existing generic reader.</div>
+      </div>
       <div class="field"><label>Bank Statements</label><input id="trainFiles" type="file" accept="application/pdf" multiple></div>
       <div class="grid">
         <div class="field">
@@ -68,6 +78,16 @@
       <h2>Calculate Maximum Recommended Loan</h2>
       <div class="intro">The engine compares this business with the closest approved and declined files in your Training Data and applies essential current-banking checks.</div>
       <div class="field"><label>Company Name</label><input id="assessCompanyName"></div>
+      <div class="field">
+        <label>Bank Format</label>
+        <select id="assessBankProfile">
+          <option value="">Select bank format</option>
+          <option value="RBC">RBC</option>
+          <option value="BMO">BMO</option>
+          <option value="AUTO">Other / Auto</option>
+        </select>
+        <div class="note">Select the bank that issued these statements. BMO rules do not run on RBC files, and RBC uses the existing working intake path.</div>
+      </div>
       <div class="field"><label>Bank Statements</label><input id="assessFiles" type="file" accept="application/pdf" multiple></div>
       <button id="assessButton" class="button primary" onclick="submitAssessment()">Upload & Calculate Maximum Loan</button>
       <div id="assessStatus" class="status">Ready.</div>
@@ -101,6 +121,16 @@ function toggleTrainingFields(){
 }
 toggleTrainingFields();
 
+function uploadFunctionForBank(profile){
+  return profile==='BMO'?'uploadStatementBatchBMO':'uploadStatementBatch';
+}
+
+function bankStatusLabel(profile){
+  if(profile==='BMO')return 'BMO';
+  if(profile==='RBC')return 'RBC';
+  return 'bank';
+}
+
 function serverCall(functionName,args){
   return new Promise(function(resolve,reject){
     const runner=google.script.run
@@ -112,14 +142,15 @@ function serverCall(functionName,args){
 
 async function submitTraining(){
   const company=value('trainCompanyName');
+  const bankProfile=value('trainBankProfile');
   const filesInput=id('trainFiles');
   const decision=value('trainDecision');
   const lender=value('trainLenderName');
   const approvedAmount=decision==='Declined'?'':value('trainApprovedAmount');
   const reason=decision==='Approved'?'':value('trainDeclineReason');
 
-  if(!company||!filesInput.files.length||!decision||!lender){
-    alert('Please complete company, statements, decision, and lender.');
+  if(!company||!bankProfile||!filesInput.files.length||!decision||!lender){
+    alert('Please complete company, bank format, statements, decision, and lender.');
     return;
   }
   if((decision==='Approved'||decision==='Conditional')&&!approvedAmount){
@@ -128,10 +159,10 @@ async function submitTraining(){
   }
 
   const button=id('trainButton');
-  setBusy(button,'trainStatus','Reading statements...');
+  setBusy(button,'trainStatus','Reading '+bankStatusLabel(bankProfile)+' statements...');
   try{
     const files=await prepareFiles(filesInput.files);
-    const upload=await serverCall('uploadStatementBatch',[company,files]);
+    const upload=await serverCall(uploadFunctionForBank(bankProfile),[company,files]);
     const result=await serverCall('saveLenderDecision',[{
       companyName:company,
       period:(upload&&upload.detectedPeriod)||'',
@@ -149,9 +180,10 @@ async function submitTraining(){
 
 async function submitAssessment(){
   const company=value('assessCompanyName');
+  const bankProfile=value('assessBankProfile');
   const filesInput=id('assessFiles');
-  if(!company||!filesInput.files.length){
-    alert('Please enter the company and upload bank statements.');
+  if(!company||!bankProfile||!filesInput.files.length){
+    alert('Please enter the company, select the bank format, and upload bank statements.');
     return;
   }
 
@@ -159,11 +191,11 @@ async function submitAssessment(){
   id('assessmentSection').style.display='none';
   id('openAIBox').innerHTML='';
   id('bankingInputBox').innerHTML='';
-  setBusy(button,'assessStatus','Reading statements...');
+  setBusy(button,'assessStatus','Reading '+bankStatusLabel(bankProfile)+' statements...');
 
   try{
     const files=await prepareFiles(filesInput.files);
-    const upload=await serverCall('uploadStatementBatch',[company,files]);
+    const upload=await serverCall(uploadFunctionForBank(bankProfile),[company,files]);
     const period=(upload&&upload.detectedPeriod)||'';
 
     setStatus('assessStatus','Validating deposits and recurring debt/PAD payments...');
