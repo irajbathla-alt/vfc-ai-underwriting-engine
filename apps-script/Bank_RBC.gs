@@ -1,6 +1,18 @@
 /** RBC v1.0 — TRAINED / LOCKED. */
 function vfcRbcBankProfile_(){return{id:'RBC',label:'RBC',status:'LOCKED',rulesVersion:'RBC-1.0-LOCKED',aliases:['ROYAL BANK OF CANADA','RBC ROYAL BANK','RBC']};}
 
+function vfcRbcExtractionRules_(){return [
+  'RBC Account Summary: Total deposits & credits is total_deposits; Total cheques & debits is total_withdrawals.',
+  'RBC Account Activity: Cheques & Debits = DEBIT and Deposits & Credits = CREDIT.',
+  'Extract LOAN CREDIT, generic LOAN PAYMENT, numbered Loan payment NO.x and Loan interest NO.x.',
+  'Preserve Business PAD BDC exactly and preserve Investment MERCH PAD / Investment MERCHANT GROWTH exactly.',
+  'Extract recurring insurance lines including ICBC, IND ALL LIFE IN, EQUITABLE LIFE and OWIC for informational analysis.',
+  'Extract commercial tax / EMPTX / GST lines, credit-card payments and potential financing credits.',
+  'A LOAN CREDIT printed in Deposits & Credits is always a CREDIT. Never turn it into a debit because of the word loan.',
+  'Do not duplicate cheque image pages.'
+].join('\n');}
+function vfcRbcLockFacts_(summary,text,fileName){return vfcLockPrintedStatementFacts_(summary,text);}
+
 function vfcRbcClassifyDebit_(t){
   const s=String(t.description||'').toUpperCase().replace(/\s+/g,' ').trim();
   if(/\bFEE\b|SERVICE\s+CHARGE|NSF|OVERDRAFT\s+INTEREST|PAYMENT\s+COVERAGE/.test(s))return null;
