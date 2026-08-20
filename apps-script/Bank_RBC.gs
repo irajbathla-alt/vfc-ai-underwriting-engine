@@ -20,7 +20,7 @@ function vfcRbcExtractionRules_(){return [
   'Extract recurring insurance lines including ICBC, IND ALL LIFE IN, EQUITABLE LIFE and OWIC for informational analysis.',
   'Extract commercial tax / EMPTX / GST lines, credit-card payments and potential financing credits.',
   'A LOAN CREDIT printed in Deposits & Credits is always a CREDIT. Never turn it into a debit because of the word loan.',
-  'A credit containing explicit LOAN, FINANCING, MCA or a known financing entity is a financing-credit candidate; ordinary deposits, payroll/commission credits, owner transfers and generic deposits are not financing merely because they are large.',
+  'A credit containing explicit LOAN/MCA wording or a trained known financing entity is a financing-credit candidate; ordinary deposits, payroll/commission credits, owner transfers and generic deposits are not financing merely because they are large or the sender name contains Finance/Financing.',
   'Do not duplicate cheque image pages.'
 ].join('\n');}
 function vfcRbcLockFacts_(summary,text,fileName){return vfcLockPrintedStatementFacts_(summary,text);}
@@ -108,7 +108,7 @@ function vfcRbcClassifyDebit_(t){
 
 function vfcRbcKnownFinancingCredit_(t){
   const s=String((t&&t.description)||'').toUpperCase();
-  return /\bBDC\b|MERCHANT\s+GROWTH|JOURNEY|ONDECK|\bJTO\b|CANACAP|GREENBOX|\bCSBFL\b|\bLOAN\b|\bMCA\b|\bFINANC(?:E|ING)\b/.test(s);
+  return /\bBDC\b|MERCHANT\s+GROWTH|JOURNEY|ONDECK|\bJTO\b|CANACAP|GREENBOX|\bCSBFL\b|\bLOAN\b|\bMCA\b/.test(s);
 }
 function vfcRbcStrongEntityKey_(key){
   return /^(BDC|MERCHANT_GROWTH|JOURNEY_ONDECK|SILVERCHEF_EQUIPMENT_LEASE|AUTO_PAYMENT_FINANCE_|RBC_FINANCE_|RBC_OTHER_|INSURANCE_)/.test(String(key||'').toUpperCase());
