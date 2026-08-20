@@ -15,7 +15,7 @@ function vfcDetectBankId_(text){
 }
 function vfcClassifyDebitForBank_(bankId,t){switch(String(bankId||'').toUpperCase()){case'RBC':return vfcRbcClassifyDebit_(t);case'TD':return vfcTdClassifyDebit_(t);case'SCOTIA':return vfcScotiaClassifyDebit_(t);case'BMO':return vfcBmoClassifyDebit_(t);case'CIBC':return vfcCibcClassifyDebit_(t);case'COAST_CAPITAL':return vfcCoastCapitalClassifyDebit_(t);default:return vfcGenericConservativeClassifyDebit_(t);}}
 function vfcIsKnownFinancingCreditForBank_(bankId,t){switch(String(bankId||'').toUpperCase()){case'RBC':return vfcRbcKnownFinancingCredit_(t);case'TD':return vfcTdKnownFinancingCredit_(t);case'SCOTIA':return vfcScotiaKnownFinancingCredit_(t);case'BMO':return vfcBmoKnownFinancingCredit_(t);case'CIBC':return vfcCibcKnownFinancingCredit_(t);case'COAST_CAPITAL':return vfcCoastCapitalKnownFinancingCredit_(t);default:return false;}}
-function vfcBankStrongEntityKey_(key,family){return vfcRbcStrongEntityKey_(key);}
+function vfcBankStrongEntityKey_(bankId,key,family){switch(String(bankId||'').toUpperCase()){case'RBC':return vfcRbcStrongEntityKey_(key);default:return false;}}
 function vfcBankExtractionRules_(bankId){switch(String(bankId||'').toUpperCase()){case'RBC':return vfcRbcExtractionRules_();case'TD':return vfcTdExtractionRules_();case'SCOTIA':return vfcScotiaExtractionRules_();case'BMO':return vfcBmoExtractionRules_();case'CIBC':return vfcCibcExtractionRules_();case'COAST_CAPITAL':return vfcCoastCapitalExtractionRules_();default:return'Extract conservatively. Do not infer missing transactions.';}}
 function vfcLockBankStatementFacts_(bankId,summary,text,fileName){switch(String(bankId||'').toUpperCase()){case'RBC':return vfcRbcLockFacts_(summary,text,fileName);case'TD':return vfcTdLockFacts_(summary,text,fileName);case'SCOTIA':return vfcScotiaLockFacts_(summary,text,fileName);case'BMO':return vfcBmoLockFacts_(summary,text,fileName);case'CIBC':return vfcCibcLockFacts_(summary,text,fileName);case'COAST_CAPITAL':return vfcCoastCapitalLockFacts_(summary,text,fileName);default:return vfcLockPrintedStatementFacts_(summary,text);}}
 
@@ -24,7 +24,6 @@ function vfcNormalizeBankDocumentType_(value,summary){
   const s=String(value||'').trim().toUpperCase().replace(/[^A-Z0-9]+/g,'_');
   if(/^(NOT|NON)_?BANK/.test(s)||/NOT_BANK_STATEMENT|NON_BANK_STATEMENT/.test(s))return'NOT_BANK_STATEMENT';
   if((/BANK/.test(s)&&/STATEMENT/.test(s))||Array.isArray(summary&&summary.banking_transactions))return'BANK_STATEMENT';
-  // This upload route is only for a user-selected bank and the PDF bank identity is checked above.
   return'BANK_STATEMENT';
 }
 
