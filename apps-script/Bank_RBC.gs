@@ -4,9 +4,9 @@ function vfcRbcBankProfile_(){return{id:'RBC',label:'RBC',status:'LOCKED',rulesV
 function vfcRbcExtractionRules_(){return [
   'RBC Account Summary: Total deposits & credits is total_deposits; Total cheques & debits is total_withdrawals.',
   'RBC Account Activity: Cheques & Debits = DEBIT and Deposits & Credits = CREDIT.',
-  'For RBC, freeze EVERY visible Account Activity transaction, not only financing items. Include e-Transfers, online transfers, PADs, auto payments, rent, utilities, payroll/service debits, credit-card payments, taxes, insurance, loans, leases, MCA activity and every visible credit. Duplicate cheque-image pages must not be extracted twice.',
-  'Preserve every debit containing LOAN, FINANCING, FINANCE, LEASE, LSE, MCA, AUTO PAYMENT or PAD exactly so recurrence can be tested deterministically.',
-  'Any debit explicitly containing LOAN is a financing-obligation candidate. If the same loan/reference recurs with the same or near-identical amount and regular cadence, include its monthly equivalent in confirmed debt.',
+  'For RBC, freeze EVERY visible Account Activity transaction, not only financing items. Include e-Transfers, online transfers, PADs, auto payments, rent, utilities, payroll/service debits, credit-card payments, taxes, insurance, loans, mortgages, LOC/line-of-credit activity, leases, MCA activity and every visible credit. Duplicate cheque-image pages must not be extracted twice.',
+  'Preserve every debit containing LOAN, MORTGAGE, LOC, LINE OF CREDIT, FINANCING, FINANCE, LEASE, LSE, MCA, AUTO PAYMENT or PAD exactly so recurrence can be tested deterministically.',
+  'Any debit explicitly containing LOAN, MORTGAGE, LOC/LINE OF CREDIT, FINANCING, MCA or LEASE is a financing-obligation candidate. It must recur before a fixed monthly equivalent is confirmed.',
   'Same or near-identical dollar amount by itself NEVER proves debt. A recurring e-Transfer, online transfer, rent, tax, utility, payroll, card payment or unknown PAD remains informational or ignored for debt unless there is independent financing evidence.',
   'General e-Transfers, online transfers, BR TO BR transfers, ATM/cash withdrawals and ordinary cheques are frozen as statement facts but are not debt candidates merely because they repeat or use the same amount.',
   'AUTO PAYMENT describes a payment method, not automatically a loan. Treat it as financing only when the counterparty/description is finance-like and the payment recurs. A returned NSF/reversal followed by a retry does not create a second monthly obligation.',
@@ -20,7 +20,7 @@ function vfcRbcExtractionRules_(){return [
   'Extract recurring insurance lines including ICBC, IND ALL LIFE IN, EQUITABLE LIFE and OWIC for informational analysis.',
   'Extract commercial tax / EMPTX / GST lines, credit-card payments and potential financing credits.',
   'A LOAN CREDIT printed in Deposits & Credits is always a CREDIT. Never turn it into a debit because of the word loan.',
-  'A credit containing explicit LOAN/MCA wording or a trained known financing entity is a financing-credit candidate; ordinary deposits, payroll/commission credits, owner transfers and generic deposits are not financing merely because they are large or the sender name contains Finance/Financing.',
+  'A credit containing explicit LOAN/MCA/MORTGAGE/LOC wording or a trained known financing entity is a financing-credit candidate; ordinary deposits, payroll/commission credits, owner transfers and generic deposits are not financing merely because they are large or the sender name contains Finance/Financing.',
   'Do not duplicate cheque image pages.'
 ].join('\n');}
 function vfcRbcLockFacts_(summary,text,fileName){return vfcLockPrintedStatementFacts_(summary,text);}
@@ -73,9 +73,9 @@ function vfcRbcClassifyDebit_(t){
       family='OTHER';entityKey='RBC_OTHER_AUTOPAY_'+vfcCounterpartyKey_(clean||cp||raw);label=clean||cp||raw;
     }
   }
-  else if(/\bLOAN\b|\bFINANC(?:E|ING)?\b|\bMCA\b|\bLEASE\b|\bLSE\b/.test(s)){
+  else if(/\bLOAN\b|\bMORTGAGE\b|\bLOC\b|LINE\s+OF\s+CREDIT|CREDIT\s+LINE|\bFINANC(?:E|ING)?\b|\bMCA\b|\bLEASE\b|\bLSE\b/.test(s)){
     family='FINANCING';
-    debtJustification='Explicit loan/financing/lease/MCA wording plus recurring observed cadence.';
+    debtJustification='Explicit loan/mortgage/LOC/financing/lease/MCA wording plus recurring observed cadence.';
     if(/^LOAN\s+PAYMENT$/i.test(raw)){
       entityKey='GENERIC_LOAN_PAYMENT';label='Generic LOAN PAYMENT';
     }else{
@@ -95,6 +95,9 @@ function vfcRbcClassifyDebit_(t){
   else if(/\bPAD\b|PRE[- ]?AUTH/.test(s)){
     family='OTHER';entityKey='RBC_OTHER_PAD_'+vfcCounterpartyKey_(cp||raw);label=cp||raw;
   }
+  else if(/\bCAPITAL\b|\bFUNDING\b|\bFACTOR(?:ING)?\b/.test(s)){
+    family='OTHER';entityKey='RBC_OTHER_POSSIBLE_FINANCE_'+vfcCounterpartyKey_(cp||raw);label=cp||raw;
+  }
   else if(/COMMERCIAL\s+RENT|\bRENT\b|HYDRO|FORTIS|TELUS|UTILITY|SUPERPASS|PETROLEUM|\bFUEL\b|EQUIPMENT\s+RENT|MISC\s+PAYMENT|PAY\s+EMPLOYEE|PAYROLL/.test(s)){
     family='OTHER';entityKey='RBC_OTHER_BUSINESS_'+vfcCounterpartyKey_(cp||raw);label=cp||raw;
   }
@@ -108,7 +111,7 @@ function vfcRbcClassifyDebit_(t){
 
 function vfcRbcKnownFinancingCredit_(t){
   const s=String((t&&t.description)||'').toUpperCase();
-  return /\bBDC\b|MERCHANT\s+GROWTH|JOURNEY|ONDECK|\bJTO\b|CANACAP|GREENBOX|\bCSBFL\b|\bLOAN\b|\bMCA\b/.test(s);
+  return /\bBDC\b|MERCHANT\s+GROWTH|JOURNEY|ONDECK|\bJTO\b|CANACAP|GREENBOX|\bCSBFL\b|\bLOAN\b|\bMCA\b|\bMORTGAGE\b|\bLOC\b|LINE\s+OF\s+CREDIT|CREDIT\s+LINE/.test(s);
 }
 function vfcRbcStrongEntityKey_(key){
   return /^(BDC|MERCHANT_GROWTH|JOURNEY_ONDECK|SILVERCHEF_EQUIPMENT_LEASE|AUTO_PAYMENT_FINANCE_|RBC_FINANCE_|RBC_OTHER_|INSURANCE_)/.test(String(key||'').toUpperCase());
