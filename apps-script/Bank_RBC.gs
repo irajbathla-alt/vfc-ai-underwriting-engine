@@ -7,7 +7,8 @@ function vfcRbcExtractionRules_(){return [
   'For RBC, freeze EVERY visible Account Activity transaction, not only financing items. Include e-Transfers, online transfers, PADs, auto payments, rent, utilities, payroll/service debits, credit-card payments, taxes, insurance, loans, leases, MCA activity and every visible credit. Duplicate cheque-image pages must not be extracted twice.',
   'Preserve every debit containing LOAN, FINANCING, FINANCE, LEASE, LSE, MCA, AUTO PAYMENT or PAD exactly so recurrence can be tested deterministically.',
   'Any debit explicitly containing LOAN is a financing-obligation candidate. If the same loan/reference recurs with the same or near-identical amount and regular cadence, include its monthly equivalent in confirmed debt.',
-  'Same or near-identical dollar amount by itself NEVER proves debt. A recurring e-Transfer, online transfer, rent, tax, utility, payroll, card payment or unknown PAD remains informational unless there is independent financing evidence.',
+  'Same or near-identical dollar amount by itself NEVER proves debt. A recurring e-Transfer, online transfer, rent, tax, utility, payroll, card payment or unknown PAD remains informational or ignored for debt unless there is independent financing evidence.',
+  'General e-Transfers, online transfers, BR TO BR transfers, ATM/cash withdrawals and ordinary cheques are frozen as statement facts but are not debt candidates merely because they repeat or use the same amount.',
   'AUTO PAYMENT describes a payment method, not automatically a loan. Treat it as financing only when the counterparty/description is finance-like and the payment recurs. A returned NSF/reversal followed by a retry does not create a second monthly obligation.',
   'A generic PAD or pre-authorized debit is a recurring-payment candidate but is NOT confirmed financing unless lender/loan/MCA/finance/lease evidence is present.',
   'Extract LOAN CREDIT, generic LOAN PAYMENT, numbered Loan payment NO.x and Loan interest NO.x.',
@@ -94,10 +95,11 @@ function vfcRbcClassifyDebit_(t){
   else if(/\bPAD\b|PRE[- ]?AUTH/.test(s)){
     family='OTHER';entityKey='RBC_OTHER_PAD_'+vfcCounterpartyKey_(cp||raw);label=cp||raw;
   }
+  else if(/COMMERCIAL\s+RENT|\bRENT\b|HYDRO|FORTIS|TELUS|UTILITY|SUPERPASS|PETROLEUM|\bFUEL\b|EQUIPMENT\s+RENT|MISC\s+PAYMENT|PAY\s+EMPLOYEE|PAYROLL/.test(s)){
+    family='OTHER';entityKey='RBC_OTHER_BUSINESS_'+vfcCounterpartyKey_(cp||raw);label=cp||raw;
+  }
   else{
-    family='OTHER';
-    const genericCp=/^(E-?TRANSFER|ONLINE\s+TRANSFER|TRANSFER|PAYMENT|DEBIT|UNKNOWN)$/i.test(cp)?'':cp;
-    entityKey='RBC_OTHER_'+vfcCounterpartyKey_(genericCp||raw);label=genericCp||raw;
+    return null;
   }
 
   if(!entityKey)entityKey='RBC_OTHER_'+vfcCounterpartyKey_(raw);
