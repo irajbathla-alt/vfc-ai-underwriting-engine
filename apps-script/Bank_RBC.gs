@@ -1,18 +1,19 @@
-/** RBC v1.4 — TRAINED / LOCKED. */
-function vfcRbcBankProfile_(){return{id:'RBC',label:'RBC',status:'LOCKED',rulesVersion:'RBC-1.4-LOCKED',aliases:['ROYAL BANK OF CANADA','RBC ROYAL BANK','RBC']};}
+/** RBC v1.5 — CANDIDATE / REVALIDATION REQUIRED. */
+function vfcRbcBankProfile_(){return{id:'RBC',label:'RBC',status:'CANDIDATE',rulesVersion:'RBC-1.5-CANDIDATE',aliases:['ROYAL BANK OF CANADA','RBC ROYAL BANK','RBC']};}
 
 function vfcRbcExtractionRules_(){return [
   'RBC Account Summary: Total deposits & credits is total_deposits; Total cheques & debits is total_withdrawals.',
   'RBC Account Activity: Cheques & Debits = DEBIT and Deposits & Credits = CREDIT.',
   'For RBC, freeze every visible Account Activity transaction needed for underwriting recurrence and credit analysis. Include e-Transfers, online transfers, PADs, auto payments, rent, utilities, payroll/service debits, credit-card payments, taxes, insurance, loans, mortgages, LOC/line-of-credit activity, leases, MCA activity and every visible credit. Duplicate cheque-image pages must not be extracted twice.',
   'NSF retry rule: when a debit is clearly reversed/returned by an Item returned NSF or equivalent same-amount return and then retried, do not keep the failed debit as a completed obligation payment in banking_transactions. Preserve the NSF/returned event through nsf_count/negative-balance/risk facts and keep the later successful retry. This prevents one monthly obligation from being counted twice.',
-  'Preserve every completed debit containing LOAN, MORTGAGE, LOC, LINE OF CREDIT, FINANCING, FINANCE, LEASE, LSE, MCA, AUTO PAYMENT or PAD exactly so recurrence can be tested deterministically.',
+  'Preserve every completed debit containing LOAN, MORTGAGE, LOC, LINE OF CREDIT, CREDIT LINE, FINANCING, FINANCE, LEASE, LSE, MCA, AUTO PAYMENT or PAD exactly so recurrence can be tested deterministically.',
   'Any completed debit explicitly containing LOAN, MORTGAGE, LOC/LINE OF CREDIT, FINANCING, MCA or LEASE is a financing-obligation candidate. It must recur before a fixed monthly equivalent is confirmed.',
   'Same or near-identical dollar amount by itself NEVER proves debt. A recurring e-Transfer, online transfer, rent, tax, utility, payroll, card payment or unknown PAD remains informational or ignored for debt unless there is independent financing evidence.',
   'General e-Transfers, online transfers, BR TO BR transfers, ATM/cash withdrawals and ordinary cheques are frozen as statement facts but are not debt candidates merely because they repeat or use the same amount.',
   'AUTO PAYMENT describes a payment method, not automatically a loan. Treat it as financing only when the counterparty/description is finance-like and the payment recurs.',
   'A successful retry may print as MISC PAYMENT instead of AUTO PAYMENT. If the same finance-like counterparty appears, keep it under the same financing entity so the recurring obligation is not broken.',
   'A generic PAD or pre-authorized debit is a recurring-payment candidate but is NOT confirmed financing unless lender/loan/MCA/finance/lease evidence is present.',
+  'A fee-related word only suppresses a line when there is no independent financing signal. A loan/financing/lease/MCA line that also contains a fee word must still be preserved for recurrence testing.',
   'Extract LOAN CREDIT, generic LOAN PAYMENT, numbered Loan payment NO.x and Loan interest NO.x.',
   'Extract CSBFL advance / CSBFL loan advance credits as financing proceeds when printed in Deposits & Credits.',
   'Preserve COMM EQUIP RENT/LSE SILVERCHEF debits exactly; treat SilverChef as recurring equipment lease financing when recurring.',
@@ -31,7 +32,9 @@ function vfcRbcClassifyDebit_(t){
   const raw=String(t.description||'').replace(/\s+/g,' ').trim();
   const s=raw.toUpperCase();
   const cp=String(t.counterparty||'').replace(/\s+/g,' ').trim();
-  if(/\bFEE\b|SERVICE\s+CHARGE|NSF\s+ITEM\s+FEE|OVERDRAFT\s+INTEREST|PAYMENT\s+COVERAGE/.test(s))return null;
+  const hasFinancingSignal=/\bLOAN\b|\bMORTGAGE\b|\bLOC\b|LINE\s+OF\s+CREDIT|CREDIT\s+LINE|\bFINANC(?:E|ING)?\b|\bMCA\b|\bLEASE\b|\bLSE\b/.test(s);
+  const isFeeLine=/\bFEE\b|SERVICE\s+CHARGE|NSF\s+ITEM\s+FEE|OVERDRAFT\s+INTEREST|PAYMENT\s+COVERAGE/.test(s);
+  if(isFeeLine&&!hasFinancingSignal)return null;
 
   let family='',entityKey='',label=cp||raw,debtJustification='';
 
@@ -67,7 +70,7 @@ function vfcRbcClassifyDebit_(t){
   }
   else if(/^AUTO\s+PAYMENT\b/.test(s)){
     const clean=raw.replace(/^AUTO\s+PAYMENT\s*/i,'').trim();
-    const financeLike=/\bAFS\b|FINANC|\bCREDIT\b|CAPITAL|LEASE|LENDING|DEALER\s+ADVANTAGE|AUTO\s+FINANCE/.test(s);
+    const financeLike=/\bAFS\b|FINANC|\bCREDIT\b|CAPITAL|LEASE|LENDING|DEALER\s+ADVANTAGE|AUTO\s+FINANCE|\bLOAN\b|\bMCA\b|\bMORTGAGE\b|\bLOC\b|LINE\s+OF\s+CREDIT|CREDIT\s+LINE/.test(s);
     if(financeLike){
       family='FINANCING';entityKey='AUTO_PAYMENT_FINANCE_'+vfcCounterpartyKey_(clean||cp||raw);label=clean||cp||raw;
       debtJustification='Recurring automatic payment to a finance-like counterparty; AUTO PAYMENT alone is not sufficient, so finance-like counterparty evidence is also required.';
@@ -75,27 +78,30 @@ function vfcRbcClassifyDebit_(t){
       family='OTHER';entityKey='RBC_OTHER_AUTOPAY_'+vfcCounterpartyKey_(clean||cp||raw);label=clean||cp||raw;
     }
   }
-  else if(/^MISC\s+PAYMENT\b/.test(s)&&(/\bAFS\b|FINANC|\bCREDIT\b|LEASE|LENDING|DEALER\s+ADVANTAGE|AUTO\s+FINANCE/.test(s))){
+  else if(/^MISC\s+PAYMENT\b/.test(s)&&(/\bAFS\b|FINANC|\bCREDIT\b|LEASE|LENDING|DEALER\s+ADVANTAGE|AUTO\s+FINANCE|\bLOAN\b|\bMCA\b|\bMORTGAGE\b|\bLOC\b|LINE\s+OF\s+CREDIT|CREDIT\s+LINE/.test(s))){
     const clean=raw.replace(/^MISC\s+PAYMENT\s*/i,'').trim();
     family='FINANCING';entityKey='AUTO_PAYMENT_FINANCE_'+vfcCounterpartyKey_(clean||cp||raw);label=clean||cp||raw;
-    debtJustification='Successful retry/recurring payment to the same finance-like counterparty, even though RBC printed MISC PAYMENT instead of AUTO PAYMENT.';
+    debtJustification='Recurring or retry payment to the same finance-like counterparty, even though RBC printed MISC PAYMENT instead of AUTO PAYMENT.';
   }
-  else if(/\bLOAN\b|\bMORTGAGE\b|\bLOC\b|LINE\s+OF\s+CREDIT|CREDIT\s+LINE|\bFINANC(?:E|ING)?\b|\bMCA\b|\bLEASE\b|\bLSE\b/.test(s)){
+  else if(hasFinancingSignal){
     family='FINANCING';
     debtJustification='Explicit loan/mortgage/LOC/financing/lease/MCA wording plus recurring observed cadence.';
     if(/^LOAN\s+PAYMENT$/i.test(raw)){
       entityKey='GENERIC_LOAN_PAYMENT';label='Generic LOAN PAYMENT';
     }else{
-      const numbered=s.match(/(?:NO\.?|NUMBER)\s*([0-9-]{5,})/);
-      const genericLoanNumber=s.match(/\bLOAN\b[^0-9]{0,30}([0-9]{6,})\b/);
-      const loanNo=numbered||genericLoanNumber;
-      if(loanNo){
-        const n=loanNo[1].replace(/[^0-9]/g,'');
+      const numbered=s.match(/(?:NO\.?|NUMBER|#)\s*([0-9-]{5,})/);
+      const genericDebtNumber=s.match(/\b(?:LOAN|MORTGAGE|LOC)\b[^0-9]{0,30}([0-9]{6,})\b/);
+      const ref=numbered||genericDebtNumber;
+      if(ref){
+        const n=ref[1].replace(/[^0-9]/g,'');
         if(/LOAN\s+INTEREST/.test(s)){entityKey='LOAN_INTEREST_'+n;label='Loan interest NO.'+n;}
         else if(/PERSONAL\s+LOAN/.test(s)){entityKey='LOAN_'+n;label='Personal Loan '+n;}
-        else{entityKey='LOAN_'+n;label='Loan payment NO.'+n;}
+        else if(/\bLOAN\b/.test(s)){entityKey='LOAN_'+n;label='Loan payment NO.'+n;}
+        else if(/\bLEASE\b|\bLSE\b/.test(s)){entityKey='LEASE_'+n;label='Lease payment NO.'+n;}
+        else{entityKey='FINANCE_REF_'+n;label=(cp||raw)+' NO.'+n;}
       }else{
-        entityKey='RBC_FINANCE_'+vfcCounterpartyKey_(cp||raw);label=cp||raw;
+        const stable=(cp||raw).replace(/\b[0-9]{4,}\b/g,'').replace(/\s+/g,' ').trim();
+        entityKey='RBC_FINANCE_'+vfcCounterpartyKey_(stable||cp||raw);label=cp||raw;
       }
     }
   }
@@ -121,5 +127,5 @@ function vfcRbcKnownFinancingCredit_(t){
   return /\bBDC\b|MERCHANT\s+GROWTH|JOURNEY|ONDECK|\bJTO\b|CANACAP|GREENBOX|\bCSBFL\b|\bLOAN\b|\bMCA\b|\bMORTGAGE\b|\bLOC\b|LINE\s+OF\s+CREDIT|CREDIT\s+LINE/.test(s);
 }
 function vfcRbcStrongEntityKey_(key){
-  return /^(BDC|MERCHANT_GROWTH|JOURNEY_ONDECK|SILVERCHEF_EQUIPMENT_LEASE|AUTO_PAYMENT_FINANCE_|RBC_FINANCE_|RBC_OTHER_|INSURANCE_)/.test(String(key||'').toUpperCase());
+  return /^(BDC|MERCHANT_GROWTH|JOURNEY_ONDECK|SILVERCHEF_EQUIPMENT_LEASE|AUTO_PAYMENT_FINANCE_|RBC_FINANCE_|RBC_OTHER_|INSURANCE_|LEASE_[0-9]|FINANCE_REF_[0-9])/.test(String(key||'').toUpperCase());
 }
