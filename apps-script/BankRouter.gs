@@ -60,7 +60,17 @@ function vfcBuildBankStatementPrompt_(profile,text,companyName,fileName){return[
   'Return fields: document_type, bank_name, account_holder, statement_start_date, statement_end_date, opening_balance, closing_balance, total_deposits, total_withdrawals, nsf_count, negative_balance_detected, banking_transactions, summary, risks, missing_info.',
   'For a valid bank statement set document_type exactly to BANK_STATEMENT.',
   'banking_transactions is an array of {date:"YYYY-MM-DD",description:"exact visible description",counterparty:"short counterparty",direction:"DEBIT" or "CREDIT",amount:number}.',
-  'COMMON RULES:','1. Header totals come from the printed statement summary, never by summing the transaction list.','2. Printed debit/withdrawal versus credit/deposit columns control direction; wording never overrides the printed column.','3. Preserve exact amounts and visible descriptions. Never borrow an amount from an adjacent row.','4. Do not duplicate cheque-image pages when the transaction already appears in account activity.','5. Extract financing/loan/MCA/PAD/advance/funding activity, loan interest, recurring PADs, tax/government, insurance/premium finance, credit-card payments, and explicit equipment finance/lease payments.','6. Extract NSF, returned/unpaid items, reversals and overdraft/over-limit events so banking conduct is frozen with the statement facts.','7. Also extract incoming credits of $5,000 or more when they could plausibly be financing. Classification happens later.','8. If uncertain, omit a transaction rather than inventing one.','BANK-SPECIFIC RULES:',vfcBankExtractionRules_(profile.id),'Document text:',String(text||'').substring(0,VFC_CONFIG.STATEMENT_TEXT_LIMIT)
+  'COMMON RULES:',
+  '1. Header totals come from the printed statement summary, never by summing the transaction list.',
+  '2. Printed debit/withdrawal versus credit/deposit columns control direction; wording never overrides the printed column.',
+  '3. Preserve exact amounts and visible descriptions. Never borrow an amount from an adjacent row.',
+  '4. Do not duplicate cheque-image pages when the transaction already appears in account activity.',
+  '5. Preserve every visible transaction required by the bank-specific rules, especially recurring-looking debits, financing/loan/MCA/PAD/advance/funding activity, loan interest, tax/government, insurance/premium finance, credit-card payments, equipment finance/lease payments and every required financing-credit candidate.',
+  '6. Preserve original failed debits, returned/unpaid or reversal credits, and later retries as separate printed facts. Deterministic banking code decides which failed financing debit is excluded from recurring debt service.',
+  '7. Extract incoming credits of $5,000 or more when they could plausibly be financing. Classification happens later.',
+  '8. If a transaction row is visibly present but the counterparty is unclear, still extract the exact visible description when date, amount and debit/credit direction can be tied to that row. Omit only when the row cannot be reliably associated with its date, amount or direction.',
+  '9. Never invent a missing transaction, amount, date, counterparty or direction.',
+  'BANK-SPECIFIC RULES:',vfcBankExtractionRules_(profile.id),'Document text:',String(text||'').substring(0,VFC_CONFIG.STATEMENT_TEXT_LIMIT)
 ].join('\n');}
 
 function vfcFreezeDuplicateStatementFacts_(companyName,period){
