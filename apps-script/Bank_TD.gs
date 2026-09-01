@@ -1,10 +1,10 @@
-/** TD v1.1 — CANDIDATE / REVALIDATION REQUIRED. */
-function vfcTdBankProfile_(){return{id:'TD',label:'TD',status:'CANDIDATE',rulesVersion:'TD-1.1-CANDIDATE',aliases:['TD CANADA TRUST','THE TORONTO-DOMINION BANK','TORONTO-DOMINION','TD BANK','TD CANADA TRUST BUSINESS']};}
+/** TD v1.2 — CANDIDATE / REVALIDATION REQUIRED. */
+function vfcTdBankProfile_(){return{id:'TD',label:'TD',status:'CANDIDATE',rulesVersion:'TD-1.2-CANDIDATE',aliases:['TD CANADA TRUST','THE TORONTO-DOMINION BANK','TORONTO-DOMINION','TD BANK','TD CANADA TRUST BUSINESS']};}
 
 function vfcTdExtractionRules_(){return [
   'TD statement direction is controlled only by the printed CHEQUE/DEBIT versus DEPOSIT/CREDIT columns.',
   'IMPORTANT TD FORMAT RULE: the Credits and Debits boxes printed at the bottom of each activity page are PAGE SUBTOTALS, not whole-statement totals. For a multi-page TD statement, total_deposits is the sum of every printed page Credits amount and total_withdrawals is the sum of every printed page Debits amount. Never use only the first or last page subtotal as the statement total.',
-  'The TD lock step recalculates total_deposits and total_withdrawals deterministically from those printed page subtotal boxes after extraction, so preserve the full statement text and page structure accurately.',
+  'The TD lock step independently sums the printed Credits and Debits page subtotal boxes. Do not apply RBC/generic balance-lock assumptions to TD continuation pages because each TD page repeats BALANCE FORWARD.',
   'Preserve every visible transaction required for recurrence and risk analysis, including standalone LOAN debits, LN PYMT, LN PYT INT, LN PYT PRI, RBC LOAN PYMT LOAN, BDC BUS, JOURNEY/ONDECK BUS, tax/government lines, insurance, transfers, NSF/return lines, deposits and financing credits.',
   'TD loan abbreviations are financing signals: standalone LOAN, LN PYMT, LN PYT INT, LN PYT PRI, LOAN PYMT, LOAN PAYMENT, and explicit LOAN/MORTGAGE/LOC/LINE OF CREDIT/MCA/LEASE/FINANCING wording.',
   'A numbered TD loan reference such as *602099601 or 900017902 is a strong debt identity. Repeated payments with the same reference are the same obligation even if wording varies between LN PYMT, LN PYT PRI or LN PYT INT. Principal and interest lines sharing the same reference are components of the same loan obligation and their monthly cash outflow is combined by the shared Banking Core.',
@@ -23,11 +23,14 @@ function vfcTdExtractionRules_(){return [
 ].join('\n');}
 
 /**
- * TD page footer Credits/Debits are page subtotals. Sum every printed page box.
- * This intentionally overrides AI-supplied totals so multi-page TD statements are stable.
+ * TD has its own statement layout. Do NOT call the generic printed-fact lock here:
+ * continuation pages repeat BALANCE FORWARD and can be mistaken for the statement opening balance.
+ * We preserve OpenAI's first-page statement metadata, then deterministically override only facts
+ * that TD exposes in a stable printed structure: first BALANCE FORWARD and page Credits/Debits totals.
  */
 function vfcTdLockFacts_(summary,text,fileName){
-  const locked=vfcLockPrintedStatementFacts_(summary,text)||summary||{},totals=vfcTdPageTotals_(text);
+  const locked=Object.assign({},summary||{}),opening=vfcTdOpeningBalance_(text),totals=vfcTdPageTotals_(text);
+  if(opening!==null)locked.opening_balance=opening;
   if(totals.pageCount>0){
     locked.total_deposits=totals.totalDeposits;
     locked.total_withdrawals=totals.totalWithdrawals;
@@ -36,15 +39,26 @@ function vfcTdLockFacts_(summary,text,fileName){
   return locked;
 }
 
+/** First BALANCE FORWARD in TD activity is the statement opening balance. */
+function vfcTdOpeningBalance_(text){
+  const s=String(text||'').replace(/\u00a0/g,' '),m=s.match(/\bBALANCE\s+FORWARD(?:\s+[A-Z]{3}\s*\d{1,2}|\s+[A-Z]{3}\d{1,2})?\s+\$?([0-9][0-9,]*\.\d{2})(OD)?\b/i);
+  if(!m)return null;const n=Number(String(m[1]).replace(/,/g,''));if(!Number.isFinite(n))return null;return m[2]? -n:n;
+}
+
+/**
+ * TD footer parser. Credits and Debits are parsed independently because Google Drive OCR can
+ * alter column/line spacing. A valid statement page contributes one Credits subtotal and one
+ * Debits subtotal. We only override AI totals when both sides have the same non-zero page count.
+ */
 function vfcTdPageTotals_(text){
-  const s=String(text||'').replace(/\u00a0/g,' '),re=/\bCredits\s+(\d+)\s+([0-9][0-9,]*\.\d{2})\s+Debits\s+(\d+)\s+([0-9][0-9,]*\.\d{2})/gi;
-  let m,pageCount=0,totalDeposits=0,totalWithdrawals=0;
-  while((m=re.exec(s))!==null){
-    totalDeposits+=Number(String(m[2]).replace(/,/g,''))||0;
-    totalWithdrawals+=Number(String(m[4]).replace(/,/g,''))||0;
-    pageCount++;
-  }
-  return{pageCount:pageCount,totalDeposits:vfcRound_(totalDeposits,.01),totalWithdrawals:vfcRound_(totalWithdrawals,.01)};
+  const s=String(text||'').replace(/\u00a0/g,' '),credits=[],debits=[];
+  let m,re=/\bCredits\s+\d+\s+\$?([0-9][0-9,]*\.\d{2})\b/gi;
+  while((m=re.exec(s))!==null)credits.push(Number(String(m[1]).replace(/,/g,''))||0);
+  re=/\bDebits\s+\d+\s+\$?([0-9][0-9,]*\.\d{2})\b/gi;
+  while((m=re.exec(s))!==null)debits.push(Number(String(m[1]).replace(/,/g,''))||0);
+  if(!credits.length||credits.length!==debits.length)return{pageCount:0,totalDeposits:0,totalWithdrawals:0,creditCount:credits.length,debitCount:debits.length};
+  const totalDeposits=credits.reduce(function(a,b){return a+b;},0),totalWithdrawals=debits.reduce(function(a,b){return a+b;},0);
+  return{pageCount:credits.length,totalDeposits:vfcRound_(totalDeposits,.01),totalWithdrawals:vfcRound_(totalWithdrawals,.01),creditCount:credits.length,debitCount:debits.length};
 }
 
 function vfcTdClassifyDebit_(t){
