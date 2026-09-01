@@ -6,8 +6,8 @@ function vfcTdExtractionRules_(){return [
   'TD transaction direction is controlled only by the printed CHEQUE/DEBIT versus DEPOSIT/CREDIT columns.',
   'Preserve every visible transaction required for recurrence and risk analysis, including LN PYMT, LN PYT INT, LN PYT PRI, RBC LOAN PYMT LOAN, BDC BUS, JOURNEY/ONDECK BUS, tax/government lines, insurance, transfers, NSF/return lines, deposits and financing credits.',
   'TD loan abbreviations are financing signals: LN PYMT, LN PYT INT, LN PYT PRI, LOAN PYMT, LOAN PAYMENT, and explicit LOAN/MORTGAGE/LOC/LINE OF CREDIT/MCA/LEASE/FINANCING wording.',
-  'A numbered TD loan reference such as *602099601 or 900017902 is a strong debt identity. Repeated payments with the same reference are the same obligation even if wording varies between LN PYMT, LN PYT PRI or LN PYT INT.',
-  'LN PYMT-C is a returned/reversed loan-payment CREDIT, not revenue. LN RTN FEE is a fee/risk event. If a reversed loan debit is retried, the failed debit must not create an extra monthly obligation.',
+  'A numbered TD loan reference such as *602099601 or 900017902 is a strong debt identity. Repeated payments with the same reference are the same obligation even if wording varies between LN PYMT, LN PYT PRI or LN PYT INT. Principal and interest lines sharing the same reference are components of the same loan obligation and their monthly cash outflow is combined by the shared Banking Core.',
+  'LN PYMT-C is a returned/reversed loan-payment CREDIT, not revenue. LN RTN FEE is a fee/risk event. Preserve both exactly; TD return-netting can be applied deterministically during revalidation without changing the printed facts.',
   'NSF PAID FEE, NSF RETURN FEE, LN RTN FEE, OVERDRAFT INTEREST and PAYMENT COVERAGE FEE are risk/fee events, not financing debt service by themselves.',
   'BDC BUS is a financing-obligation candidate. JOURNEY/ONDECK BUS is a financing/MCA candidate. They must recur before a fixed monthly equivalent is confirmed.',
   'RBC LOAN PYMT LOAN is a payment to an RBC loan and is a financing-obligation candidate even though it appears on a TD statement.',
@@ -52,17 +52,13 @@ function vfcTdClassifyDebit_(t){
   else if(/CREDIT\s+CARD|VISA|MASTERCARD|AMERICAN\s+EXPRESS|\bAMEX\b|\bMBNA\b/.test(s)){
     family='OTHER';entityKey='TD_OTHER_CARD_'+vfcCounterpartyKey_(cp||raw);label=cp||raw;
   }
-  else if(/\bLN\s+PYT\s+INT\b/.test(s)){
-    const n=vfcTdLoanReference_(s);family='FINANCING';entityKey='TD_LOAN_INTEREST_'+(n||vfcCounterpartyKey_(cp||raw));label=n?'TD Loan Interest '+n:(cp||raw);
-    debtJustification='Explicit TD loan-interest wording tied to a loan reference plus recurring observed cadence.';
-  }
-  else if(/\bLN\s+PYT\s+PRI\b/.test(s)){
-    const n=vfcTdLoanReference_(s);family='FINANCING';entityKey='TD_LOAN_PRINCIPAL_'+(n||vfcCounterpartyKey_(cp||raw));label=n?'TD Loan Principal '+n:(cp||raw);
-    debtJustification='Explicit TD loan-principal wording tied to a loan reference plus recurring observed cadence.';
-  }
-  else if(/\bLN\s+PYMT\b|\bLOAN\s+(?:PYMT|PAYMENT)\b|\bMORTGAGE\b|\bLOC\b|LINE\s+OF\s+CREDIT|CREDIT\s+LINE|\bMCA\b|\bLEASE\b|\bFINANC(?:E|ING)?\b/.test(s)){
+  else if(/\bLN\s+PYT\s+(?:INT|PRI)\b|\bLN\s+PYMT\b|\bLOAN\s+(?:PYMT|PAYMENT)\b/.test(s)){
     const n=vfcTdLoanReference_(s);family='FINANCING';entityKey=n?'TD_LOAN_'+n:'TD_FINANCE_'+vfcCounterpartyKey_(cp||raw);label=n?'TD Loan '+n:(cp||raw);
-    debtJustification='Explicit TD loan/financing wording plus recurring observed cadence.';
+    debtJustification='Explicit TD loan-payment wording tied to a stable loan reference plus recurring observed cadence; principal and interest components with the same reference are one obligation.';
+  }
+  else if(/\bMORTGAGE\b|\bLOC\b|LINE\s+OF\s+CREDIT|CREDIT\s+LINE|\bMCA\b|\bLEASE\b|\bFINANC(?:E|ING)?\b/.test(s)){
+    const n=vfcTdLoanReference_(s);family='FINANCING';entityKey=n?'TD_LOAN_'+n:'TD_FINANCE_'+vfcCounterpartyKey_(cp||raw);label=n?'TD Loan '+n:(cp||raw);
+    debtJustification='Explicit mortgage/LOC/financing/lease/MCA wording plus recurring observed cadence.';
   }
   else if(/\bPAD\b|PRE[- ]?AUTH/.test(s)){
     family='OTHER';entityKey='TD_OTHER_PAD_'+vfcCounterpartyKey_(cp||raw);label=cp||raw;
@@ -88,7 +84,7 @@ function vfcTdKnownFinancingCredit_(t){
 }
 
 function vfcTdStrongEntityKey_(key){
-  return /^(TD_JOURNEY_ONDECK|TD_BDC|TD_RBC_LOAN_PAYMENT|TD_LOAN_|TD_LOAN_INTEREST_|TD_LOAN_PRINCIPAL_|TD_FINANCE_)/.test(String(key||'').toUpperCase());
+  return /^(TD_JOURNEY_ONDECK|TD_BDC|TD_RBC_LOAN_PAYMENT|TD_LOAN_|TD_FINANCE_)/.test(String(key||'').toUpperCase());
 }
 
 function vfcTdIsReturnedFinancingCredit_(t){
