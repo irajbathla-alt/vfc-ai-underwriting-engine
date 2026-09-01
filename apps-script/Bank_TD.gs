@@ -1,12 +1,14 @@
-/** TD v1.0 — CANDIDATE / REVALIDATION REQUIRED. */
-function vfcTdBankProfile_(){return{id:'TD',label:'TD',status:'CANDIDATE',rulesVersion:'TD-1.0-CANDIDATE',aliases:['TD CANADA TRUST','THE TORONTO-DOMINION BANK','TORONTO-DOMINION','TD BANK','TD CANADA TRUST BUSINESS']};}
+/** TD v1.1 — CANDIDATE / REVALIDATION REQUIRED. */
+function vfcTdBankProfile_(){return{id:'TD',label:'TD',status:'CANDIDATE',rulesVersion:'TD-1.1-CANDIDATE',aliases:['TD CANADA TRUST','THE TORONTO-DOMINION BANK','TORONTO-DOMINION','TD BANK','TD CANADA TRUST BUSINESS']};}
 
 function vfcTdExtractionRules_(){return [
-  'TD statement header: Credits total is total_deposits and Debits total is total_withdrawals. Use the printed header totals; do not recompute them from transaction rows.',
-  'TD transaction direction is controlled only by the printed CHEQUE/DEBIT versus DEPOSIT/CREDIT columns.',
-  'Preserve every visible transaction required for recurrence and risk analysis, including LN PYMT, LN PYT INT, LN PYT PRI, RBC LOAN PYMT LOAN, BDC BUS, JOURNEY/ONDECK BUS, tax/government lines, insurance, transfers, NSF/return lines, deposits and financing credits.',
-  'TD loan abbreviations are financing signals: LN PYMT, LN PYT INT, LN PYT PRI, LOAN PYMT, LOAN PAYMENT, and explicit LOAN/MORTGAGE/LOC/LINE OF CREDIT/MCA/LEASE/FINANCING wording.',
+  'TD statement direction is controlled only by the printed CHEQUE/DEBIT versus DEPOSIT/CREDIT columns.',
+  'IMPORTANT TD FORMAT RULE: the Credits and Debits boxes printed at the bottom of each activity page are PAGE SUBTOTALS, not whole-statement totals. For a multi-page TD statement, total_deposits is the sum of every printed page Credits amount and total_withdrawals is the sum of every printed page Debits amount. Never use only the first or last page subtotal as the statement total.',
+  'The TD lock step recalculates total_deposits and total_withdrawals deterministically from those printed page subtotal boxes after extraction, so preserve the full statement text and page structure accurately.',
+  'Preserve every visible transaction required for recurrence and risk analysis, including standalone LOAN debits, LN PYMT, LN PYT INT, LN PYT PRI, RBC LOAN PYMT LOAN, BDC BUS, JOURNEY/ONDECK BUS, tax/government lines, insurance, transfers, NSF/return lines, deposits and financing credits.',
+  'TD loan abbreviations are financing signals: standalone LOAN, LN PYMT, LN PYT INT, LN PYT PRI, LOAN PYMT, LOAN PAYMENT, and explicit LOAN/MORTGAGE/LOC/LINE OF CREDIT/MCA/LEASE/FINANCING wording.',
   'A numbered TD loan reference such as *602099601 or 900017902 is a strong debt identity. Repeated payments with the same reference are the same obligation even if wording varies between LN PYMT, LN PYT PRI or LN PYT INT. Principal and interest lines sharing the same reference are components of the same loan obligation and their monthly cash outflow is combined by the shared Banking Core.',
+  'A standalone debit printed simply as LOAN is an explicit financing candidate. It is not a confirmed monthly obligation unless recurrence is observed. Same or near-identical amount plus recurrence can confirm that specific standalone-loan stream.',
   'LN PYMT-C is a returned/reversed loan-payment CREDIT, not revenue. LN RTN FEE is a fee/risk event. Preserve both exactly; TD return-netting can be applied deterministically during revalidation without changing the printed facts.',
   'NSF PAID FEE, NSF RETURN FEE, LN RTN FEE, OVERDRAFT INTEREST and PAYMENT COVERAGE FEE are risk/fee events, not financing debt service by themselves.',
   'BDC BUS is a financing-obligation candidate. JOURNEY/ONDECK BUS is a financing/MCA candidate. They must recur before a fixed monthly equivalent is confirmed.',
@@ -20,7 +22,30 @@ function vfcTdExtractionRules_(){return [
   'Preserve cheque-image pages only as supporting images; do not duplicate a cheque transaction already listed in the statement activity.'
 ].join('\n');}
 
-function vfcTdLockFacts_(summary,text,fileName){return vfcLockPrintedStatementFacts_(summary,text);}
+/**
+ * TD page footer Credits/Debits are page subtotals. Sum every printed page box.
+ * This intentionally overrides AI-supplied totals so multi-page TD statements are stable.
+ */
+function vfcTdLockFacts_(summary,text,fileName){
+  const locked=vfcLockPrintedStatementFacts_(summary,text)||summary||{},totals=vfcTdPageTotals_(text);
+  if(totals.pageCount>0){
+    locked.total_deposits=totals.totalDeposits;
+    locked.total_withdrawals=totals.totalWithdrawals;
+    locked.td_page_subtotal_count=totals.pageCount;
+  }
+  return locked;
+}
+
+function vfcTdPageTotals_(text){
+  const s=String(text||'').replace(/\u00a0/g,' '),re=/\bCredits\s+(\d+)\s+([0-9][0-9,]*\.\d{2})\s+Debits\s+(\d+)\s+([0-9][0-9,]*\.\d{2})/gi;
+  let m,pageCount=0,totalDeposits=0,totalWithdrawals=0;
+  while((m=re.exec(s))!==null){
+    totalDeposits+=Number(String(m[2]).replace(/,/g,''))||0;
+    totalWithdrawals+=Number(String(m[4]).replace(/,/g,''))||0;
+    pageCount++;
+  }
+  return{pageCount:pageCount,totalDeposits:vfcRound_(totalDeposits,.01),totalWithdrawals:vfcRound_(totalWithdrawals,.01)};
+}
 
 function vfcTdClassifyDebit_(t){
   const raw=String(t.description||'').replace(/\s+/g,' ').trim();
@@ -56,9 +81,13 @@ function vfcTdClassifyDebit_(t){
     const n=vfcTdLoanReference_(s);family='FINANCING';entityKey=n?'TD_LOAN_'+n:'TD_FINANCE_'+vfcCounterpartyKey_(cp||raw);label=n?'TD Loan '+n:(cp||raw);
     debtJustification='Explicit TD loan-payment wording tied to a stable loan reference plus recurring observed cadence; principal and interest components with the same reference are one obligation.';
   }
-  else if(/\bMORTGAGE\b|\bLOC\b|LINE\s+OF\s+CREDIT|CREDIT\s+LINE|\bMCA\b|\bLEASE\b|\bFINANC(?:E|ING)?\b/.test(s)){
+  else if(/^LOAN\s*$/i.test(raw)){
+    const cents=Math.round(vfcNum_(t.amount)*100);family='FINANCING';entityKey='TD_STANDALONE_LOAN_'+cents;label='TD Loan';
+    debtJustification='Standalone TD LOAN debit is explicit financing evidence. It becomes confirmed monthly debt only if the same financing stream recurs with a regular cadence.';
+  }
+  else if(/\bMORTGAGE\b|\bLOC\b|LINE\s+OF\s+CREDIT|CREDIT\s+LINE|\bMCA\b|\bLEASE\b|\bFINANC(?:E|ING)?\b|\bLOAN\b/.test(s)){
     const n=vfcTdLoanReference_(s);family='FINANCING';entityKey=n?'TD_LOAN_'+n:'TD_FINANCE_'+vfcCounterpartyKey_(cp||raw);label=n?'TD Loan '+n:(cp||raw);
-    debtJustification='Explicit mortgage/LOC/financing/lease/MCA wording plus recurring observed cadence.';
+    debtJustification='Explicit loan/mortgage/LOC/financing/lease/MCA wording plus recurring observed cadence.';
   }
   else if(/\bPAD\b|PRE[- ]?AUTH/.test(s)){
     family='OTHER';entityKey='TD_OTHER_PAD_'+vfcCounterpartyKey_(cp||raw);label=cp||raw;
@@ -84,7 +113,7 @@ function vfcTdKnownFinancingCredit_(t){
 }
 
 function vfcTdStrongEntityKey_(key){
-  return /^(TD_JOURNEY_ONDECK|TD_BDC|TD_RBC_LOAN_PAYMENT|TD_LOAN_|TD_FINANCE_)/.test(String(key||'').toUpperCase());
+  return /^(TD_JOURNEY_ONDECK|TD_BDC|TD_RBC_LOAN_PAYMENT|TD_LOAN_|TD_FINANCE_|TD_STANDALONE_LOAN_)/.test(String(key||'').toUpperCase());
 }
 
 function vfcTdIsReturnedFinancingCredit_(t){
