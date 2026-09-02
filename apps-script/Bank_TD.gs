@@ -1,22 +1,24 @@
-/** TD v1.3 — CANDIDATE / REVALIDATION REQUIRED. */
-function vfcTdBankProfile_(){return{id:'TD',label:'TD',status:'CANDIDATE',rulesVersion:'TD-1.3-CANDIDATE',aliases:['TD CANADA TRUST','THE TORONTO-DOMINION BANK','TORONTO-DOMINION','TD BANK','TD CANADA TRUST BUSINESS']};}
+/** TD v1.4 — CANDIDATE / REVALIDATION REQUIRED. */
+function vfcTdBankProfile_(){return{id:'TD',label:'TD',status:'CANDIDATE',rulesVersion:'TD-1.4-CANDIDATE',aliases:['TD CANADA TRUST','THE TORONTO-DOMINION BANK','TORONTO-DOMINION','TD BANK','TD CANADA TRUST BUSINESS']};}
 
 function vfcTdExtractionRules_(){return [
   'TD statement direction is controlled only by the printed CHEQUE/DEBIT versus DEPOSIT/CREDIT columns.',
   'IMPORTANT TD FORMAT RULE: the Credits and Debits boxes printed at the bottom of each activity page are PAGE SUBTOTALS, not whole-statement totals. For a multi-page TD statement, total_deposits is the sum of every printed page Credits amount and total_withdrawals is the sum of every printed page Debits amount.',
   'The TD lock step independently reads the statement period, first BALANCE FORWARD, every page subtotal, deterministic closing balance, and monthly minimum OD flag. Do not apply RBC/generic balance-lock assumptions to TD continuation pages because each page repeats BALANCE FORWARD.',
-  'Preserve every visible transaction required for recurrence and risk analysis, including standalone LOAN debits, LN PYMT, LN PYT INT, LN PYT PRI, RBC LOAN PYMT LOAN, BDC BUS, JOURNEY/ONDECK BUS, tax/government lines, insurance, transfers, NSF/return lines, deposits and financing credits.',
+  'Preserve every visible transaction required for recurrence and risk analysis, including standalone LOAN debits, LN PYMT, LN PYT INT, LN PYT PRI, RBC LOAN PYMT LOAN, TDCT LOC, FIRST INSURANCE LOAN, FORD CREDIT CA APY, BDC BUS, JOURNEY/ONDECK BUS, tax/government lines, insurance, transfers, NSF/return lines, deposits and financing credits.',
   'TD loan abbreviations are financing signals: standalone LOAN, LN PYMT, LN PYT INT, LN PYT PRI, LOAN PYMT, LOAN PAYMENT, and explicit LOAN/MORTGAGE/LOC/LINE OF CREDIT/MCA/LEASE/FINANCING wording.',
   'A numbered TD loan reference such as *602099601 or 900017902 is a strong debt identity. Repeated payments with the same reference are the same obligation even if wording varies between LN PYMT, LN PYT PRI or LN PYT INT. Principal and interest lines sharing the same reference are components of the same loan obligation.',
   'A standalone debit printed simply as LOAN is explicit financing evidence but does not become confirmed monthly debt until recurrence is observed.',
-  'LN PYMT-C and RTN NSF are returned/reversal credits, not operating revenue. LN RTN FEE, NSF PAID FEE, NSF RETURN FEE, NSF and overdraft fees are risk/fee events, not debt service by themselves.',
+  'LN PYMT-C, RTN NSF and RTN#... FUNDS HELD are returned/reversal credits, not operating revenue. LN RTN FEE, NSF PAID FEE, NSF RETURN FEE, NSF and overdraft fees are risk/fee events, not debt service by themselves.',
+  'FIRST INSURANCE LOAN is explicit loan wording and is financing when recurring. Ordinary ICBC INS or insurance-premium descriptions without loan wording remain informational.',
+  'FORD CREDIT CA APY is a financing-obligation candidate. It must recur before a fixed monthly equivalent is confirmed.',
   'BDC BUS is a financing-obligation candidate. JOURNEY/ONDECK BUS is a financing/MCA candidate. They must recur before a fixed monthly equivalent is confirmed.',
-  'RBC LOAN PYMT LOAN is a payment to an RBC loan and is a financing-obligation candidate even though it appears on a TD statement.',
+  'RBC LOAN PYMT LOAN is a payment to an RBC loan and is a financing-obligation candidate even though it appears on a TD statement. When no loan reference is printed, materially different payment amounts are kept as separate observed streams so catch-up payments do not inflate the regular monthly obligation.',
   'EMPTX, GST-B, GST-P, TXBAL, TAX PYT and similar government remittances are TAX/informational, not financing debt.',
-  'ICBC INS and other insurance descriptions are informational, not financing debt.',
+  'ICBC INS and other insurance descriptions without explicit loan wording are informational, not financing debt.',
   'TFR-FR C/C, TFR-TO C/C, E-TRANSFER, SEND E-TFR, GC ... TRANSFER and ordinary cheques are transfers, not debt. A transfer remains non-debt even when its memo contains the word LOAN.',
   'Same or near-identical dollar amount by itself NEVER proves debt.',
-  'MONTHLY PLAN FEE, BUS LINE FEE and ordinary service/transaction fees are not debt obligations.',
+  'MONTHLY PLAN FEE, BUS LINE FEE, TAX PYT FEE and ordinary service/transaction fees are not debt obligations.',
   'A financing CREDIT must be printed in the DEPOSIT/CREDIT column and contain explicit financing wording or a known financing entity. Ordinary deposits and transfers are not financing merely because they are large.',
   'Preserve cheque-image pages only as supporting images; do not duplicate a cheque transaction already listed in the statement activity.'
 ].join('\n');}
@@ -76,19 +78,21 @@ function vfcTdNegativeBalanceFlag_(text){
 }
 
 function vfcTdClassifyDebit_(t){
-  const raw=String(t.description||'').replace(/\s+/g,' ').trim(),s=raw.toUpperCase(),cp=String(t.counterparty||'').replace(/\s+/g,' ').trim();
+  const raw=String(t.description||'').replace(/\s+/g,' ').trim(),s=raw.toUpperCase(),cp=String(t.counterparty||'').replace(/\s+/g,' ').trim(),cents=Math.round(vfcNum_(t.amount)*100);
   if(/NSF\s+(?:PAID|RETURN)\s+FEE|LN\s+RTN\s+FEE|TAX\s+PYT\s+FEE|OVERDRAFT\s+INTEREST|PAYMENT\s+COVERAGE\s+FEE|MONTHLY\s+PLAN\s+FEE|BUS\s+LINE\s+FEE|SERVICE\s+CHARGE|TRANSACTION\s+FEE|^NSF(?:\s|$)/.test(s))return null;
 
   let family='',entityKey='',label=cp||raw,debtJustification='';
   if(/JOURNEY|ONDECK/.test(s)){family='MCA';entityKey='TD_JOURNEY_ONDECK';label='Journey / OnDeck';debtJustification='Known financing/MCA entity on a TD statement plus recurring observed payment cadence.';}
   else if(/\bBDC\b/.test(s)){family='FINANCING';entityKey='TD_BDC';label='BDC';debtJustification='Known business lender on a TD statement plus recurring observed payment cadence.';}
-  else if(/RBC\s+LOAN\s+PYMT\s+LOAN/.test(s)){family='FINANCING';entityKey='TD_RBC_LOAN_PAYMENT';label='RBC Loan Payment';debtJustification='Explicit RBC loan-payment wording on the TD statement plus recurring observed cadence.';}
+  else if(/FORD\s+CREDIT/.test(s)){family='FINANCING';entityKey='TD_FORD_CREDIT';label='Ford Credit';debtJustification='Known vehicle-finance counterparty on a TD statement plus recurring observed payment cadence.';}
+  else if(/RBC\s+LOAN\s+PYMT\s+LOAN/.test(s)){family='FINANCING';entityKey='TD_RBC_LOAN_PAYMENT_'+cents;label='RBC Loan Payment';debtJustification='Explicit RBC loan-payment wording on the TD statement plus recurring observed cadence. Amount-separated identity prevents one-time catch-up payments from inflating the regular monthly stream when no reference is printed.';}
   else if(/\bLN\s+PYT\s+(?:INT|PRI)\b|\bLN\s+PYMT\b|\bLOAN\s+(?:PYMT|PAYMENT)\b/.test(s)){
-    const n=vfcTdLoanReference_(s);family='FINANCING';entityKey=n?'TD_LOAN_'+n:'TD_FINANCE_'+vfcCounterpartyKey_(cp||raw);label=n?'TD Loan '+n:(cp||raw);debtJustification='Explicit TD loan-payment wording tied to a stable loan reference plus recurring observed cadence; principal and interest components with the same reference are one obligation.';
+    const n=vfcTdLoanReference_(s);family='FINANCING';entityKey=n?'TD_LOAN_'+n:'TD_UNREFERENCED_LOAN_'+cents;label=n?'TD Loan '+n:(cp||raw);debtJustification='Explicit TD loan-payment wording tied to a stable loan reference plus recurring observed cadence; principal and interest components with the same reference are one obligation. Unreferenced streams are kept amount-separated to avoid merging unrelated loans.';
   }
-  else if(/^LOAN\s*$/i.test(raw)){const cents=Math.round(vfcNum_(t.amount)*100);family='FINANCING';entityKey='TD_STANDALONE_LOAN_'+cents;label='TD Loan';debtJustification='Standalone TD LOAN debit is explicit financing evidence. It becomes confirmed monthly debt only if the same financing stream recurs with a regular cadence.';}
+  else if(/^LOAN\s*$/i.test(raw)){family='FINANCING';entityKey='TD_STANDALONE_LOAN_'+cents;label='TD Loan';debtJustification='Standalone TD LOAN debit is explicit financing evidence. It becomes confirmed monthly debt only if the same financing stream recurs with a regular cadence.';}
   else if(vfcTdIsTransferDebit_(s))return null;
   else if(/\bEMPTX\b|\bGST[- ]?[BP]?\b|\bTXBAL\b|TAX\s+PYT|\bCRA\b|\bCCRA\b|\bHST\b/.test(s)){family='TAX';entityKey='TD_OTHER_TAX_'+vfcCounterpartyKey_(cp||raw);label=cp||raw;}
+  else if(/\bINSURANCE\b.*\bLOAN\b|\bLOAN\b.*\bINSURANCE\b/.test(s)){family='FINANCING';entityKey='TD_INSURANCE_LOAN_'+vfcCounterpartyKey_(cp||raw);label=cp||raw;debtJustification='Explicit insurance-loan wording plus recurring observed payment cadence.';}
   else if(/\bICBC\s+INS\b|INSURANCE|PREMIUM\s+FIN/.test(s)){family='OTHER';entityKey='TD_OTHER_INSURANCE_'+vfcCounterpartyKey_(cp||raw);label=cp||raw;}
   else if(/CREDIT\s+CARD|VISA|MASTERCARD|AMERICAN\s+EXPRESS|\bAMEX\b|\bMBNA\b/.test(s)){family='OTHER';entityKey='TD_OTHER_CARD_'+vfcCounterpartyKey_(cp||raw);label=cp||raw;}
   else if(/\bMORTGAGE\b|\bLOC\b|LINE\s+OF\s+CREDIT|CREDIT\s+LINE|\bMCA\b|\bLEASE\b|\bFINANC(?:E|ING)?\b|\bLOAN\b/.test(s)){
@@ -110,8 +114,8 @@ function vfcTdKnownFinancingCredit_(t){
   return /JOURNEY|ONDECK|\bBDC\b|LOAN\s+(?:ADVANCE|PROCEEDS|CREDIT)|\bMCA\b|\bMORTGAGE\b|\bLOC\b|LINE\s+OF\s+CREDIT|CREDIT\s+LINE|\bFINANC(?:E|ING)?\b/.test(s);
 }
 
-function vfcTdStrongEntityKey_(key){return/^(TD_JOURNEY_ONDECK|TD_BDC|TD_RBC_LOAN_PAYMENT|TD_LOAN_|TD_FINANCE_|TD_STANDALONE_LOAN_)/.test(String(key||'').toUpperCase());}
+function vfcTdStrongEntityKey_(key){return/^(TD_JOURNEY_ONDECK|TD_BDC|TD_FORD_CREDIT|TD_RBC_LOAN_PAYMENT_|TD_INSURANCE_LOAN_|TD_LOAN_|TD_UNREFERENCED_LOAN_|TD_FINANCE_|TD_STANDALONE_LOAN_)/.test(String(key||'').toUpperCase());}
 
 function vfcTdIsReturnedFinancingCredit_(t){
-  const s=String((t&&t.description)||'').toUpperCase();return/\bLN\s+PYMT-C\b|\bLOAN\s+PYMT-C\b|\bLOAN\s+PAYMENT-C\b|^RTN\s+NSF\b/.test(s);
+  const s=String((t&&t.description)||'').toUpperCase();return/\bLN\s+PYMT-C\b|\bLOAN\s+PYMT-C\b|\bLOAN\s+PAYMENT-C\b|^RTN\s+NSF\b|^RTN#?\d+\s+FUNDS\s+HELD\b|RETURNED\s+CHEQUE|CHEQUE\s+RETURNED/.test(s);
 }
