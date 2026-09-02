@@ -1,10 +1,11 @@
-/** TD v1.4 — CANDIDATE / REVALIDATION REQUIRED. */
-function vfcTdBankProfile_(){return{id:'TD',label:'TD',status:'CANDIDATE',rulesVersion:'TD-1.4-CANDIDATE',aliases:['TD CANADA TRUST','THE TORONTO-DOMINION BANK','TORONTO-DOMINION','TD BANK','TD CANADA TRUST BUSINESS']};}
+/** TD v1.5 — CANDIDATE / REVALIDATION REQUIRED. */
+function vfcTdBankProfile_(){return{id:'TD',label:'TD',status:'CANDIDATE',rulesVersion:'TD-1.5-CANDIDATE',aliases:['TD CANADA TRUST','THE TORONTO-DOMINION BANK','TORONTO-DOMINION','TD BANK','TD CANADA TRUST BUSINESS']};}
 
 function vfcTdExtractionRules_(){return [
   'TD statement direction is controlled only by the printed CHEQUE/DEBIT versus DEPOSIT/CREDIT columns.',
   'IMPORTANT TD FORMAT RULE: the Credits and Debits boxes printed at the bottom of each activity page are PAGE SUBTOTALS, not whole-statement totals. For a multi-page TD statement, total_deposits is the sum of every printed page Credits amount and total_withdrawals is the sum of every printed page Debits amount.',
-  'The TD lock step independently reads the statement period, first BALANCE FORWARD, every page subtotal, deterministic closing balance, and monthly minimum OD flag. Do not apply RBC/generic balance-lock assumptions to TD continuation pages because each page repeats BALANCE FORWARD.',
+  'TD Page X of Y includes cheque-image support pages. Cheque-image pages do not contain Credits/Debits activity subtotals and must not be counted as missing activity pages or duplicated as transactions.',
+  'The TD lock step independently reads the statement period, first BALANCE FORWARD, every activity-page subtotal, deterministic closing balance, and monthly minimum OD flag. Do not apply RBC/generic balance-lock assumptions to TD continuation pages because each activity page repeats BALANCE FORWARD.',
   'Preserve every visible transaction required for recurrence and risk analysis, including standalone LOAN debits, LN PYMT, LN PYT INT, LN PYT PRI, RBC LOAN PYMT LOAN, TDCT LOC, FIRST INSURANCE LOAN, FORD CREDIT CA APY, BDC BUS, JOURNEY/ONDECK BUS, tax/government lines, insurance, transfers, NSF/return lines, deposits and financing credits.',
   'TD loan abbreviations are financing signals: standalone LOAN, LN PYMT, LN PYT INT, LN PYT PRI, LOAN PYMT, LOAN PAYMENT, and explicit LOAN/MORTGAGE/LOC/LINE OF CREDIT/MCA/LEASE/FINANCING wording.',
   'A numbered TD loan reference such as *602099601 or 900017902 is a strong debt identity. Repeated payments with the same reference are the same obligation even if wording varies between LN PYMT, LN PYT PRI or LN PYT INT. Principal and interest lines sharing the same reference are components of the same loan obligation.',
@@ -28,15 +29,14 @@ function vfcTdLockFacts_(summary,text,fileName){
   if(dates.startDate)locked.statement_start_date=dates.startDate;
   if(dates.endDate)locked.statement_end_date=dates.endDate;
   if(opening!==null)locked.opening_balance=opening;
-  if(totals.expectedPageCount>0&&!totals.complete){
-    throw new Error('TD printed page subtotals could not be fully verified for '+String(fileName||'statement')+'. Expected '+totals.expectedPageCount+' page(s), found '+totals.creditCount+' Credits subtotal(s) and '+totals.debitCount+' Debits subtotal(s).');
+  if(!totals.complete){
+    throw new Error('TD printed activity-page subtotals could not be fully verified for '+String(fileName||'statement')+'. PDF pages: '+totals.declaredPageCount+', cheque-image pages: '+totals.chequeImagePageCount+', expected activity pages: '+totals.expectedActivityPageCount+', found '+totals.creditCount+' Credits subtotal(s) and '+totals.debitCount+' Debits subtotal(s).');
   }
-  if(totals.pageCount>0){
-    locked.total_deposits=totals.totalDeposits;
-    locked.total_withdrawals=totals.totalWithdrawals;
-    locked.td_page_subtotal_count=totals.pageCount;
-    if(opening!==null)locked.closing_balance=vfcRound_(opening+totals.totalDeposits-totals.totalWithdrawals,.01);
-  }
+  locked.total_deposits=totals.totalDeposits;
+  locked.total_withdrawals=totals.totalWithdrawals;
+  locked.td_page_subtotal_count=totals.pageCount;
+  locked.td_cheque_image_page_count=totals.chequeImagePageCount;
+  if(opening!==null)locked.closing_balance=vfcRound_(opening+totals.totalDeposits-totals.totalWithdrawals,.01);
   if(negative!==null)locked.negative_balance_detected=negative;
   return locked;
 }
@@ -57,19 +57,23 @@ function vfcTdOpeningBalance_(text){
   if(!m)return null;const n=Number(String(m[1]).replace(/,/g,''));if(!Number.isFinite(n))return null;return m[2]? -n:n;
 }
 
-function vfcTdDeclaredPageCount_(text){
-  const s=String(text||''),re=/\bPage\s+\d+\s+of\s+(\d+)\b/gi;let m,max=0;while((m=re.exec(s))!==null)max=Math.max(max,Number(m[1])||0);return max;
+function vfcTdPageStructure_(text){
+  const s=String(text||''),re=/\bPage\s+(\d+)\s+of\s+(\d+)\b/gi,marks=[];let m,declared=0;
+  while((m=re.exec(s))!==null){marks.push({page:Number(m[1])||0,total:Number(m[2])||0,index:m.index,end:re.lastIndex});declared=Math.max(declared,Number(m[2])||0);}
+  let chequeImagePageCount=0,activityPageCount=0,unknownPageCount=0;
+  marks.forEach(function(mark,i){const segment=s.slice(mark.index,i+1<marks.length?marks[i+1].index:s.length),hasCredits=/\bCredits\s+\d+\s+\$?[0-9][0-9,]*\.\d{2}\b/i.test(segment),hasDebits=/\bDebits\s+\d+\s+\$?[0-9][0-9,]*\.\d{2}\b/i.test(segment),hasChequeImage=/\bCHEQUE\s*#\s*\d+/i.test(segment);if(hasCredits||hasDebits)activityPageCount++;else if(hasChequeImage)chequeImagePageCount++;else unknownPageCount++;});
+  const expectedActivityPageCount=declared?Math.max(0,declared-chequeImagePageCount):activityPageCount;
+  return{declaredPageCount:declared,activityPageCount:activityPageCount,chequeImagePageCount:chequeImagePageCount,unknownPageCount:unknownPageCount,expectedActivityPageCount:expectedActivityPageCount};
 }
 
 function vfcTdPageTotals_(text){
-  const s=String(text||'').replace(/\u00a0/g,' '),credits=[],debits=[],expectedPageCount=vfcTdDeclaredPageCount_(s);
-  let m,re=/\bCredits\s+\d+\s+\$?([0-9][0-9,]*\.\d{2})\b/gi;
+  const s=String(text||'').replace(/\u00a0/g,' '),credits=[],debits=[],structure=vfcTdPageStructure_(s);let m,re=/\bCredits\s+\d+\s+\$?([0-9][0-9,]*\.\d{2})\b/gi;
   while((m=re.exec(s))!==null)credits.push(Number(String(m[1]).replace(/,/g,''))||0);
   re=/\bDebits\s+\d+\s+\$?([0-9][0-9,]*\.\d{2})\b/gi;
   while((m=re.exec(s))!==null)debits.push(Number(String(m[1]).replace(/,/g,''))||0);
-  const same=credits.length>0&&credits.length===debits.length,complete=same&&(!expectedPageCount||credits.length===expectedPageCount);
-  if(!complete)return{pageCount:0,totalDeposits:0,totalWithdrawals:0,creditCount:credits.length,debitCount:debits.length,expectedPageCount:expectedPageCount,complete:false};
-  return{pageCount:credits.length,totalDeposits:vfcRound_(credits.reduce(function(a,b){return a+b;},0),.01),totalWithdrawals:vfcRound_(debits.reduce(function(a,b){return a+b;},0),.01),creditCount:credits.length,debitCount:debits.length,expectedPageCount:expectedPageCount,complete:true};
+  const same=credits.length>0&&credits.length===debits.length,expected=structure.expectedActivityPageCount,complete=same&&(!expected||credits.length===expected);
+  const base={pageCount:complete?credits.length:0,totalDeposits:complete?vfcRound_(credits.reduce(function(a,b){return a+b;},0),.01):0,totalWithdrawals:complete?vfcRound_(debits.reduce(function(a,b){return a+b;},0),.01):0,creditCount:credits.length,debitCount:debits.length,complete:complete};
+  return Object.assign(base,structure);
 }
 
 function vfcTdNegativeBalanceFlag_(text){
