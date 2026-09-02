@@ -51,7 +51,7 @@ function vfcTdIsoParts_(month,day,year){
 }
 
 function vfcTdOpeningBalance_(text){
-  const s=String(text||'').replace(/\u00a0/g,' '),m=s.match(/\bBALANCE\s+FORWARD(?:\s+[A-Z]{3}\s*\d{1,2}|\s+[A-Z]{3}\d{1,2})?\s+\$?([0-9][0-9,]*\.\d{2})(OD)?\b/i);
+  const s=String(text||'').replace(/\u00a0/g,' '),m=s.match(/\bBALANCE\s+FORWARD(?:\s+[A-Z]{3}\s*\d{1,2}|\s+[A-Z]{3}\d{1,2})?\s+\$?([0-9][0-9,]*\.\d{2})\s*(OD)?\b/i);
   if(!m)return null;const n=Number(String(m[1]).replace(/,/g,''));if(!Number.isFinite(n))return null;return m[2]? -n:n;
 }
 
@@ -71,13 +71,13 @@ function vfcTdPageTotals_(text){
 }
 
 function vfcTdNegativeBalanceFlag_(text){
-  const s=String(text||'').replace(/\u00a0/g,' '),m=s.match(/MONTHLY\s+MIN\.\s+BAL\.\s+\$?([0-9][0-9,]*\.\d{2})(OD)?\b/i);
-  if(!m)return null;return!!m[2];
+  const s=String(text||'').replace(/\u00a0/g,' '),m=s.match(/MONTHLY\s+MIN\.\s+BAL\.\s+\$?([0-9][0-9,]*\.\d{2})\s*(OD)?\b/i);
+  if(m)return!!m[2];if(/\b[0-9][0-9,]*\.\d{2}\s*OD\b/i.test(s))return true;return null;
 }
 
 function vfcTdClassifyDebit_(t){
   const raw=String(t.description||'').replace(/\s+/g,' ').trim(),s=raw.toUpperCase(),cp=String(t.counterparty||'').replace(/\s+/g,' ').trim();
-  if(/NSF\s+(?:PAID|RETURN)\s+FEE|LN\s+RTN\s+FEE|OVERDRAFT\s+INTEREST|PAYMENT\s+COVERAGE\s+FEE|MONTHLY\s+PLAN\s+FEE|BUS\s+LINE\s+FEE|SERVICE\s+CHARGE|TRANSACTION\s+FEE|^NSF(?:\s|$)/.test(s))return null;
+  if(/NSF\s+(?:PAID|RETURN)\s+FEE|LN\s+RTN\s+FEE|TAX\s+PYT\s+FEE|OVERDRAFT\s+INTEREST|PAYMENT\s+COVERAGE\s+FEE|MONTHLY\s+PLAN\s+FEE|BUS\s+LINE\s+FEE|SERVICE\s+CHARGE|TRANSACTION\s+FEE|^NSF(?:\s|$)/.test(s))return null;
 
   let family='',entityKey='',label=cp||raw,debtJustification='';
   if(/JOURNEY|ONDECK/.test(s)){family='MCA';entityKey='TD_JOURNEY_ONDECK';label='Journey / OnDeck';debtJustification='Known financing/MCA entity on a TD statement plus recurring observed payment cadence.';}
