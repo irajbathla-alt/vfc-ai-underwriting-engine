@@ -40,6 +40,12 @@ function runTdBankingSelfTests(){
     const t=vfcTdPageTotals_(text);equal(t.pageCount,5,'TD page subtotal count');truthy(t.complete,'TD subtotal completeness');close(t.totalDeposits,112701.67,.02,'TD total deposits');close(t.totalWithdrawals,97585.89,.02,'TD total withdrawals');return'deposits='+t.totalDeposits+', withdrawals='+t.totalWithdrawals;
   });
 
+  test('TD cheque-image pages are excluded from expected activity-page count',function(){
+    const text=['JUN 30/25 - JUL 31/25','BALANCE FORWARD JUN30 34.49','Page 1 of 2','Credits 7 24,121.00','Debits 18 18,350.24','MONTHLY MIN. BAL. $34.49','Page 2 of 2','CHEQUE # 00410 $1,064.92 CHEQUE # 00410','CHEQUE # 00413 $2,000.00 CHEQUE # 00413'].join('\n'),t=vfcTdPageTotals_(text);
+    equal(t.declaredPageCount,2,'TD declared page count');equal(t.chequeImagePageCount,1,'TD cheque-image page count');equal(t.expectedActivityPageCount,1,'TD expected activity pages');equal(t.pageCount,1,'TD subtotal page count');truthy(t.complete,'TD cheque-image statement completeness');
+    const s=vfcTdLockFacts_({},text,'new-age-july.pdf');close(s.total_deposits,24121,.001,'TD cheque-image deposits');close(s.total_withdrawals,18350.24,.001,'TD cheque-image withdrawals');close(s.closing_balance,5805.25,.001,'TD cheque-image closing');return'activity pages=1, cheque pages=1';
+  });
+
   test('TD lock deterministically sets dates opening closing and OD flag',function(){
     const text=['MAR 31/26 - APR 30/26','Page 1 of 2','Credits 13 11,441.88','Debits 18 8,762.88','MONTHLY MIN. BAL. $30.76OD','BALANCE FORWARD MAR31 3.63','Page 2 of 2','Credits 1 2,520.00','Debits 10 2,142.71','MONTHLY MIN. BAL. $30.76OD','BALANCE FORWARD APR27 2,682.63'].join('\n');
     const s=vfcTdLockFacts_({closing_balance:999999,negative_balance_detected:false},text,'test.pdf');equal(s.statement_start_date,'2026-03-31','TD start date');equal(s.statement_end_date,'2026-04-30','TD end date');close(s.opening_balance,3.63,.001,'TD opening');close(s.total_deposits,13961.88,.001,'TD deposits');close(s.total_withdrawals,10905.59,.001,'TD withdrawals');close(s.closing_balance,3059.92,.001,'TD deterministic closing');equal(s.negative_balance_detected,true,'TD negative flag');return'closing='+s.closing_balance;
