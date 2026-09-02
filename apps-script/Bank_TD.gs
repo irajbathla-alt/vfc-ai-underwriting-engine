@@ -10,7 +10,7 @@ function vfcTdExtractionRules_(){return [
   'TD loan abbreviations are financing signals: standalone LOAN, LN PYMT, LN PYT INT, LN PYT PRI, LOAN PYMT, LOAN PAYMENT, and explicit LOAN/MORTGAGE/LOC/LINE OF CREDIT/MCA/LEASE/FINANCING wording.',
   'A numbered TD loan reference such as *602099601 or 900017902 is a strong debt identity. Repeated payments with the same reference are the same obligation even if wording varies between LN PYMT, LN PYT PRI or LN PYT INT. Principal and interest lines sharing the same reference are components of the same loan obligation.',
   'A standalone debit printed simply as LOAN is explicit financing evidence but does not become confirmed monthly debt until recurrence is observed.',
-  'LN PYMT-C, RTN NSF and RTN#... FUNDS HELD are returned/reversal credits, not operating revenue. LN RTN FEE, NSF PAID FEE, NSF RETURN FEE, NSF and overdraft fees are risk/fee events, not debt service by themselves.',
+  'LN PYMT-C, RTN NSF, RTN#... NSF and RTN#... FUNDS HELD are returned/reversal credits, not operating revenue. LN RTN FEE, NSF PAID FEE, NSF RETURN FEE, NSF and overdraft fees are risk/fee events, not debt service by themselves.',
   'FIRST INSURANCE LOAN is explicit loan wording and is financing when recurring. Ordinary ICBC INS or insurance-premium descriptions without loan wording remain informational.',
   'FORD CREDIT CA APY is a financing-obligation candidate. It must recur before a fixed monthly equivalent is confirmed.',
   'BDC BUS is a financing-obligation candidate. JOURNEY/ONDECK BUS is a financing/MCA candidate. They must recur before a fixed monthly equivalent is confirmed.',
@@ -121,5 +121,5 @@ function vfcTdKnownFinancingCredit_(t){
 function vfcTdStrongEntityKey_(key){return/^(TD_JOURNEY_ONDECK|TD_BDC|TD_FORD_CREDIT|TD_RBC_LOAN_PAYMENT_|TD_INSURANCE_LOAN_|TD_LOAN_|TD_UNREFERENCED_LOAN_|TD_FINANCE_|TD_STANDALONE_LOAN_)/.test(String(key||'').toUpperCase());}
 
 function vfcTdIsReturnedFinancingCredit_(t){
-  const s=String((t&&t.description)||'').toUpperCase();return/\bLN\s+PYMT-C\b|\bLOAN\s+PYMT-C\b|\bLOAN\s+PAYMENT-C\b|^RTN\s+NSF\b|^RTN#?\d+\s+FUNDS\s+HELD\b|RETURNED\s+CHEQUE|CHEQUE\s+RETURNED/.test(s);
+  const s=String((t&&t.description)||'').toUpperCase();return/\bLN\s+PYMT-C\b|\bLOAN\s+PYMT-C\b|\bLOAN\s+PAYMENT-C\b|^RTN\s+NSF\b|^RTN#?\d+\s+(?:NSF|FUNDS\s+HELD)\b|RETURNED\s+CHEQUE|CHEQUE\s+RETURNED/.test(s);
 }
