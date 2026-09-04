@@ -1,5 +1,5 @@
 /**
- * TD BANK ENGINE v1.6 — CANDIDATE
+ * TD BANK ENGINE v1.7 — CANDIDATE
  *
  * One permanent TD module. All TD-specific behavior lives here:
  * - extraction instructions
@@ -17,7 +17,7 @@ function vfcTdBankProfile_(){
     id:'TD',
     label:'TD',
     status:'CANDIDATE',
-    rulesVersion:'TD-1.6-CANDIDATE',
+    rulesVersion:'TD-1.7-CANDIDATE',
     aliases:['TD CANADA TRUST','THE TORONTO-DOMINION BANK','TORONTO-DOMINION','TD BANK','TD CANADA TRUST BUSINESS']
   };
 }
@@ -114,7 +114,7 @@ function vfcTdPageStructure_(text){
     const segment=s.slice(mark.index,i+1<marks.length?marks[i+1].index:s.length);
     const hasCredits=/\bCredits\s+\d+\s+\$?[0-9][0-9,]*\.\d{2}\b/i.test(segment);
     const hasDebits=/\bDebits\s+\d+\s+\$?[0-9][0-9,]*\.\d{2}\b/i.test(segment);
-    const hasChequeImage=/\bCHEQUE\s*#\s*\d+/i.test(segment);
+    const hasChequeImage=/\b(?:CHEQUE|CHQ)\s*#\s*\d+/i.test(segment);
     if(hasCredits||hasDebits)activityPageCount++;
     else if(hasChequeImage)chequeImagePageCount++;
     else unknownPageCount++;
@@ -122,7 +122,7 @@ function vfcTdPageStructure_(text){
 
   /* Some Drive OCR exports omit the Page marker on image-only pages. */
   const unmarkedPages=Math.max(0,declared-marks.length);
-  if(unmarkedPages>0&&/\bCHEQUE\s*#\s*\d+/i.test(s))chequeImagePageCount+=unmarkedPages;
+  if(unmarkedPages>0&&/\b(?:CHEQUE|CHQ)\s*#\s*\d+/i.test(s))chequeImagePageCount+=unmarkedPages;
 
   const expectedActivityPageCount=declared?Math.max(0,declared-chequeImagePageCount):activityPageCount;
   return{
@@ -296,6 +296,33 @@ function runTdBankingSelfTests(){
   test('TD multi-page subtotals sum to whole-statement totals',function(){const text=['Page 1 of 5','Credits 3 33,132.31 Debits 28 39,968.90','Page 2 of 5','Credits 2 15,043.38 Debits 29 16,693.00','Page 3 of 5','Credits 2 18,603.11 Debits 29 16,908.00','Page 4 of 5','Credits 1 20,198.13 Debits 30 11,199.04','Page 5 of 5','Credits 2 25,724.74 Debits 26 12,816.95'].join('\n'),t=vfcTdPageTotals_(text);equal(t.pageCount,5,'page count');truthy(t.complete,'complete');close(t.totalDeposits,112701.67,.02,'deposits');close(t.totalWithdrawals,97585.89,.02,'withdrawals');return'deposits='+t.totalDeposits;});
 
   test('TD cheque-image pages do not look like missing activity pages',function(){const text=['JUN 30/25 - JUL 31/25','BALANCE FORWARD JUN30 34.49','Page 1 of 2','Credits 7 24,121.00','Debits 18 18,350.24','MONTHLY MIN. BAL. $34.49','CHEQUE # 00410 $1,064.92 CHEQUE # 00410','CHEQUE # 00413 $2,000.00 CHEQUE # 00413'].join('\n'),t=vfcTdPageTotals_(text);equal(t.declaredPageCount,2,'declared pages');equal(t.chequeImagePageCount,1,'cheque pages');equal(t.expectedActivityPageCount,1,'expected activity pages');truthy(t.complete,'cheque-image completeness');const s=vfcTdLockFacts_({},text,'new-age-july.pdf');close(s.total_deposits,24121,.001,'deposits');close(s.total_withdrawals,18350.24,.001,'withdrawals');close(s.closing_balance,5805.25,.001,'closing');return'activity=1, cheque=1';});
+
+  test('Lotus Pharmacy 7-page TD statement has 6 activity pages plus one cheque-image page',function(){
+    const text=[
+      'APR 30/25 - MAY 30/25','BALANCE FORWARD APR30 13,860.16OD',
+      'Page 1 of 7','Credits 20 30,324.40','Debits 11 9,110.85',
+      'Page 2 of 7','Credits 23 27,337.51','Debits 8 62,985.31',
+      'Page 3 of 7','Credits 27 29,595.72','Debits 4 10,631.20',
+      'Page 4 of 7','Credits 25 29,557.15','Debits 6 15,492.49',
+      'Page 5 of 7','Credits 23 34,578.29','Debits 8 72,099.88',
+      'Page 6 of 7','Credits 12 209,806.93','Debits 10 89,450.33',
+      'Page 7 of 7','9280-5229903','CHEQUE # 01866 $5,551.88 CHEQUE # 01866',
+      'MONTHLY MIN. BAL. $39,804.16OD'
+    ].join('\n');
+    const t=vfcTdPageTotals_(text);
+    equal(t.declaredPageCount,7,'Lotus declared pages');
+    equal(t.chequeImagePageCount,1,'Lotus cheque-image pages');
+    equal(t.expectedActivityPageCount,6,'Lotus expected activity pages');
+    equal(t.creditCount,6,'Lotus Credits subtotals');
+    equal(t.debitCount,6,'Lotus Debits subtotals');
+    truthy(t.complete,'Lotus statement completeness');
+    close(t.totalDeposits,361200.00,.02,'Lotus deposits');
+    close(t.totalWithdrawals,259770.06,.02,'Lotus withdrawals');
+    const s=vfcTdLockFacts_({},text,'TD_EVERY_DAY_B_BUSINESS_PLAN_9280-5229903_Apr_30-May_30_2025.pdf');
+    close(s.opening_balance,-13860.16,.02,'Lotus opening');
+    close(s.closing_balance,87569.78,.02,'Lotus closing');
+    return'activity=6, cheque=1, deposits='+t.totalDeposits+', withdrawals='+t.totalWithdrawals;
+  });
 
   test('TD lock sets dates opening closing and OD deterministically',function(){const text=['MAR 31/26 - APR 30/26','Page 1 of 2','Credits 13 11,441.88','Debits 18 8,762.88','MONTHLY MIN. BAL. $30.76OD','BALANCE FORWARD MAR31 3.63','Page 2 of 2','Credits 1 2,520.00','Debits 10 2,142.71','MONTHLY MIN. BAL. $30.76OD','BALANCE FORWARD APR27 2,682.63'].join('\n'),s=vfcTdLockFacts_({closing_balance:999999,negative_balance_detected:false},text,'test.pdf');equal(s.statement_start_date,'2026-03-31','start');equal(s.statement_end_date,'2026-04-30','end');close(s.opening_balance,3.63,.001,'opening');close(s.total_deposits,13961.88,.001,'deposits');close(s.total_withdrawals,10905.59,.001,'withdrawals');close(s.closing_balance,3059.92,.001,'closing');equal(s.negative_balance_detected,true,'OD');return'closing='+s.closing_balance;});
 
