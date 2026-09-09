@@ -1,5 +1,5 @@
 /**
- * TD BANK ENGINE v1.7 — CANDIDATE
+ * TD BANK ENGINE v1.8 — CANDIDATE
  *
  * One permanent TD module. All TD-specific behavior lives here:
  * - extraction instructions
@@ -7,6 +7,7 @@
  * - page / cheque-image handling
  * - debit classification and debt identity
  * - financing-credit classification
+ * - explicit internal-account transfer credit classification
  * - returned / reversed credit recognition
  * - deterministic TD regression tests
  *
@@ -17,7 +18,7 @@ function vfcTdBankProfile_(){
     id:'TD',
     label:'TD',
     status:'CANDIDATE',
-    rulesVersion:'TD-1.7-CANDIDATE',
+    rulesVersion:'TD-1.8-CANDIDATE',
     aliases:['TD CANADA TRUST','THE TORONTO-DOMINION BANK','TORONTO-DOMINION','TD BANK','TD CANADA TRUST BUSINESS']
   };
 }
@@ -38,6 +39,7 @@ function vfcTdExtractionRules_(){return[
   'RBC LOAN PYMT LOAN is financing even though it appears on a TD account. When no reference is printed, materially different payment amounts remain separate streams so a catch-up payment cannot inflate the regular monthly obligation.',
   'EMPTX, GST-B, GST-P, TXBAL, TAX PYT, CRA, CCRA and HST are TAX/informational, not financing debt.',
   'TFR-FR C/C, TFR-TO C/C, E-TRANSFER, SEND E-TFR, GC ... TRANSFER and ordinary cheques are transfers, not debt. A transfer remains non-debt even if its memo contains the word LOAN.',
+  'For operating-deposit analysis, an explicit inbound TD account-transfer credit such as TFR-FR C/C or GC ####-TRANSFER is a non-operating transfer when printed in DEPOSIT/CREDIT. Generic E-TRANSFER, SEND E-TFR, MOBILE DEPOSIT and GC ####-DEPOSIT are NOT treated as internal transfers merely from their wording.',
   'Same or near-identical dollar amount by itself NEVER proves debt.',
   'MONTHLY PLAN FEE, BUS LINE FEE, TAX PYT FEE, SERVICE CHARGE and ordinary transaction fees are not debt obligations.',
   'A financing CREDIT must be in the DEPOSIT/CREDIT column and contain explicit financing wording or a known financing entity. Ordinary deposits and transfers are not financing merely because they are large.',
@@ -232,6 +234,15 @@ function vfcTdIsTransferDebit_(s){
   return/TFR-TO\s+C\/C|TFR-FR\s+C\/C|E-TRANSFER|SEND\s+E-TFR|\bTRANSFER\b|CHQ#|CHEQUE|ATM\s+W\/D|ATM\s+DEP|GC\s+\d+-(?:TRANSFER|DEPOSIT)/.test(String(s||'').toUpperCase());
 }
 
+function vfcTdIsNonOperatingTransferCredit_(t){
+  if(String((t&&t.direction)||'').toUpperCase()!=='CREDIT')return false;
+  const s=String((t&&t.description)||'').toUpperCase().replace(/\s+/g,' ').trim();
+  if(/\bTFR[- ]FR\s+C\/C\b/.test(s))return true;
+  if(/\bGC\s+\d+-TRANSFER\b/.test(s))return true;
+  if(/\bTRANSFER\s+FROM\s+(?:C\/C|ACCOUNT)\b/.test(s))return true;
+  return false;
+}
+
 function vfcTdLoanReference_(s){
   s=String(s||'').toUpperCase();
   let m=s.match(/\*([0-9]{6,})/);if(m)return m[1];
@@ -327,6 +338,30 @@ function runTdBankingSelfTests(){
   test('TD lock sets dates opening closing and OD deterministically',function(){const text=['MAR 31/26 - APR 30/26','Page 1 of 2','Credits 13 11,441.88','Debits 18 8,762.88','MONTHLY MIN. BAL. $30.76OD','BALANCE FORWARD MAR31 3.63','Page 2 of 2','Credits 1 2,520.00','Debits 10 2,142.71','MONTHLY MIN. BAL. $30.76OD','BALANCE FORWARD APR27 2,682.63'].join('\n'),s=vfcTdLockFacts_({closing_balance:999999,negative_balance_detected:false},text,'test.pdf');equal(s.statement_start_date,'2026-03-31','start');equal(s.statement_end_date,'2026-04-30','end');close(s.opening_balance,3.63,.001,'opening');close(s.total_deposits,13961.88,.001,'deposits');close(s.total_withdrawals,10905.59,.001,'withdrawals');close(s.closing_balance,3059.92,.001,'closing');equal(s.negative_balance_detected,true,'OD');return'closing='+s.closing_balance;});
 
   test('TD incomplete activity pages fail closed',function(){let threw=false;try{vfcTdLockFacts_({},['MAR 31/26 - APR 30/26','Page 1 of 2','Credits 13 11,441.88','Debits 18 8,762.88','BALANCE FORWARD MAR31 3.63'].join('\n'),'incomplete.pdf');}catch(e){threw=/could not be fully verified/i.test(String(e&&e.message||e));}truthy(threw,'fail closed');return'failed closed';});
+
+  test('TD explicit internal transfer credit patterns are narrow and directional',function(){
+    truthy(vfcTdIsNonOperatingTransferCredit_(tx('2025-05-23','JX353 TFR-FR C/C','CREDIT',3000)),'TFR-FR credit');
+    truthy(vfcTdIsNonOperatingTransferCredit_(tx('2025-05-30','GC 9993-TRANSFER','CREDIT',10000)),'GC transfer credit');
+    equal(vfcTdIsNonOperatingTransferCredit_(tx('2025-05-30','GC 9993-TRANSFER','DEBIT',10000)),false,'GC transfer debit');
+    equal(vfcTdIsNonOperatingTransferCredit_(tx('2025-05-01','E-TRANSFER ***Bpq','CREDIT',1500)),false,'customer e-transfer');
+    equal(vfcTdIsNonOperatingTransferCredit_(tx('2025-05-29','GC 9993-DEPOSIT','CREDIT',5500)),false,'GC deposit');
+    equal(vfcTdIsNonOperatingTransferCredit_(tx('2025-05-29','MOBILE DEPOSIT','CREDIT',5500)),false,'mobile deposit');
+    return'narrow transfer rules';
+  });
+
+  test('TD explicit account-transfer credits are excluded but generic deposits remain operating',function(){
+    const txs=vfcNormalizeTransactions_([
+      tx('2025-05-23','JX353 TFR-FR C/C','CREDIT',3000),
+      tx('2025-05-30','GC 9993-TRANSFER','CREDIT',10000),
+      tx('2025-05-01','E-TRANSFER ***Bpq','CREDIT',1500),
+      tx('2025-05-29','GC 9993-DEPOSIT','CREDIT',5500)
+    ],'TD');
+    const p={bankId:'TD',bankName:'TD',statementStartDate:'2025-04-30',statementEndDate:'2025-05-30',openingBalance:0,closingBalance:20000,totalDeposits:20000,totalWithdrawals:0,reconciliationDifference:0,nsfCount:0,negativeBalanceDetected:false,transactionsVerified:true,transactions:txs};
+    const f=vfcBuildBankingFeatures_({},[{row:{fileName:'lotus-transfer-test.pdf'},payload:p}]);
+    close(f.excludedTransferCredits,13000,.02,'excluded transfers');
+    close(f.estimatedOperatingTotalDeposits,7000,.02,'operating deposits');
+    return'excluded=13000, operating=7000';
+  });
 
   test('TD transfer memo containing LOAN is never debt',function(){equal(vfcTdClassifyDebit_(tx('2025-06-01','SEND E-TFR *Esd LOAN','DEBIT',2000)),null,'transfer loan memo');return'excluded';});
   test('Same-dollar TD e-transfers never become debt',function(){const d=vfcDebtProfile_([row('2025-07-31',[tx('2025-07-10','SEND E-TFR ***AAA','DEBIT',1000)]),row('2025-08-29',[tx('2025-08-10','SEND E-TFR ***AAA','DEBIT',1000)]),row('2025-09-29',[tx('2025-09-10','SEND E-TFR ***AAA','DEBIT',1000)])]);close(d.confirmedMonthlyDebtService,0,.001,'e-transfer debt');return'debt=0';});
