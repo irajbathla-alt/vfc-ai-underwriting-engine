@@ -1,10 +1,10 @@
 /**
- * VFC Banking Core 3.7
+ * VFC Banking Core 3.8
  * Shared bank-agnostic banking math over frozen statement facts.
  * No PDF or OpenAI call occurs during underwriting.
  */
 const VFC_BANK_ENGINE={
-  VERSION:'VFC-BANKING-CORE-3.7',
+  VERSION:'VFC-BANKING-CORE-3.8',
   FACTS_VERSION:'VFC-BANK-FACTS-1.0',
   CACHE_PREFIX:'VFC_BANK_FACTS_V1:',
   LEGACY_PREFIXES:['VFC_BANK_PURE_V46:','VFC_BANK_PURE_V45:','VFC_BANK_PURE_V44:','VFC_BANK_PURE_V43:','VFC_BANK_PURE_V42:','VFC_BANK_PURE_V41:','VFC_BANK_PURE_V40:','VFC_BANK_PURE_V35:','VFC_BANK_PURE_V34:','VFC_BANK_PURE_V1:'],
@@ -55,6 +55,7 @@ function vfcNormalizeTransactions_(items,bankId){
   out.sort(function(a,b){return vfcTime_(a.date)-vfcTime_(b.date)||a.direction.localeCompare(b.direction)||a.amount-b.amount||a.description.localeCompare(b.description)||(a.occurrence||1)-(b.occurrence||1);});return out;
 }
 function vfcPreserveBankPrintedDuplicate_(bankId,t,occurrence,items){
+  if(typeof vfcBankPreservePrintedDuplicate_==='function'&&vfcBankPreservePrintedDuplicate_(bankId||'UNKNOWN',t,occurrence,items))return true;
   if(!vfcBankIsReturnedFinancingCredit_(bankId||'UNKNOWN',t)&&String(t.direction||'')!=='DEBIT')return false;
   if(t.direction==='DEBIT'){
     const classified=vfcClassifyDebitForBank_(bankId||'UNKNOWN',t);if(!classified||(classified.family!=='FINANCING'&&classified.family!=='MCA'))return false;
