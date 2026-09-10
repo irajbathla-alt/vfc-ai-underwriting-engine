@@ -1,22 +1,32 @@
 /**
- * VFC Banking Core 3.9
+ * VFC Banking Core 4.0
  * Shared bank-agnostic banking math over frozen statement facts.
  * No PDF or OpenAI call occurs during underwriting.
  */
 const VFC_BANK_ENGINE={
-  VERSION:'VFC-BANKING-CORE-3.9',
+  VERSION:'VFC-BANKING-CORE-4.0',
   FACTS_VERSION:'VFC-BANK-FACTS-1.0',
+  INTAKE_CONTRACT:'BANK_MATCHED_FROZEN_LEDGER_V1',
   CACHE_PREFIX:'VFC_BANK_FACTS_V1:',
   LEGACY_PREFIXES:['VFC_BANK_PURE_V46:','VFC_BANK_PURE_V45:','VFC_BANK_PURE_V44:','VFC_BANK_PURE_V43:','VFC_BANK_PURE_V42:','VFC_BANK_PURE_V41:','VFC_BANK_PURE_V40:','VFC_BANK_PURE_V35:','VFC_BANK_PURE_V34:','VFC_BANK_PURE_V1:'],
   MAX_STATEMENTS:12,DEBT_LOOKBACK:6,ACTIVE_DAYS:75,RECONCILE_TOLERANCE:5
 };
 const VFC_BANK_SIMPLE=VFC_BANK_ENGINE;
 
-function getBankingInputQualityStatus(){return{modelVersion:VFC_BANK_ENGINE.VERSION,factsVersion:VFC_BANK_ENGINE.FACTS_VERSION,deterministic:true,pdfReReadDuringUnderwriting:false,frozenStatementFacts:true,allRiskDrivingFeaturesFromFrozenFacts:true,architecture:'BankingCore + BankRouter + one isolated file per bank',banks:getBankParserTabs()};}
+function getBankingInputQualityStatus(){return{modelVersion:VFC_BANK_ENGINE.VERSION,factsVersion:VFC_BANK_ENGINE.FACTS_VERSION,intakeContract:VFC_BANK_ENGINE.INTAKE_CONTRACT,deterministic:true,pdfReReadDuringUnderwriting:false,frozenStatementFacts:true,allRiskDrivingFeaturesFromFrozenFacts:true,architecture:'BankingCore + BankRouter + one isolated file per bank',banks:getBankParserTabs()};}
 
 function vfcBankCreateIntakePayload_(summary,fileName){
   summary=summary||{};const opening=vfcNumNull_(summary.opening_balance),closing=vfcNumNull_(summary.closing_balance),deposits=vfcNumNull_(summary.total_deposits),withdrawals=vfcNumNull_(summary.total_withdrawals),diff=(opening!==null&&closing!==null&&deposits!==null&&withdrawals!==null)?vfcRound_((opening+deposits-withdrawals)-closing,.01):null,bankName=String(summary.bank_name||'Unknown'),bankId=vfcDetectBankId_(bankName);
   return VFC_BANK_ENGINE.CACHE_PREFIX+JSON.stringify({version:3,extractionVersion:VFC_BANK_ENGINE.FACTS_VERSION,fileName:String(fileName||''),bankId:bankId,bankName:bankName,statementStartDate:vfcIso_(summary.statement_start_date),statementEndDate:vfcIso_(summary.statement_end_date),openingBalance:opening,closingBalance:closing,totalDeposits:deposits,totalWithdrawals:withdrawals,reconciliationDifference:diff,nsfCount:Math.max(0,vfcNum_(summary.nsf_count)),negativeBalanceDetected:vfcBool_(summary.negative_balance_detected),transactionsVerified:true,transactions:vfcNormalizeTransactions_(summary.banking_transactions||[],bankId)});
+}
+
+/** One shared intake contract for every bank: usable frozen facts + correct bank identity. */
+function vfcValidateFrozenPayload_(raw,expectedBankId,fileName){
+  const frozen=vfcParseBankCache_(raw);
+  if(!vfcPayloadUsable_(frozen))throw new Error('Frozen banking ledger could not be created for '+String(fileName||'statement')+'. Upload was stopped before saving incomplete facts.');
+  const expected=String(expectedBankId||'').toUpperCase(),actual=String(frozen.bankId||vfcDetectBankId_(frozen.bankName||'')).toUpperCase();
+  if(expected&&actual!==expected)throw new Error('Frozen banking ledger bank mismatch for '+String(fileName||'statement')+': expected '+expected+' but froze '+(actual||'UNKNOWN')+'.');
+  return frozen;
 }
 
 function getValidatedBankingFeatures_(companyName,period){
