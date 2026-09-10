@@ -30,19 +30,8 @@ function vfcNormalizeBankDocumentType_(value,summary){
   return'BANK_STATEMENT';
 }
 
-/**
- * Final intake gate: every statement must have a usable frozen ledger and the
- * frozen payload must belong to the bank selected in the UI before anything
- * is written to PDF Summaries. Legacy rows without this payload must be
- * re-uploaded once; assessment never re-OCRs or guesses missing transactions.
- */
-function vfcVerifyFrozenIntake_(raw,expectedBankId,fileName){
-  const frozen=vfcParseBankCache_(raw);
-  if(!vfcPayloadUsable_(frozen))throw new Error('Frozen banking ledger could not be created for '+String(fileName||'statement')+'. Upload was stopped before saving incomplete facts.');
-  const expected=String(expectedBankId||'').toUpperCase(),actual=String(frozen.bankId||'').toUpperCase();
-  if(expected&&actual!==expected)throw new Error('Frozen banking ledger bank mismatch for '+String(fileName||'statement')+': expected '+expected+' but froze '+(actual||'UNKNOWN')+'.');
-  return frozen;
-}
+/** Core 4.0 owns the single frozen-ledger intake contract. */
+function vfcVerifyFrozenIntake_(raw,expectedBankId,fileName){return vfcValidateFrozenPayload_(raw,expectedBankId,fileName);}
 
 /** Single upload entry point used by the UI for every bank. */
 function uploadStatementBatchByBank(bankId,companyName,files){
