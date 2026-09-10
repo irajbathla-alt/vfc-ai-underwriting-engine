@@ -1,5 +1,5 @@
 /**
- * TD BANK ENGINE v1.8 — CANDIDATE
+ * TD BANK ENGINE v1.9 — CANDIDATE
  *
  * One permanent TD module. All TD-specific behavior lives here:
  * - extraction instructions
@@ -7,7 +7,7 @@
  * - page / cheque-image handling
  * - debit classification and debt identity
  * - financing-credit classification
- * - explicit internal-account transfer credit classification
+ * - direction-safe internal-account transfer credit classification
  * - returned / reversed credit recognition
  * - deterministic TD regression tests
  *
@@ -18,7 +18,7 @@ function vfcTdBankProfile_(){
     id:'TD',
     label:'TD',
     status:'CANDIDATE',
-    rulesVersion:'TD-1.8-CANDIDATE',
+    rulesVersion:'TD-1.9-CANDIDATE',
     aliases:['TD CANADA TRUST','THE TORONTO-DOMINION BANK','TORONTO-DOMINION','TD BANK','TD CANADA TRUST BUSINESS']
   };
 }
@@ -39,7 +39,7 @@ function vfcTdExtractionRules_(){return[
   'RBC LOAN PYMT LOAN is financing even though it appears on a TD account. When no reference is printed, materially different payment amounts remain separate streams so a catch-up payment cannot inflate the regular monthly obligation.',
   'EMPTX, GST-B, GST-P, TXBAL, TAX PYT, CRA, CCRA and HST are TAX/informational, not financing debt.',
   'TFR-FR C/C, TFR-TO C/C, E-TRANSFER, SEND E-TFR, GC ... TRANSFER and ordinary cheques are transfers, not debt. A transfer remains non-debt even if its memo contains the word LOAN.',
-  'For operating-deposit analysis, an explicit inbound TD account-transfer credit such as TFR-FR C/C or GC ####-TRANSFER is a non-operating transfer when printed in DEPOSIT/CREDIT. Generic E-TRANSFER, SEND E-TFR, MOBILE DEPOSIT and GC ####-DEPOSIT are NOT treated as internal transfers merely from their wording.',
+  'For operating-deposit analysis, exclude only direction-explicit inbound account-transfer credits such as TFR-FR C/C or TRANSFER FROM C/C/ACCOUNT. GC ####-TRANSFER is direction-ambiguous in TD OCR and must never be excluded from operating deposits solely from its description. Generic E-TRANSFER, SEND E-TFR, MOBILE DEPOSIT and GC ####-DEPOSIT are also not treated as internal transfers merely from wording.',
   'Same or near-identical dollar amount by itself NEVER proves debt.',
   'MONTHLY PLAN FEE, BUS LINE FEE, TAX PYT FEE, SERVICE CHARGE and ordinary transaction fees are not debt obligations.',
   'A financing CREDIT must be in the DEPOSIT/CREDIT column and contain explicit financing wording or a known financing entity. Ordinary deposits and transfers are not financing merely because they are large.',
@@ -238,8 +238,10 @@ function vfcTdIsNonOperatingTransferCredit_(t){
   if(String((t&&t.direction)||'').toUpperCase()!=='CREDIT')return false;
   const s=String((t&&t.description)||'').toUpperCase().replace(/\s+/g,' ').trim();
   if(/\bTFR[- ]FR\s+C\/C\b/.test(s))return true;
-  if(/\bGC\s+\d+-TRANSFER\b/.test(s))return true;
   if(/\bTRANSFER\s+FROM\s+(?:C\/C|ACCOUNT)\b/.test(s))return true;
+  /* GC ####-TRANSFER is intentionally NOT classified here. Lotus Pharmacy proves
+     the same printed description can be debit or credit; description alone is
+     insufficient evidence for operating-deposit exclusion. */
   return false;
 }
 
@@ -341,15 +343,15 @@ function runTdBankingSelfTests(){
 
   test('TD explicit internal transfer credit patterns are narrow and directional',function(){
     truthy(vfcTdIsNonOperatingTransferCredit_(tx('2025-05-23','JX353 TFR-FR C/C','CREDIT',3000)),'TFR-FR credit');
-    truthy(vfcTdIsNonOperatingTransferCredit_(tx('2025-05-30','GC 9993-TRANSFER','CREDIT',10000)),'GC transfer credit');
+    equal(vfcTdIsNonOperatingTransferCredit_(tx('2025-05-30','GC 9993-TRANSFER','CREDIT',10000)),false,'GC transfer description alone');
     equal(vfcTdIsNonOperatingTransferCredit_(tx('2025-05-30','GC 9993-TRANSFER','DEBIT',10000)),false,'GC transfer debit');
     equal(vfcTdIsNonOperatingTransferCredit_(tx('2025-05-01','E-TRANSFER ***Bpq','CREDIT',1500)),false,'customer e-transfer');
     equal(vfcTdIsNonOperatingTransferCredit_(tx('2025-05-29','GC 9993-DEPOSIT','CREDIT',5500)),false,'GC deposit');
     equal(vfcTdIsNonOperatingTransferCredit_(tx('2025-05-29','MOBILE DEPOSIT','CREDIT',5500)),false,'mobile deposit');
-    return'narrow transfer rules';
+    return'direction-safe transfer rules';
   });
 
-  test('TD explicit account-transfer credits are excluded but generic deposits remain operating',function(){
+  test('TD only direction-explicit inbound transfers reduce operating deposits',function(){
     const txs=vfcNormalizeTransactions_([
       tx('2025-05-23','JX353 TFR-FR C/C','CREDIT',3000),
       tx('2025-05-30','GC 9993-TRANSFER','CREDIT',10000),
@@ -358,9 +360,9 @@ function runTdBankingSelfTests(){
     ],'TD');
     const p={bankId:'TD',bankName:'TD',statementStartDate:'2025-04-30',statementEndDate:'2025-05-30',openingBalance:0,closingBalance:20000,totalDeposits:20000,totalWithdrawals:0,reconciliationDifference:0,nsfCount:0,negativeBalanceDetected:false,transactionsVerified:true,transactions:txs};
     const f=vfcBuildBankingFeatures_({},[{row:{fileName:'lotus-transfer-test.pdf'},payload:p}]);
-    close(f.excludedTransferCredits,13000,.02,'excluded transfers');
-    close(f.estimatedOperatingTotalDeposits,7000,.02,'operating deposits');
-    return'excluded=13000, operating=7000';
+    close(f.excludedTransferCredits,3000,.02,'excluded transfers');
+    close(f.estimatedOperatingTotalDeposits,17000,.02,'operating deposits');
+    return'excluded=3000, operating=17000';
   });
 
   test('TD transfer memo containing LOAN is never debt',function(){equal(vfcTdClassifyDebit_(tx('2025-06-01','SEND E-TFR *Esd LOAN','DEBIT',2000)),null,'transfer loan memo');return'excluded';});
