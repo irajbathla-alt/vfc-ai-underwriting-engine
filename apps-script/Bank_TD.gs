@@ -1,5 +1,5 @@
 /**
- * TD BANK ENGINE v1.9 — CANDIDATE
+ * TD BANK ENGINE v2.0 — CANDIDATE
  *
  * One permanent TD module. All TD-specific behavior lives here:
  * - extraction instructions
@@ -9,6 +9,7 @@
  * - financing-credit classification
  * - direction-safe internal-account transfer credit classification
  * - returned / reversed credit recognition
+ * - Core 4.0 frozen-ledger intake contract
  * - deterministic TD regression tests
  *
  * Shared recurrence math, frozen-fact storage and underwriting remain in BankingCore.gs.
@@ -18,13 +19,15 @@ function vfcTdBankProfile_(){
     id:'TD',
     label:'TD',
     status:'CANDIDATE',
-    rulesVersion:'TD-1.9-CANDIDATE',
+    rulesVersion:'TD-2.0-CANDIDATE',
+    intakeContract:'BANK_MATCHED_FROZEN_LEDGER_V1',
     aliases:['TD CANADA TRUST','THE TORONTO-DOMINION BANK','TORONTO-DOMINION','TD BANK','TD CANADA TRUST BUSINESS']
   };
 }
 
 function vfcTdExtractionRules_(){return[
   'TD statement direction is controlled only by the printed CHEQUE/DEBIT versus DEPOSIT/CREDIT columns.',
+  'Before a TD statement is saved, its transaction ledger must satisfy Banking Core 4.0 BANK_MATCHED_FROZEN_LEDGER_V1 validation. Assessment never re-OCRs or guesses missing transaction facts.',
   'The Credits and Debits boxes printed at the bottom of each TD activity page are PAGE SUBTOTALS, not whole-statement totals. Sum every verified activity-page Credits amount for total_deposits and every verified activity-page Debits amount for total_withdrawals.',
   'TD Page X of Y can include cheque-image support pages. Cheque-image pages do not contain Credits/Debits activity subtotals and must not be treated as missing activity or duplicated as transactions.',
   'The TD lock step independently reads the statement period, first BALANCE FORWARD, all activity-page subtotals, deterministic closing balance and monthly minimum OD flag. Never use later continuation-page BALANCE FORWARD values as the opening balance.',
@@ -392,6 +395,16 @@ function runTdBankingSelfTests(){
   test('TD returned cheque FUNDS HELD is excluded from operating deposits',function(){const txs=vfcNormalizeTransactions_([tx('2026-02-17','CHQ#01564-0146568325','DEBIT',80000),tx('2026-02-17','RTN#01564 FUNDS HELD','CREDIT',80000)],'TD'),p={bankId:'TD',bankName:'TD',statementStartDate:'2026-01-30',statementEndDate:'2026-02-27',openingBalance:0,closingBalance:0,totalDeposits:100000,totalWithdrawals:100000,reconciliationDifference:0,nsfCount:1,negativeBalanceDetected:false,transactionsVerified:true,transactions:txs},f=vfcBuildBankingFeatures_({},[{row:{fileName:'3d-concrete.pdf'},payload:p}]);close(f.estimatedOperatingTotalDeposits,20000,.02,'operating deposits');close(f.debtProfile.returnedCreditsTotal,80000,.02,'returned cheque');return'operating='+f.estimatedOperatingTotalDeposits;});
   test('TD failed debit plus same-day retry preserves one real payment',function(){function retryRow(end,date){const items=vfcNormalizeTransactions_([tx(date,'LN PYMT *602099601','DEBIT',1265.14),tx(date,'LN PYMT-C *602099601','CREDIT',1265.14),tx(date,'LN PYMT *602099601','DEBIT',1265.14)],'TD');equal(items.filter(function(x){return x.direction==='DEBIT';}).length,2,'two printed debits');return row(end,items);}const d=vfcDebtProfile_([retryRow('2025-07-31','2025-07-09'),retryRow('2025-08-29','2025-08-11'),retryRow('2025-09-29','2025-09-09')]);equal(d.returnedFinanceDebitsSuppressed,3,'suppressed failed debits');close(d.confirmedMonthlyDebtService,1265.14,.02,'retry debt');equal(d.activeDebtObligations.length,1,'one obligation');return'debt='+d.confirmedMonthlyDebtService;});
   test('TD returned credits reduce estimated operating deposits',function(){const txs=vfcNormalizeTransactions_([tx('2025-09-09','LN PYMT *602099601','DEBIT',1265.14),tx('2025-09-09','LN PYMT-C *602099601','CREDIT',1265.14)],'TD'),p={bankId:'TD',bankName:'TD',statementStartDate:'2025-08-29',statementEndDate:'2025-09-29',openingBalance:0,closingBalance:0,totalDeposits:5000,totalWithdrawals:5000,reconciliationDifference:0,nsfCount:1,negativeBalanceDetected:false,transactionsVerified:true,transactions:txs},f=vfcBuildBankingFeatures_({},[{row:{fileName:'td.pdf'},payload:p}]);close(f.estimatedOperatingTotalDeposits,3734.86,.02,'operating');equal(f.returnedPaymentFlag,1,'return flag');return'operating='+f.estimatedOperatingTotalDeposits;});
+
+  test('TD intake payload freezes a usable bank-matched ledger',function(){
+    const summary={bank_name:'TD',statement_start_date:'2025-08-29',statement_end_date:'2025-09-29',opening_balance:1000,closing_balance:5725.79,total_deposits:9000,total_withdrawals:4274.21,nsf_count:0,negative_balance_detected:false,banking_transactions:[tx('2025-09-04','E-TRANSFER CUSTOMER','CREDIT',9000),tx('2025-09-04','JOURNEY/ONDECK BUS','DEBIT',4274.21)]};
+    const raw=vfcBankCreateIntakePayload_(summary,'td-intake-contract.pdf'),p=vfcValidateFrozenPayload_(raw,'TD','td-intake-contract.pdf');
+    equal(p.bankId,'TD','frozen bank');equal(p.transactionsVerified,true,'transactions verified');equal(p.transactions.length,2,'frozen transactions');
+    let mismatch=false;try{vfcValidateFrozenPayload_(raw,'RBC','td-intake-contract.pdf');}catch(e){mismatch=/bank mismatch/i.test(String(e&&e.message||e));}
+    truthy(mismatch,'wrong-bank rejection');
+    return'bank='+p.bankId+', transactions='+p.transactions.length;
+  });
+
   test('TD debt profile is deterministic for identical frozen facts',function(){const rows=[row('2026-01-31',[tx('2026-01-10','FORD CREDIT CA APY','DEBIT',950.61),tx('2026-01-18','FIRST INSURANCE LOAN','DEBIT',437.99)]),row('2026-02-28',[tx('2026-02-10','FORD CREDIT CA APY','DEBIT',950.61),tx('2026-02-18','FIRST INSURANCE LOAN','DEBIT',437.99)]),row('2026-03-31',[tx('2026-03-10','FORD CREDIT CA APY','DEBIT',950.61),tx('2026-03-18','FIRST INSURANCE LOAN','DEBIT',437.99)])],a=JSON.stringify(vfcDebtProfile_(rows)),b=JSON.stringify(vfcDebtProfile_(rows));equal(a,b,'deterministic JSON');return'deterministic';});
 
   const failed=results.filter(function(x){return!x.pass;});
