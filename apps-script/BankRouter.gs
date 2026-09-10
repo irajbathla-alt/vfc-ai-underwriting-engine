@@ -30,6 +30,20 @@ function vfcNormalizeBankDocumentType_(value,summary){
   return'BANK_STATEMENT';
 }
 
+/**
+ * Final intake gate: every statement must have a usable frozen ledger and the
+ * frozen payload must belong to the bank selected in the UI before anything
+ * is written to PDF Summaries. Legacy rows without this payload must be
+ * re-uploaded once; assessment never re-OCRs or guesses missing transactions.
+ */
+function vfcVerifyFrozenIntake_(raw,expectedBankId,fileName){
+  const frozen=vfcParseBankCache_(raw);
+  if(!vfcPayloadUsable_(frozen))throw new Error('Frozen banking ledger could not be created for '+String(fileName||'statement')+'. Upload was stopped before saving incomplete facts.');
+  const expected=String(expectedBankId||'').toUpperCase(),actual=String(frozen.bankId||'').toUpperCase();
+  if(expected&&actual!==expected)throw new Error('Frozen banking ledger bank mismatch for '+String(fileName||'statement')+': expected '+expected+' but froze '+(actual||'UNKNOWN')+'.');
+  return frozen;
+}
+
 /** Single upload entry point used by the UI for every bank. */
 function uploadStatementBatchByBank(bankId,companyName,files){
   const profile=vfcGetBankProfile_(bankId);if(profile.id==='UNKNOWN')throw new Error('Select a supported bank.');if(!companyName)throw new Error('Company name is required.');if(!files||!files.length)throw new Error('Upload at least one PDF.');
@@ -45,8 +59,7 @@ function uploadStatementBatchByBank(bankId,companyName,files){
     if(summary.document_type==='NOT_BANK_STATEMENT')throw new Error(item.fileName+' was not recognized as a bank statement.');
     if(!Array.isArray(summary.banking_transactions))throw new Error('Banking ledger extraction was incomplete for '+item.fileName+'.');
     summary.possible_mca_or_loan_payments=vfcBankCreateIntakePayload_(summary,item.fileName);
-    const frozen=vfcParseBankCache_(summary.possible_mca_or_loan_payments);
-    if(!vfcPayloadUsable_(frozen))throw new Error('Frozen banking ledger could not be created for '+item.fileName+'. Upload was stopped before saving incomplete facts.');
+    vfcVerifyFrozenIntake_(summary.possible_mca_or_loan_payments,profile.id,item.fileName);
     const startDate=parseDateSafe_(summary.statement_start_date),endDate=parseDateSafe_(summary.statement_end_date);if(startDate)starts.push(startDate);if(endDate)ends.push(endDate);
     return{uploadId:item.uploadId,fileName:item.fileName,fileId:item.fileId,fileUrl:item.fileUrl,summary:summary};
   });
