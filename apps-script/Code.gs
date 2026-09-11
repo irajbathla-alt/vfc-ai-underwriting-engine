@@ -35,65 +35,13 @@ function setupVFC() {
   return {ok:true,message:'VFC Underwriting Engine setup complete. Existing data was preserved.'};
 }
 
+/**
+ * Legacy generic upload is intentionally disabled.
+ * Every bank statement must enter through BankRouter so bank-specific locking,
+ * bank identity, reconciliation and the frozen-ledger contract cannot be bypassed.
+ */
 function uploadStatementBatch(companyName, files) {
-  if (!companyName) throw new Error('Company name is required.');
-  if (!files || !files.length) throw new Error('Upload at least one PDF.');
-
-  const company = getOrCreateCompany_(companyName);
-  const companyFolder = DriveApp.getFolderById(company.folderId);
-  const tempFolder = getOrCreateSubFolder_(companyFolder, '_TEMP_PROCESSING');
-  const staged = [];
-
-  files.forEach(function(file){
-    const fileName = file.name || 'statement.pdf';
-    const blob = Utilities.newBlob(
-      Utilities.base64Decode(file.base64),
-      'application/pdf',
-      fileName.toLowerCase().endsWith('.pdf') ? fileName : fileName + '.pdf'
-    );
-    const tempFile = tempFolder.createFile(blob);
-    const text = extractTextFromPdf_(tempFile.getId());
-    staged.push({uploadId:Utilities.getUuid(),fileName:fileName,fileId:tempFile.getId(),fileUrl:tempFile.getUrl(),text:text});
-  });
-
-  const prompts = staged.map(function(item){ return buildSingleBankStatementPrompt_(item.text, companyName, item.fileName); });
-  const summaries = callOpenAIJsonBatch_(prompts);
-  if (summaries.length !== staged.length) throw new Error('Statement reader returned an incomplete batch.');
-
-  const starts = [], ends = [];
-  const processed = staged.map(function(item,index){
-    let summary = summaries[index] || {};
-    summary = vfcLockPrintedStatementFacts_(summary, item.text);
-    const documentType = String(summary.document_type || '').trim().toUpperCase().replace(/\s+/g,'_');
-    summary.document_type = documentType || 'BANK_STATEMENT';
-    if (summary.document_type === 'BANK_STATEMENT') {
-      if (!Array.isArray(summary.banking_transactions)) throw new Error('Banking ledger extraction was incomplete for ' + item.fileName + '.');
-      if (typeof vfcBankCreateIntakePayload_ === 'function') summary.possible_mca_or_loan_payments = vfcBankCreateIntakePayload_(summary, item.fileName);
-    }
-    const startDate = parseDateSafe_(summary.statement_start_date), endDate = parseDateSafe_(summary.statement_end_date);
-    if (startDate) starts.push(startDate); if (endDate) ends.push(endDate);
-    return {uploadId:item.uploadId,fileName:item.fileName,fileId:item.fileId,fileUrl:item.fileUrl,summary:summary};
-  });
-
-  if (!starts.length || !ends.length) throw new Error('Statement dates could not be verified from the uploaded bank statements.');
-
-  const period = buildDetectedPeriod_(starts, ends);
-  const periodFolder = getOrCreateSubFolder_(companyFolder, period.label);
-  const uploadRows = [], pdfRows = [], batchInput = [], now = new Date();
-
-  processed.forEach(function(item){
-    const driveFile = DriveApp.getFileById(item.fileId);
-    periodFolder.addFile(driveFile); tempFolder.removeFile(driveFile);
-    uploadRows.push([item.uploadId,company.companyId,companyName,period.label,item.fileName,item.fileId,item.fileUrl,item.summary.document_type === 'BANK_STATEMENT' ? 'READ' : 'REVIEW_REQUIRED',now]);
-    pdfRows.push([item.uploadId,companyName,period.label,item.fileName,item.summary.document_type || '',item.summary.bank_name || '',item.summary.account_holder || '',item.summary.statement_start_date || '',item.summary.statement_end_date || '',item.summary.opening_balance || '',item.summary.closing_balance || '',item.summary.total_deposits || '',item.summary.total_withdrawals || '',item.summary.nsf_count || '',item.summary.negative_balance_detected || '',item.summary.possible_mca_or_loan_payments || '',item.summary.summary || '',item.summary.risks || '',item.summary.missing_info || '',now]);
-    batchInput.push({fileName:item.fileName,summary:item.summary});
-  });
-
-  appendRows_('Uploads', uploadRows); appendRows_('PDF Summaries', pdfRows);
-  const batch = summarizeBatch_(batchInput, companyName, period.label);
-  appendRow_('Batch Summaries', [Utilities.getUuid(),companyName,period.label,files.length,period.earliest || '',period.latest || '',batch.combined_summary || '',batch.key_findings || '',batch.risks || '',batch.missing_info || '',new Date()]);
-  upsertStructuredFeature_(companyName, period.label);
-  return {ok:true,intakeModelVersion:VFC_CONFIG.MODEL_VERSION,companyName:companyName,detectedPeriod:period.label,filesUploaded:files.length,companyFolderLink:company.folderLink,periodFolderLink:periodFolder.getUrl(),batchSummary:batch};
+  throw new Error('Legacy generic bank-statement upload is disabled. Use uploadStatementBatchByBank(bankId, companyName, files).');
 }
 
 function saveLenderDecision(payload) {
