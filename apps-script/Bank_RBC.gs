@@ -1,15 +1,17 @@
-/** RBC v1.5 — CANDIDATE / REVALIDATION REQUIRED. */
-function vfcRbcBankProfile_(){return{id:'RBC',label:'RBC',status:'CANDIDATE',rulesVersion:'RBC-1.5-CANDIDATE',aliases:['ROYAL BANK OF CANADA','RBC ROYAL BANK','RBC']};}
+/** RBC v1.6 — CANDIDATE / REVALIDATION REQUIRED. */
+function vfcRbcBankProfile_(){return{id:'RBC',label:'RBC',status:'CANDIDATE',rulesVersion:'RBC-1.6-CANDIDATE',intakeContract:'BANK_MATCHED_FROZEN_LEDGER_V2',aliases:['ROYAL BANK OF CANADA','RBC ROYAL BANK','RBC']};}
 
 function vfcRbcExtractionRules_(){return [
   'RBC Account Summary: Total deposits & credits is total_deposits; Total cheques & debits is total_withdrawals.',
   'RBC Account Activity: Cheques & Debits = DEBIT and Deposits & Credits = CREDIT.',
-  'For RBC, preserve every visible Account Activity row needed for underwriting recurrence and credit analysis. Include e-Transfers, online transfers, PADs, auto payments, rent, utilities, payroll/service debits, credit-card payments, taxes, insurance, loans, mortgages, LOC/line-of-credit activity, leases, MCA activity and every visible credit. Duplicate cheque-image pages must not be extracted twice.',
+  'RBC printed opening balance, closing balance, deposits and withdrawals must reconcile to the cent before the statement is saved.',
+  'For RBC, preserve every visible Account Activity row needed for underwriting recurrence and credit analysis. Include e-Transfers, online transfers, BR TO BR transfers, PADs, auto payments, rent, utilities, payroll/service debits, credit-card payments, taxes, insurance, loans, mortgages, LOC/line-of-credit activity, leases, MCA activity and every visible credit. Duplicate cheque-image pages must not be extracted twice.',
   'NSF/retry rule: preserve the original debit, the returned/NSF or reversal credit, and any later successful retry as separate printed facts. Do not delete the failed debit during extraction. The deterministic Banking Core nets a demonstrably reversed financing debit out of debt-service recurrence while retaining the NSF/return as a risk fact.',
   'Preserve every visible debit containing LOAN, MORTGAGE, LOC, LINE OF CREDIT, CREDIT LINE, FINANCING, FINANCE, LEASE, LSE, MCA, AUTO PAYMENT or PAD exactly so recurrence can be tested deterministically.',
   'Any debit explicitly containing LOAN, MORTGAGE, LOC/LINE OF CREDIT, FINANCING, MCA or LEASE is a financing-obligation candidate. It must recur before a fixed monthly equivalent is confirmed.',
   'Same or near-identical dollar amount by itself NEVER proves debt. A recurring e-Transfer, online transfer, rent, tax, utility, payroll, card payment or unknown PAD remains informational or ignored for debt unless there is independent financing evidence.',
   'General e-Transfers, online transfers, BR TO BR transfers, ATM/cash withdrawals and ordinary cheques are frozen as statement facts but are not debt candidates merely because they repeat or use the same amount.',
+  'For operating-deposit analysis, explicit BR TO BR credits and explicit TRANSFER FROM ACCOUNT credits are internal-account transfers unless the same credit is independently identified as financing proceeds. Generic customer e-Transfers are not excluded.',
   'AUTO PAYMENT describes a payment method, not automatically a loan. Treat it as financing only when the counterparty/description is finance-like and the payment recurs.',
   'A successful retry may print as MISC PAYMENT instead of AUTO PAYMENT. If the same finance-like counterparty appears, keep it under the same financing entity so the recurring obligation is not broken.',
   'A generic PAD or pre-authorized debit is a recurring-payment candidate but is NOT confirmed financing unless lender/loan/MCA/finance/lease evidence is present.',
@@ -27,7 +29,13 @@ function vfcRbcExtractionRules_(){return [
   'A credit containing explicit LOAN/MCA/MORTGAGE/LOC wording or a trained known financing entity is a financing-credit candidate; ordinary deposits, payroll/commission credits, owner transfers and generic deposits are not financing merely because they are large or the sender name contains Finance/Financing.',
   'Do not duplicate cheque image pages.'
 ].join('\n');}
-function vfcRbcLockFacts_(summary,text,fileName){return vfcLockPrintedStatementFacts_(summary,text);}
+function vfcRbcLockFacts_(summary,text,fileName){
+  const facts=vfcExtractPrintedStatementFacts_(text),name=String(fileName||'statement');
+  if(!facts.startDate||!facts.endDate||facts.opening===null||facts.closing===null||facts.deposits===null||facts.withdrawals===null)throw new Error('RBC printed Account Summary could not be fully verified for '+name+'. Upload was stopped before saving incomplete statement totals.');
+  const diff=Math.abs((facts.opening+facts.deposits-facts.withdrawals)-facts.closing);
+  if(diff>.05)throw new Error('RBC printed Account Summary does not reconcile for '+name+'. Difference: $'+vfcRound_(diff,.01)+'.');
+  const locked=Object.assign({},summary||{});locked.statement_start_date=facts.startDate;locked.statement_end_date=facts.endDate;locked.opening_balance=facts.opening;locked.closing_balance=facts.closing;locked.total_deposits=facts.deposits;locked.total_withdrawals=facts.withdrawals;return locked;
+}
 
 function vfcRbcClassifyDebit_(t){
   const raw=String(t.description||'').replace(/\s+/g,' ').trim();
@@ -122,18 +130,20 @@ function vfcRbcClassifyDebit_(t){
   else if(/COMMERCIAL\s+RENT|\bRENT\b|HYDRO|FORTIS|TELUS|UTILITY|SUPERPASS|PETROLEUM|\bFUEL\b|EQUIPMENT\s+RENT|MISC\s+PAYMENT|PAY\s+EMPLOYEE|PAYROLL/.test(s)){
     family='OTHER';entityKey='RBC_OTHER_BUSINESS_'+vfcCounterpartyKey_(cp||raw);label=cp||raw;
   }
-  else{
-    return null;
-  }
-
+  else{return null;}
   if(!entityKey)entityKey='RBC_OTHER_'+vfcCounterpartyKey_(raw);
   return Object.assign({},t,{family:family,entityKey:entityKey,key:entityKey,label:label,debtJustification:debtJustification});
 }
 
+function vfcRbcIsReturnedFinancingCredit_(t){const s=String(t&&t.description||'').toUpperCase();return/ITEM\s+RETURNED\s+NSF|RETURNED\s+ITEM|RETURNED\s+PAYMENT|RETURNED\s+UNPAID|PAYMENT\s+RETURNED|\bREVERSAL\b/.test(s);}
+function vfcRbcIsNonOperatingTransferCredit_(t){
+  if(String(t&&t.direction||'').toUpperCase()!=='CREDIT')return false;const s=String(t&&t.description||'').toUpperCase();
+  if(/E-TRANSFER|INTERAC/.test(s))return false;
+  return/\bBR\s+TO\s+BR\b|\bTRANSFER\s+FROM\s+(?:ACCOUNT|A\/C|ACCT)\b|\bINTERNAL\s+TRANSFER\b/.test(s);
+}
 function vfcRbcKnownFinancingCredit_(t){
-  const s=String((t&&t.description)||'').toUpperCase();
+  const s=String((t&&t.description)||'').toUpperCase();if(vfcRbcIsReturnedFinancingCredit_(t))return false;
   return /\bBDC\b|MERCHANT\s+GROWTH|JOURNEY|ONDECK|\bJTO\b|CANACAP|\bICAPITAL\b|GREENBOX|\bCSBFL\b|\bLOAN\b|\bMCA\b|\bMORTGAGE\b|\bLOC\b|LINE\s+OF\s+CREDIT|CREDIT\s+LINE/.test(s);
 }
-function vfcRbcStrongEntityKey_(key){
-  return /^(BDC|MERCHANT_GROWTH|JOURNEY_ONDECK|CANACAP|ICAPITAL|GREENBOX|SILVERCHEF_EQUIPMENT_LEASE|AUTO_PAYMENT_FINANCE_|RBC_FINANCE_|RBC_OTHER_|INSURANCE_|LEASE_[0-9]|FINANCE_REF_[0-9])/.test(String(key||'').toUpperCase());
-}
+function vfcRbcPreservePrintedDuplicate_(t){const direction=String(t&&t.direction||'').toUpperCase();if(direction!=='CREDIT')return false;return vfcRbcKnownFinancingCredit_(t)||vfcRbcIsReturnedFinancingCredit_(t)||vfcRbcIsNonOperatingTransferCredit_(t);}
+function vfcRbcStrongEntityKey_(key){return /^(BDC|MERCHANT_GROWTH|JOURNEY_ONDECK|CANACAP|ICAPITAL|GREENBOX|SILVERCHEF_EQUIPMENT_LEASE|AUTO_PAYMENT_FINANCE_|RBC_FINANCE_|RBC_OTHER_|INSURANCE_|LEASE_[0-9]|FINANCE_REF_[0-9])/.test(String(key||'').toUpperCase());}
