@@ -1,10 +1,10 @@
-/** RBC v1.6 — CANDIDATE / REVALIDATION REQUIRED. */
-function vfcRbcBankProfile_(){return{id:'RBC',label:'RBC',status:'CANDIDATE',rulesVersion:'RBC-1.6-CANDIDATE',intakeContract:'BANK_MATCHED_FROZEN_LEDGER_V2',aliases:['ROYAL BANK OF CANADA','RBC ROYAL BANK','RBC']};}
+/** RBC v1.7 — CANDIDATE / REVALIDATION REQUIRED. */
+function vfcRbcBankProfile_(){return{id:'RBC',label:'RBC',status:'CANDIDATE',rulesVersion:'RBC-1.7-CANDIDATE',intakeContract:'BANK_MATCHED_FROZEN_LEDGER_V2',aliases:['ROYAL BANK OF CANADA','RBC ROYAL BANK','RBC']};}
 
 function vfcRbcExtractionRules_(){return [
   'RBC Account Summary: Total deposits & credits is total_deposits; Total cheques & debits is total_withdrawals.',
   'RBC Account Activity: Cheques & Debits = DEBIT and Deposits & Credits = CREDIT.',
-  'RBC printed opening balance, closing balance, deposits and withdrawals must reconcile to the cent before the statement is saved.',
+  'RBC printed opening balance, closing balance, deposits and withdrawals must reconcile to the cent before the statement is saved. Printed Item returned NSF rows and visible negative running balances are also locked deterministically.',
   'For RBC, preserve every visible Account Activity row needed for underwriting recurrence and credit analysis. Include e-Transfers, online transfers, BR TO BR transfers, PADs, auto payments, rent, utilities, payroll/service debits, credit-card payments, taxes, insurance, loans, mortgages, LOC/line-of-credit activity, leases, MCA activity and every visible credit. Duplicate cheque-image pages must not be extracted twice.',
   'NSF/retry rule: preserve the original debit, the returned/NSF or reversal credit, and any later successful retry as separate printed facts. Do not delete the failed debit during extraction. The deterministic Banking Core nets a demonstrably reversed financing debit out of debt-service recurrence while retaining the NSF/return as a risk fact.',
   'Preserve every visible debit containing LOAN, MORTGAGE, LOC, LINE OF CREDIT, CREDIT LINE, FINANCING, FINANCE, LEASE, LSE, MCA, AUTO PAYMENT or PAD exactly so recurrence can be tested deterministically.',
@@ -32,118 +32,33 @@ function vfcRbcExtractionRules_(){return [
 function vfcRbcLockFacts_(summary,text,fileName){
   const facts=vfcExtractPrintedStatementFacts_(text),name=String(fileName||'statement');
   if(!facts.startDate||!facts.endDate||facts.opening===null||facts.closing===null||facts.deposits===null||facts.withdrawals===null)throw new Error('RBC printed Account Summary could not be fully verified for '+name+'. Upload was stopped before saving incomplete statement totals.');
-  const diff=Math.abs((facts.opening+facts.deposits-facts.withdrawals)-facts.closing);
-  if(diff>.05)throw new Error('RBC printed Account Summary does not reconcile for '+name+'. Difference: $'+vfcRound_(diff,.01)+'.');
-  const locked=Object.assign({},summary||{});locked.statement_start_date=facts.startDate;locked.statement_end_date=facts.endDate;locked.opening_balance=facts.opening;locked.closing_balance=facts.closing;locked.total_deposits=facts.deposits;locked.total_withdrawals=facts.withdrawals;return locked;
+  const diff=Math.abs((facts.opening+facts.deposits-facts.withdrawals)-facts.closing);if(diff>.05)throw new Error('RBC printed Account Summary does not reconcile for '+name+'. Difference: $'+vfcRound_(diff,.01)+'.');
+  const locked=Object.assign({},summary||{});locked.statement_start_date=facts.startDate;locked.statement_end_date=facts.endDate;locked.opening_balance=facts.opening;locked.closing_balance=facts.closing;locked.total_deposits=facts.deposits;locked.total_withdrawals=facts.withdrawals;locked.nsf_count=vfcRbcCountNsf_(text);locked.negative_balance_detected=vfcRbcNegativeBalanceFlag_(text,facts);return locked;
 }
+function vfcRbcCountNsf_(text){return(String(text||'').match(/ITEM\s+RETURNED\s+NSF|RETURNED\s+ITEM\s+NSF/gi)||[]).length;}
+function vfcRbcNegativeBalanceFlag_(text,facts){if((facts&&facts.opening<0)||(facts&&facts.closing<0))return true;return/(?:^|\s)-[0-9][0-9,]*\.\d{2}(?:\s|$)/m.test(String(text||''));}
 
 function vfcRbcClassifyDebit_(t){
-  const raw=String(t.description||'').replace(/\s+/g,' ').trim();
-  const s=raw.toUpperCase();
-  const cp=String(t.counterparty||'').replace(/\s+/g,' ').trim();
-  const hasFinancingSignal=/\bLOAN\b|\bMORTGAGE\b|\bLOC\b|LINE\s+OF\s+CREDIT|CREDIT\s+LINE|\bFINANC(?:E|ING)?\b|\bMCA\b|\bLEASE\b|\bLSE\b/.test(s);
-  const isFeeLine=/\bFEE\b|SERVICE\s+CHARGE|NSF\s+ITEM\s+FEE|OVERDRAFT\s+INTEREST|PAYMENT\s+COVERAGE/.test(s);
-  if(isFeeLine&&!hasFinancingSignal)return null;
-
+  const raw=String(t.description||'').replace(/\s+/g,' ').trim(),s=raw.toUpperCase(),cp=String(t.counterparty||'').replace(/\s+/g,' ').trim(),hasFinancingSignal=/\bLOAN\b|\bMORTGAGE\b|\bLOC\b|LINE\s+OF\s+CREDIT|CREDIT\s+LINE|\bFINANC(?:E|ING)?\b|\bMCA\b|\bLEASE\b|\bLSE\b/.test(s),isFeeLine=/\bFEE\b|SERVICE\s+CHARGE|NSF\s+ITEM\s+FEE|OVERDRAFT\s+INTEREST|PAYMENT\s+COVERAGE/.test(s);if(isFeeLine&&!hasFinancingSignal)return null;
   let family='',entityKey='',label=cp||raw,debtJustification='';
-
-  if(/COMM\s+EQUIP\s+RENT\/LSE\s+SILVERCHEF|\bSILVERCHEF\b/.test(s)){
-    family='FINANCING';entityKey='SILVERCHEF_EQUIPMENT_LEASE';label='SilverChef Equipment Lease';
-    debtJustification='Explicit equipment lease wording plus recurring SilverChef payments.';
-  }
-  else if(/MERCH\s+PAD|MERCHANT\s+GROWTH/.test(s)){
-    family='MCA';entityKey='MERCHANT_GROWTH';label='Merchant Growth';
-    debtJustification='Known MCA/funding entity plus recurring payment cadence.';
-  }
-  else if(/JOURNEY|ONDECK|\bJTO\b/.test(s)){
-    family='FINANCING';entityKey='JOURNEY_ONDECK';label='Journey / OnDeck';
-    debtJustification='Known financing entity plus recurring payment cadence.';
-  }
-  else if(/\bBDC\b/.test(s)&&(/\bPAD\b|LOAN|FINANC/.test(s))){
-    family='FINANCING';entityKey='BDC';label='BDC';
-    debtJustification='BDC financing/loan/PAD wording plus recurring payment cadence.';
-  }
-  else if(/\bCANACAP\b|\bICAPITAL\b|\bGREENBOX\b/.test(s)){
-    family='FINANCING';
-    if(/\bCANACAP\b/.test(s)){entityKey='CANACAP';label='Canacap';}
-    else if(/\bICAPITAL\b/.test(s)){entityKey='ICAPITAL';label='iCapital';}
-    else{entityKey='GREENBOX';label='Greenbox';}
-    debtJustification='Known financing entity plus recurring observed payment cadence.';
-  }
-  else if(/\bCRA\b|\bCCRA\b|GST|HST|COMMERCIAL\s+TAXES|EMPTX|TXINS|TXBAL|\bTAX\b/.test(s)){
-    family='TAX';entityKey='RBC_OTHER_TAX_'+vfcCounterpartyKey_(cp||raw);label=cp||raw;
-  }
-  else if(/INSURANCE|\bIPFS\b|PREMIUM\s+FIN/.test(s)){
-    family='OTHER';
-    if(/ICBC/.test(s)){entityKey='INSURANCE_ICBC';label='Auto Insurance ICBC';}
-    else if(/EQUITABLE\s+LIFE/.test(s)){entityKey='INSURANCE_EQUITABLE_LIFE';label='Insurance EQUITABLE LIFE';}
-    else if(/IND\s+ALL\s+LIFE/.test(s)){entityKey='INSURANCE_IND_ALL_LIFE';label='Insurance IND ALL LIFE IN';}
-    else if(/\bOWIC\b/.test(s)){entityKey='INSURANCE_OWIC';label='Insurance OWIC';}
-    else entityKey='RBC_OTHER_INSURANCE_'+vfcCounterpartyKey_(cp||raw);
-  }
-  else if(/CREDIT\s+CARD|VISA\s+(ROYAL|TD|BNS)|RBC\s+CREDIT\s+CARD|MASTERCARD|AMERICAN\s+EXPRESS|\bAMEX\b|CAPITAL\s+ONE|\bMBNA\b/.test(s)){
-    family='OTHER';entityKey='RBC_OTHER_CARD_'+vfcCounterpartyKey_(cp||raw);label=cp||raw;
-  }
-  else if(/^AUTO\s+PAYMENT\b/.test(s)){
-    const clean=raw.replace(/^AUTO\s+PAYMENT\s*/i,'').trim();
-    const financeLike=/\bAFS\b|FINANC|LEASE|LENDING|DEALER\s+ADVANTAGE|AUTO\s+FINANCE|\bLOAN\b|\bMCA\b|\bMORTGAGE\b|\bLOC\b|LINE\s+OF\s+CREDIT|CREDIT\s+LINE|\bCANACAP\b|\bICAPITAL\b|\bGREENBOX\b|CAPITAL\s+(?:LENDING|FINANCE|FUNDING)|CREDIT\s+(?:CORP|FINANCE|LENDING)/.test(s);
-    if(financeLike){
-      family='FINANCING';entityKey='AUTO_PAYMENT_FINANCE_'+vfcCounterpartyKey_(clean||cp||raw);label=clean||cp||raw;
-      debtJustification='Recurring automatic payment to a finance-like counterparty; AUTO PAYMENT alone is not sufficient, so finance-like counterparty evidence is also required.';
-    }else{
-      family='OTHER';entityKey='RBC_OTHER_AUTOPAY_'+vfcCounterpartyKey_(clean||cp||raw);label=clean||cp||raw;
-    }
-  }
-  else if(/^MISC\s+PAYMENT\b/.test(s)&&(/\bAFS\b|FINANC|LEASE|LENDING|DEALER\s+ADVANTAGE|AUTO\s+FINANCE|\bLOAN\b|\bMCA\b|\bMORTGAGE\b|\bLOC\b|LINE\s+OF\s+CREDIT|CREDIT\s+LINE|\bCANACAP\b|\bICAPITAL\b|\bGREENBOX\b|CAPITAL\s+(?:LENDING|FINANCE|FUNDING)|CREDIT\s+(?:CORP|FINANCE|LENDING)/.test(s))){
-    const clean=raw.replace(/^MISC\s+PAYMENT\s*/i,'').trim();
-    family='FINANCING';entityKey='AUTO_PAYMENT_FINANCE_'+vfcCounterpartyKey_(clean||cp||raw);label=clean||cp||raw;
-    debtJustification='Recurring or retry payment to the same finance-like counterparty, even though RBC printed MISC PAYMENT instead of AUTO PAYMENT.';
-  }
-  else if(hasFinancingSignal){
-    family='FINANCING';
-    debtJustification='Explicit loan/mortgage/LOC/financing/lease/MCA wording plus recurring observed cadence.';
-    if(/^LOAN\s+PAYMENT$/i.test(raw)){
-      entityKey='GENERIC_LOAN_PAYMENT';label='Generic LOAN PAYMENT';
-    }else{
-      const numbered=s.match(/(?:NO\.?|NUMBER|#)\s*([0-9-]{5,})/);
-      const genericDebtNumber=s.match(/\b(?:LOAN|MORTGAGE|LOC)\b[^0-9]{0,30}([0-9][0-9-]{5,})\b/);
-      const ref=numbered||genericDebtNumber;
-      if(ref){
-        const n=ref[1].replace(/[^0-9]/g,'');
-        if(/LOAN\s+INTEREST/.test(s)){entityKey='LOAN_INTEREST_'+n;label='Loan interest NO.'+n;}
-        else if(/PERSONAL\s+LOAN/.test(s)){entityKey='LOAN_'+n;label='Personal Loan '+n;}
-        else if(/\bLOAN\b/.test(s)){entityKey='LOAN_'+n;label='Loan payment NO.'+n;}
-        else if(/\bLEASE\b|\bLSE\b/.test(s)){entityKey='LEASE_'+n;label='Lease payment NO.'+n;}
-        else{entityKey='FINANCE_REF_'+n;label=(cp||raw)+' NO.'+n;}
-      }else{
-        const stable=(cp||raw).replace(/\b[0-9][0-9-]{4,}\b/g,'').replace(/\s+/g,' ').trim();
-        entityKey='RBC_FINANCE_'+vfcCounterpartyKey_(stable||cp||raw);label=cp||raw;
-      }
-    }
-  }
-  else if(/\bPAD\b|PRE[- ]?AUTH/.test(s)){
-    family='OTHER';entityKey='RBC_OTHER_PAD_'+vfcCounterpartyKey_(cp||raw);label=cp||raw;
-  }
-  else if(/\bCAPITAL\b|\bFUNDING\b|\bFACTOR(?:ING)?\b/.test(s)){
-    family='OTHER';entityKey='RBC_OTHER_POSSIBLE_FINANCE_'+vfcCounterpartyKey_(cp||raw);label=cp||raw;
-  }
-  else if(/COMMERCIAL\s+RENT|\bRENT\b|HYDRO|FORTIS|TELUS|UTILITY|SUPERPASS|PETROLEUM|\bFUEL\b|EQUIPMENT\s+RENT|MISC\s+PAYMENT|PAY\s+EMPLOYEE|PAYROLL/.test(s)){
-    family='OTHER';entityKey='RBC_OTHER_BUSINESS_'+vfcCounterpartyKey_(cp||raw);label=cp||raw;
-  }
-  else{return null;}
-  if(!entityKey)entityKey='RBC_OTHER_'+vfcCounterpartyKey_(raw);
-  return Object.assign({},t,{family:family,entityKey:entityKey,key:entityKey,label:label,debtJustification:debtJustification});
+  if(/COMM\s+EQUIP\s+RENT\/LSE\s+SILVERCHEF|\bSILVERCHEF\b/.test(s)){family='FINANCING';entityKey='SILVERCHEF_EQUIPMENT_LEASE';label='SilverChef Equipment Lease';debtJustification='Explicit equipment lease wording plus recurring SilverChef payments.';}
+  else if(/MERCH\s+PAD|MERCHANT\s+GROWTH/.test(s)){family='MCA';entityKey='MERCHANT_GROWTH';label='Merchant Growth';debtJustification='Known MCA/funding entity plus recurring payment cadence.';}
+  else if(/JOURNEY|ONDECK|\bJTO\b/.test(s)){family='FINANCING';entityKey='JOURNEY_ONDECK';label='Journey / OnDeck';debtJustification='Known financing entity plus recurring payment cadence.';}
+  else if(/\bBDC\b/.test(s)&&(/\bPAD\b|LOAN|FINANC/.test(s))){family='FINANCING';entityKey='BDC';label='BDC';debtJustification='BDC financing/loan/PAD wording plus recurring payment cadence.';}
+  else if(/\bCANACAP\b|\bICAPITAL\b|\bGREENBOX\b/.test(s)){family='FINANCING';if(/\bCANACAP\b/.test(s)){entityKey='CANACAP';label='Canacap';}else if(/\bICAPITAL\b/.test(s)){entityKey='ICAPITAL';label='iCapital';}else{entityKey='GREENBOX';label='Greenbox';}debtJustification='Known financing entity plus recurring observed payment cadence.';}
+  else if(/\bCRA\b|\bCCRA\b|GST|HST|COMMERCIAL\s+TAXES|EMPTX|TXINS|TXBAL|\bTAX\b/.test(s)){family='TAX';entityKey='RBC_OTHER_TAX_'+vfcCounterpartyKey_(cp||raw);label=cp||raw;}
+  else if(/INSURANCE|\bIPFS\b|PREMIUM\s+FIN/.test(s)){family='OTHER';if(/ICBC/.test(s)){entityKey='INSURANCE_ICBC';label='Auto Insurance ICBC';}else if(/EQUITABLE\s+LIFE/.test(s)){entityKey='INSURANCE_EQUITABLE_LIFE';label='Insurance EQUITABLE LIFE';}else if(/IND\s+ALL\s+LIFE/.test(s)){entityKey='INSURANCE_IND_ALL_LIFE';label='Insurance IND ALL LIFE IN';}else if(/\bOWIC\b/.test(s)){entityKey='INSURANCE_OWIC';label='Insurance OWIC';}else entityKey='RBC_OTHER_INSURANCE_'+vfcCounterpartyKey_(cp||raw);}
+  else if(/CREDIT\s+CARD|VISA\s+(ROYAL|TD|BNS)|RBC\s+CREDIT\s+CARD|MASTERCARD|AMERICAN\s+EXPRESS|\bAMEX\b|CAPITAL\s+ONE|\bMBNA\b/.test(s)){family='OTHER';entityKey='RBC_OTHER_CARD_'+vfcCounterpartyKey_(cp||raw);label=cp||raw;}
+  else if(/^AUTO\s+PAYMENT\b/.test(s)){const clean=raw.replace(/^AUTO\s+PAYMENT\s*/i,'').trim(),financeLike=/\bAFS\b|FINANC|LEASE|LENDING|DEALER\s+ADVANTAGE|AUTO\s+FINANCE|\bLOAN\b|\bMCA\b|\bMORTGAGE\b|\bLOC\b|LINE\s+OF\s+CREDIT|CREDIT\s+LINE|\bCANACAP\b|\bICAPITAL\b|\bGREENBOX\b|CAPITAL\s+(?:LENDING|FINANCE|FUNDING)|CREDIT\s+(?:CORP|FINANCE|LENDING)/.test(s);if(financeLike){family='FINANCING';entityKey='AUTO_PAYMENT_FINANCE_'+vfcCounterpartyKey_(clean||cp||raw);label=clean||cp||raw;debtJustification='Recurring automatic payment to a finance-like counterparty; AUTO PAYMENT alone is not sufficient, so finance-like counterparty evidence is also required.';}else{family='OTHER';entityKey='RBC_OTHER_AUTOPAY_'+vfcCounterpartyKey_(clean||cp||raw);label=clean||cp||raw;}}
+  else if(/^MISC\s+PAYMENT\b/.test(s)&&(/\bAFS\b|FINANC|LEASE|LENDING|DEALER\s+ADVANTAGE|AUTO\s+FINANCE|\bLOAN\b|\bMCA\b|\bMORTGAGE\b|\bLOC\b|LINE\s+OF\s+CREDIT|CREDIT\s+LINE|\bCANACAP\b|\bICAPITAL\b|\bGREENBOX\b|CAPITAL\s+(?:LENDING|FINANCE|FUNDING)|CREDIT\s+(?:CORP|FINANCE|LENDING)/.test(s))){const clean=raw.replace(/^MISC\s+PAYMENT\s*/i,'').trim();family='FINANCING';entityKey='AUTO_PAYMENT_FINANCE_'+vfcCounterpartyKey_(clean||cp||raw);label=clean||cp||raw;debtJustification='Recurring or retry payment to the same finance-like counterparty, even though RBC printed MISC PAYMENT instead of AUTO PAYMENT.';}
+  else if(hasFinancingSignal){family='FINANCING';debtJustification='Explicit loan/mortgage/LOC/financing/lease/MCA wording plus recurring observed cadence.';if(/^LOAN\s+PAYMENT$/i.test(raw)){entityKey='GENERIC_LOAN_PAYMENT';label='Generic LOAN PAYMENT';}else{const numbered=s.match(/(?:NO\.?|NUMBER|#)\s*([0-9-]{5,})/),genericDebtNumber=s.match(/\b(?:LOAN|MORTGAGE|LOC)\b[^0-9]{0,30}([0-9][0-9-]{5,})\b/),ref=numbered||genericDebtNumber;if(ref){const n=ref[1].replace(/[^0-9]/g,'');if(/LOAN\s+INTEREST/.test(s)){entityKey='LOAN_INTEREST_'+n;label='Loan interest NO.'+n;}else if(/PERSONAL\s+LOAN/.test(s)){entityKey='LOAN_'+n;label='Personal Loan '+n;}else if(/\bLOAN\b/.test(s)){entityKey='LOAN_'+n;label='Loan payment NO.'+n;}else if(/\bLEASE\b|\bLSE\b/.test(s)){entityKey='LEASE_'+n;label='Lease payment NO.'+n;}else{entityKey='FINANCE_REF_'+n;label=(cp||raw)+' NO.'+n;}}else{const stable=(cp||raw).replace(/\b[0-9][0-9-]{4,}\b/g,'').replace(/\s+/g,' ').trim();entityKey='RBC_FINANCE_'+vfcCounterpartyKey_(stable||cp||raw);label=cp||raw;}}}
+  else if(/\bPAD\b|PRE[- ]?AUTH/.test(s)){family='OTHER';entityKey='RBC_OTHER_PAD_'+vfcCounterpartyKey_(cp||raw);label=cp||raw;}
+  else if(/\bCAPITAL\b|\bFUNDING\b|\bFACTOR(?:ING)?\b/.test(s)){family='OTHER';entityKey='RBC_OTHER_POSSIBLE_FINANCE_'+vfcCounterpartyKey_(cp||raw);label=cp||raw;}
+  else if(/COMMERCIAL\s+RENT|\bRENT\b|HYDRO|FORTIS|TELUS|UTILITY|SUPERPASS|PETROLEUM|\bFUEL\b|EQUIPMENT\s+RENT|MISC\s+PAYMENT|PAY\s+EMPLOYEE|PAYROLL/.test(s)){family='OTHER';entityKey='RBC_OTHER_BUSINESS_'+vfcCounterpartyKey_(cp||raw);label=cp||raw;}
+  else return null;if(!entityKey)entityKey='RBC_OTHER_'+vfcCounterpartyKey_(raw);return Object.assign({},t,{family:family,entityKey:entityKey,key:entityKey,label:label,debtJustification:debtJustification});
 }
-
 function vfcRbcIsReturnedFinancingCredit_(t){const s=String(t&&t.description||'').toUpperCase();return/ITEM\s+RETURNED\s+NSF|RETURNED\s+ITEM|RETURNED\s+PAYMENT|RETURNED\s+UNPAID|PAYMENT\s+RETURNED|\bREVERSAL\b/.test(s);}
-function vfcRbcIsNonOperatingTransferCredit_(t){
-  if(String(t&&t.direction||'').toUpperCase()!=='CREDIT')return false;const s=String(t&&t.description||'').toUpperCase();
-  if(/E-TRANSFER|INTERAC/.test(s))return false;
-  return/\bBR\s+TO\s+BR\b|\bTRANSFER\s+FROM\s+(?:ACCOUNT|A\/C|ACCT)\b|\bINTERNAL\s+TRANSFER\b/.test(s);
-}
-function vfcRbcKnownFinancingCredit_(t){
-  const s=String((t&&t.description)||'').toUpperCase();if(vfcRbcIsReturnedFinancingCredit_(t))return false;
-  return /\bBDC\b|MERCHANT\s+GROWTH|JOURNEY|ONDECK|\bJTO\b|CANACAP|\bICAPITAL\b|GREENBOX|\bCSBFL\b|\bLOAN\b|\bMCA\b|\bMORTGAGE\b|\bLOC\b|LINE\s+OF\s+CREDIT|CREDIT\s+LINE/.test(s);
-}
+function vfcRbcIsNonOperatingTransferCredit_(t){if(String(t&&t.direction||'').toUpperCase()!=='CREDIT')return false;const s=String(t&&t.description||'').toUpperCase();if(/E-TRANSFER|INTERAC/.test(s))return false;return/\bBR\s+TO\s+BR\b|\bTRANSFER\s+FROM\s+(?:ACCOUNT|A\/C|ACCT)\b|\bINTERNAL\s+TRANSFER\b/.test(s);}
+function vfcRbcKnownFinancingCredit_(t){const s=String((t&&t.description)||'').toUpperCase();if(vfcRbcIsReturnedFinancingCredit_(t))return false;return/\bBDC\b|MERCHANT\s+GROWTH|JOURNEY|ONDECK|\bJTO\b|CANACAP|\bICAPITAL\b|GREENBOX|\bCSBFL\b|\bLOAN\b|\bMCA\b|\bMORTGAGE\b|\bLOC\b|LINE\s+OF\s+CREDIT|CREDIT\s+LINE/.test(s);}
 function vfcRbcPreservePrintedDuplicate_(t){const direction=String(t&&t.direction||'').toUpperCase();if(direction!=='CREDIT')return false;return vfcRbcKnownFinancingCredit_(t)||vfcRbcIsReturnedFinancingCredit_(t)||vfcRbcIsNonOperatingTransferCredit_(t);}
-function vfcRbcStrongEntityKey_(key){return /^(BDC|MERCHANT_GROWTH|JOURNEY_ONDECK|CANACAP|ICAPITAL|GREENBOX|SILVERCHEF_EQUIPMENT_LEASE|AUTO_PAYMENT_FINANCE_|RBC_FINANCE_|RBC_OTHER_|INSURANCE_|LEASE_[0-9]|FINANCE_REF_[0-9])/.test(String(key||'').toUpperCase());}
+function vfcRbcStrongEntityKey_(key){return/^(BDC|MERCHANT_GROWTH|JOURNEY_ONDECK|CANACAP|ICAPITAL|GREENBOX|SILVERCHEF_EQUIPMENT_LEASE|AUTO_PAYMENT_FINANCE_|RBC_FINANCE_|RBC_OTHER_|INSURANCE_|LEASE_[0-9]|FINANCE_REF_[0-9])/.test(String(key||'').toUpperCase());}
