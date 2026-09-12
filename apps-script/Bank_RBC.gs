@@ -1,5 +1,5 @@
-/** RBC v1.7 — CANDIDATE / REVALIDATION REQUIRED. */
-function vfcRbcBankProfile_(){return{id:'RBC',label:'RBC',status:'CANDIDATE',rulesVersion:'RBC-1.7-CANDIDATE',intakeContract:'BANK_MATCHED_FROZEN_LEDGER_V2',aliases:['ROYAL BANK OF CANADA','RBC ROYAL BANK','RBC']};}
+/** RBC v1.8 — CANDIDATE / REVALIDATION REQUIRED. */
+function vfcRbcBankProfile_(){return{id:'RBC',label:'RBC',status:'CANDIDATE',rulesVersion:'RBC-1.8-CANDIDATE',intakeContract:'BANK_MATCHED_FROZEN_LEDGER_V2',aliases:['ROYAL BANK OF CANADA','RBC ROYAL BANK','RBC']};}
 
 function vfcRbcExtractionRules_(){return [
   'RBC Account Summary: Total deposits & credits is total_deposits; Total cheques & debits is total_withdrawals.',
@@ -16,13 +16,15 @@ function vfcRbcExtractionRules_(){return [
   'A successful retry may print as MISC PAYMENT instead of AUTO PAYMENT. If the same finance-like counterparty appears, keep it under the same financing entity so the recurring obligation is not broken.',
   'A generic PAD or pre-authorized debit is a recurring-payment candidate but is NOT confirmed financing unless lender/loan/MCA/finance/lease evidence is present.',
   'A fee-related word only suppresses a line when there is no independent financing signal. A loan/financing/lease/MCA line that also contains a fee word must still be preserved for recurrence testing.',
+  'PAY-FILE FEE / PAY-FILE FEES and ordinary bank/service/transaction fees are fees only and must not become recurring obligations.',
+  'AFFIRM CANADA is a financing counterparty. Preserve AFFIRM CANADA debits exactly; recurring AFFIRM debits are confirmed financing debt, while a single observation remains unconfirmed.',
   'Extract LOAN CREDIT, generic LOAN PAYMENT, numbered Loan payment NO.x and Loan interest NO.x.',
   'Extract CSBFL advance / CSBFL loan advance credits as financing proceeds when printed in Deposits & Credits.',
   'Preserve COMM EQUIP RENT/LSE SILVERCHEF debits exactly; treat SilverChef as recurring equipment lease financing when recurring.',
   'Preserve Business PAD BDC exactly and preserve Investment MERCH PAD / Investment MERCHANT GROWTH exactly.',
   'Journey/OnDeck aliases: JOURNEY, ONDECK and JTO. A credit memo containing TRF JTO is Journey/OnDeck financing proceeds when printed in Deposits & Credits.',
   'Business PAD JOURNEY/ONDECK may be either a CREDIT or DEBIT; direction is controlled only by the printed RBC column.',
-  'Known financing entities for RBC recurrence include Canacap, iCapital and Greenbox in addition to the trained entities above; a debit still has to recur before it becomes fixed monthly debt.',
+  'Known financing entities for RBC recurrence include Canacap, iCapital, Greenbox and Affirm Canada in addition to the trained entities above; a debit still has to recur before it becomes fixed monthly debt.',
   'Extract recurring insurance lines including ICBC, IND ALL LIFE IN, EQUITABLE LIFE and OWIC for informational analysis.',
   'Extract commercial tax / EMPTX / GST lines, credit-card payments and potential financing credits.',
   'A LOAN CREDIT printed in Deposits & Credits is always a CREDIT. Never turn it into a debit because of the word loan.',
@@ -39,12 +41,13 @@ function vfcRbcCountNsf_(text){return(String(text||'').match(/ITEM\s+RETURNED\s+
 function vfcRbcNegativeBalanceFlag_(text,facts){if((facts&&facts.opening<0)||(facts&&facts.closing<0))return true;return/(?:^|\s)-[0-9][0-9,]*\.\d{2}(?:\s|$)/m.test(String(text||''));}
 
 function vfcRbcClassifyDebit_(t){
-  const raw=String(t.description||'').replace(/\s+/g,' ').trim(),s=raw.toUpperCase(),cp=String(t.counterparty||'').replace(/\s+/g,' ').trim(),hasFinancingSignal=/\bLOAN\b|\bMORTGAGE\b|\bLOC\b|LINE\s+OF\s+CREDIT|CREDIT\s+LINE|\bFINANC(?:E|ING)?\b|\bMCA\b|\bLEASE\b|\bLSE\b/.test(s),isFeeLine=/\bFEE\b|SERVICE\s+CHARGE|NSF\s+ITEM\s+FEE|OVERDRAFT\s+INTEREST|PAYMENT\s+COVERAGE/.test(s);if(isFeeLine&&!hasFinancingSignal)return null;
+  const raw=String(t.description||'').replace(/\s+/g,' ').trim(),s=raw.toUpperCase(),cp=String(t.counterparty||'').replace(/\s+/g,' ').trim(),hasFinancingSignal=/\bLOAN\b|\bMORTGAGE\b|\bLOC\b|LINE\s+OF\s+CREDIT|CREDIT\s+LINE|\bFINANC(?:E|ING)?\b|\bMCA\b|\bLEASE\b|\bLSE\b/.test(s),isFeeLine=/\bFEES?\b|SERVICE\s+CHARGE|NSF\s+ITEM\s+FEES?|OVERDRAFT\s+INTEREST|PAYMENT\s+COVERAGE/.test(s);if(isFeeLine&&!hasFinancingSignal)return null;
   let family='',entityKey='',label=cp||raw,debtJustification='';
   if(/COMM\s+EQUIP\s+RENT\/LSE\s+SILVERCHEF|\bSILVERCHEF\b/.test(s)){family='FINANCING';entityKey='SILVERCHEF_EQUIPMENT_LEASE';label='SilverChef Equipment Lease';debtJustification='Explicit equipment lease wording plus recurring SilverChef payments.';}
   else if(/MERCH\s+PAD|MERCHANT\s+GROWTH/.test(s)){family='MCA';entityKey='MERCHANT_GROWTH';label='Merchant Growth';debtJustification='Known MCA/funding entity plus recurring payment cadence.';}
   else if(/JOURNEY|ONDECK|\bJTO\b/.test(s)){family='FINANCING';entityKey='JOURNEY_ONDECK';label='Journey / OnDeck';debtJustification='Known financing entity plus recurring payment cadence.';}
   else if(/\bBDC\b/.test(s)&&(/\bPAD\b|LOAN|FINANC/.test(s))){family='FINANCING';entityKey='BDC';label='BDC';debtJustification='BDC financing/loan/PAD wording plus recurring payment cadence.';}
+  else if(/\bAFFIRM(?:\s+CANADA)?\b/.test(s)){family='FINANCING';entityKey='RBC_AFFIRM_CANADA';label='Affirm Canada';debtJustification='Affirm Canada is a financing counterparty; recurring observed payments are treated as financing debt.';}
   else if(/\bCANACAP\b|\bICAPITAL\b|\bGREENBOX\b/.test(s)){family='FINANCING';if(/\bCANACAP\b/.test(s)){entityKey='CANACAP';label='Canacap';}else if(/\bICAPITAL\b/.test(s)){entityKey='ICAPITAL';label='iCapital';}else{entityKey='GREENBOX';label='Greenbox';}debtJustification='Known financing entity plus recurring observed payment cadence.';}
   else if(/\bCRA\b|\bCCRA\b|GST|HST|COMMERCIAL\s+TAXES|EMPTX|TXINS|TXBAL|\bTAX\b/.test(s)){family='TAX';entityKey='RBC_OTHER_TAX_'+vfcCounterpartyKey_(cp||raw);label=cp||raw;}
   else if(/INSURANCE|\bIPFS\b|PREMIUM\s+FIN/.test(s)){family='OTHER';if(/ICBC/.test(s)){entityKey='INSURANCE_ICBC';label='Auto Insurance ICBC';}else if(/EQUITABLE\s+LIFE/.test(s)){entityKey='INSURANCE_EQUITABLE_LIFE';label='Insurance EQUITABLE LIFE';}else if(/IND\s+ALL\s+LIFE/.test(s)){entityKey='INSURANCE_IND_ALL_LIFE';label='Insurance IND ALL LIFE IN';}else if(/\bOWIC\b/.test(s)){entityKey='INSURANCE_OWIC';label='Insurance OWIC';}else entityKey='RBC_OTHER_INSURANCE_'+vfcCounterpartyKey_(cp||raw);}
@@ -61,4 +64,4 @@ function vfcRbcIsReturnedFinancingCredit_(t){const s=String(t&&t.description||''
 function vfcRbcIsNonOperatingTransferCredit_(t){if(String(t&&t.direction||'').toUpperCase()!=='CREDIT')return false;const s=String(t&&t.description||'').toUpperCase();if(/E-TRANSFER|INTERAC/.test(s))return false;return/\bBR\s+TO\s+BR\b|\bTRANSFER\s+FROM\s+(?:ACCOUNT|A\/C|ACCT)\b|\bINTERNAL\s+TRANSFER\b/.test(s);}
 function vfcRbcKnownFinancingCredit_(t){const s=String((t&&t.description)||'').toUpperCase();if(vfcRbcIsReturnedFinancingCredit_(t))return false;return/\bBDC\b|MERCHANT\s+GROWTH|JOURNEY|ONDECK|\bJTO\b|CANACAP|\bICAPITAL\b|GREENBOX|\bCSBFL\b|\bLOAN\b|\bMCA\b|\bMORTGAGE\b|\bLOC\b|LINE\s+OF\s+CREDIT|CREDIT\s+LINE/.test(s);}
 function vfcRbcPreservePrintedDuplicate_(t){const direction=String(t&&t.direction||'').toUpperCase();if(direction!=='CREDIT')return false;return vfcRbcKnownFinancingCredit_(t)||vfcRbcIsReturnedFinancingCredit_(t)||vfcRbcIsNonOperatingTransferCredit_(t);}
-function vfcRbcStrongEntityKey_(key){return/^(BDC|MERCHANT_GROWTH|JOURNEY_ONDECK|CANACAP|ICAPITAL|GREENBOX|SILVERCHEF_EQUIPMENT_LEASE|AUTO_PAYMENT_FINANCE_|RBC_FINANCE_|RBC_OTHER_|INSURANCE_|LEASE_[0-9]|FINANCE_REF_[0-9])/.test(String(key||'').toUpperCase());}
+function vfcRbcStrongEntityKey_(key){return/^(RBC_AFFIRM_CANADA|BDC|MERCHANT_GROWTH|JOURNEY_ONDECK|CANACAP|ICAPITAL|GREENBOX|SILVERCHEF_EQUIPMENT_LEASE|AUTO_PAYMENT_FINANCE_|RBC_FINANCE_|RBC_OTHER_|INSURANCE_|LEASE_[0-9]|FINANCE_REF_[0-9])/.test(String(key||'').toUpperCase());}
