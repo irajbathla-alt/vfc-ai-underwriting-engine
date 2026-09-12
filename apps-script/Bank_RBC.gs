@@ -1,7 +1,8 @@
 /**
  * RBC BANK ENGINE v2.0 — CANDIDATE
- * One permanent RBC module: extraction, deterministic locking, classification,
- * financing/returns/transfers, duplicate preservation, and RBC regression tests.
+ * ONE PERMANENT RBC FILE.
+ * Contains RBC extraction, deterministic printed-fact locking, debit/debt classification,
+ * financing credits, returns, internal transfers, duplicate preservation and RBC self-tests.
  * Shared recurrence math and frozen-fact storage remain in BankingCore.gs.
  */
 function vfcRbcBankProfile_(){
