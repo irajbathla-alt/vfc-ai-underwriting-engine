@@ -18,6 +18,21 @@ function runRbcBankingSelfTests(){
 
   test('RBC CSBFL BR TO BR advance remains financing, not transfer exclusion',function(){const printed=vfcNormalizeTransactions_([tx('2026-03-10','BR TO BR - Credit Memo 7512 CSBFL advance Loan: 09530611-001','CREDIT',13775,'CSBFL')],'RBC'),d=vfcDebtProfile_([row('2026-03-31',printed)]),transfers=vfcNonOperatingTransferCredits_(printed.map(function(t){return Object.assign({bankId:'RBC'},t);}));close(d.financingCreditsTotal,13775,.02,'financing credit');equal(transfers.length,0,'transfer exclusions');return'financing='+d.financingCreditsTotal;});
 
+  test('RBC recurring Affirm Canada is confirmed financing debt',function(){const d=vfcDebtProfile_([
+    row('2026-02-20',[tx('2026-02-06','Misc Payment AFFIRM CANADA REF-DA34122F93D','DEBIT',66.62,'AFFIRM CANADA')]),
+    row('2026-03-20',[tx('2026-03-06','Misc Payment AFFIRM CANADA REF-724FB64C7B5','DEBIT',66.62,'AFFIRM CANADA')]),
+    row('2026-04-22',[tx('2026-04-09','Misc Payment AFFIRM CANADA REF-C57E487D0BD','DEBIT',66.62,'AFFIRM CANADA')]),
+    row('2026-05-22',[tx('2026-05-07','Misc Payment AFFIRM CANADA REF-84B25583A57','DEBIT',66.62,'AFFIRM CANADA')]),
+    row('2026-06-22',[tx('2026-06-08','Misc Payment AFFIRM CANADA REF-267B24CD695','DEBIT',66.62,'AFFIRM CANADA')]),
+    row('2026-07-22',[tx('2026-07-08','Misc Payment AFFIRM CANADA REF-9DFC7780243','DEBIT',66.62,'AFFIRM CANADA')])
+  ]);close(d.confirmedMonthlyDebtService,66.62,.02,'Affirm debt');equal(d.activeDebtObligations.length,1,'Affirm obligation count');equal(d.activeDebtObligations[0].entityKey,'RBC_AFFIRM_CANADA','Affirm identity');return'debt='+d.confirmedMonthlyDebtService;});
+
+  test('RBC single Affirm Canada observation is not fabricated into monthly debt',function(){const d=vfcDebtProfile_([row('2026-02-20',[tx('2026-02-06','Misc Payment AFFIRM CANADA REF-ONE','DEBIT',66.62,'AFFIRM CANADA')])]);close(d.confirmedMonthlyDebtService,0,.001,'single Affirm debt');equal(d.observedOnce.length,1,'single Affirm observed once');return'observed once';});
+
+  test('RBC PAY-FILE FEES are suppressed as fees',function(){equal(vfcRbcClassifyDebit_(tx('2026-06-01','Misc Payment PAY-FILE FEES','DEBIT',2,'PAY-FILE FEES')),null,'PAY-FILE FEES');equal(vfcRbcClassifyDebit_(tx('2026-06-01','Monthly fee','DEBIT',6,'Monthly fee')),null,'monthly fee');return'fees excluded';});
+
+  test('RBC six-statement deposit profile retains severe decline signal',function(){const deposits=[20723.05,69571.19,48623.43,547.73,2152,700];close(deposits.reduce(function(a,b){return a+b;},0),142317.40,.02,'total deposits');close(deposits.reduce(function(a,b){return a+b;},0)/6,23719.5667,.02,'six-statement average');close((547.73+2152+700)/3,1133.2433,.02,'latest three average');truthy(vfcTrend_(deposits)<-.95,'severe decline');return'avg=23719.57, recent3=1133.24';});
+
   test('Personal loan is confirmed monthly debt',function(){const d=vfcDebtProfile_([row('2026-01-31',[tx('2026-01-05','Personal Loan SPL 000329209037884','DEBIT',1322.82)]),row('2026-02-28',[tx('2026-02-05','Personal Loan SPL 000329209037884','DEBIT',1322.82)]),row('2026-03-31',[tx('2026-03-05','Personal Loan SPL 000329209037884','DEBIT',1322.82)])]);close(d.confirmedMonthlyDebtService,1322.82,.02,'personal loan monthly debt');equal(d.activeDebtObligations.length,1,'personal loan obligation count');if(!/Explicit loan|financing/i.test(d.activeDebtObligations[0].debtJustification||''))throw new Error('missing debt justification');return d.activeDebtObligations[0].counterparty+' '+d.confirmedMonthlyDebtService;});
 
   test('Lincoln NSF plus retry counts once',function(){const d=vfcDebtProfile_([row('2026-01-31',[tx('2026-01-05','Auto Payment LINCOLN AFS CA','DEBIT',1367.54,'LINCOLN AFS CA')]),row('2026-02-28',[tx('2026-02-05','Auto Payment LINCOLN AFS CA','DEBIT',1367.54,'LINCOLN AFS CA'),tx('2026-02-05','Item returned NSF','CREDIT',1367.54,'Item returned NSF'),tx('2026-02-09','Misc Payment LINCOLN AFS CA','DEBIT',1367.54,'LINCOLN AFS CA')]),row('2026-03-31',[tx('2026-03-05','Auto Payment LINCOLN AFS CA','DEBIT',1367.54,'LINCOLN AFS CA')])]);close(d.confirmedMonthlyDebtService,1367.54,.02,'Lincoln monthly debt');equal(d.returnedFinanceDebitsSuppressed,1,'returned financing debit suppression');return'monthly='+d.confirmedMonthlyDebtService+', suppressed='+d.returnedFinanceDebitsSuppressed;});
