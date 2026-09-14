@@ -54,14 +54,22 @@ function vfcSummaryRows_(companyName,period){
 }
 function vfcAccountNumberKey_(v){return String(v||'').toUpperCase().replace(/[^A-Z0-9]/g,'');}
 function vfcFileIdentityKey_(v){return String(v||'').toUpperCase().replace(/\.[A-Z0-9]+$/,'').replace(/\s*\(\d+\)$/,'').replace(/[^A-Z0-9]+/g,'_').replace(/^_+|_+$/g,'');}
-function vfcStatementIdentityKey_(r){
-  r=r||{};const p=vfcParseBankCache_(r.signalRaw),bankId=vfcPayloadBankId_(p,r.bank||''),start=vfcIso_((p&&p.statementStartDate)||r.startDate),end=vfcIso_((p&&p.statementEndDate)||r.endDate),account=vfcAccountNumberKey_((p&&p.accountNumber)||r.accountNumber||''),fileKey=vfcFileIdentityKey_((p&&p.fileName)||r.fileName||''),holder=vfcCounterpartyKey_((p&&p.accountHolder)||r.accountHolder||'');
-  const subject=account?'ACCOUNT:'+account:(fileKey?'FILE:'+fileKey:(holder?'HOLDER:'+holder:'UNKNOWN'));
-  return[bankId,subject,start,end].join('|');
+function vfcStatementMeta_(r){r=r||{};const p=vfcParseBankCache_(r.signalRaw);return{bankId:vfcPayloadBankId_(p,r.bank||''),start:vfcIso_((p&&p.statementStartDate)||r.startDate),end:vfcIso_((p&&p.statementEndDate)||r.endDate),account:vfcAccountNumberKey_((p&&p.accountNumber)||r.accountNumber||''),fileKey:vfcFileIdentityKey_((p&&p.fileName)||r.fileName||''),holder:vfcCounterpartyKey_((p&&p.accountHolder)||r.accountHolder||'')};}
+function vfcStatementBasePeriodKey_(r){const m=vfcStatementMeta_(r);return[m.bankId,m.start,m.end].join('|');}
+function vfcStatementIdentityKey_(r){const m=vfcStatementMeta_(r),subject=m.account?'ACCOUNT:'+m.account:(m.fileKey?'FILE:'+m.fileKey:(m.holder?'HOLDER:'+m.holder:'UNKNOWN'));return[m.bankId,subject,m.start,m.end].join('|');}
+/**
+ * Group one logical statement across re-uploads without trusting extracted dollar totals as identity.
+ * Known account numbers are authoritative. Legacy rows without an account number may join exactly one
+ * account group only when bank + dates + normalized filename match. Ambiguous legacy rows stay separate.
+ */
+function vfcGroupLogicalStatementRows_(rows){
+  const byPeriod={};(rows||[]).forEach(function(r){const key=vfcStatementBasePeriodKey_(r);if(!byPeriod[key])byPeriod[key]=[];byPeriod[key].push(r);});const out=[];
+  Object.keys(byPeriod).sort().forEach(function(periodKey){const bucket=byPeriod[periodKey],accountGroups={},legacy=[];bucket.forEach(function(r){const m=vfcStatementMeta_(r);if(m.account){if(!accountGroups[m.account])accountGroups[m.account]=[];accountGroups[m.account].push(r);}else legacy.push(r);});const groups=Object.keys(accountGroups).sort().map(function(k){return accountGroups[k];});
+    legacy.forEach(function(r){const m=vfcStatementMeta_(r),matches=[];if(m.fileKey)groups.forEach(function(g){if(g.some(function(x){return vfcStatementMeta_(x).fileKey===m.fileKey;}))matches.push(g);});if(matches.length===1){matches[0].push(r);return;}let target=null;out.some(function(){return false;});const legacyGroups=groups.filter(function(g){return!g.some(function(x){return!!vfcStatementMeta_(x).account;});});legacyGroups.some(function(g){const gm=vfcStatementMeta_(g[0]);if((m.fileKey&&gm.fileKey===m.fileKey)||(!m.fileKey&&m.holder&&gm.holder===m.holder)){target=g;return true;}return false;});if(target)target.push(r);else groups.push([r]);});groups.forEach(function(g){out.push(g);});
+  });return out;
 }
 function vfcSelectedStatementRows_(companyName,period){
-  const all=vfcSummaryRows_(companyName,period),groups={};all.forEach(function(r){const key=vfcStatementIdentityKey_(r);if(!groups[key])groups[key]=[];groups[key].push(r);});
-  const rows=Object.keys(groups).map(function(k){const group=groups[k],latest=group.slice().sort(function(a,b){return vfcTime_(b.createdAt)-vfcTime_(a.createdAt)||b.rowNumber-a.rowNumber;})[0],bankId=vfcDetectBankId_(latest.bank||''),canonical=vfcCanonicalSignalRawFromRows_(group,bankId),row=Object.assign({},latest);if(canonical)row.signalRaw=canonical;row.statementIdentity=k;row.duplicateRowsCollapsed=Math.max(0,group.length-1);return row;});
+  const all=vfcSummaryRows_(companyName,period),groups=vfcGroupLogicalStatementRows_(all),rows=groups.map(function(group){const latest=group.slice().sort(function(a,b){return vfcTime_(b.createdAt)-vfcTime_(a.createdAt)||b.rowNumber-a.rowNumber;})[0],bankId=vfcDetectBankId_(latest.bank||''),canonical=vfcCanonicalSignalRawFromRows_(group,bankId),row=Object.assign({},latest);if(canonical)row.signalRaw=canonical;row.statementIdentity=vfcStatementIdentityKey_(row);row.logicalRowNumbers=group.map(function(x){return x.rowNumber;});row.duplicateRowsCollapsed=Math.max(0,group.length-1);return row;});
   rows.sort(function(a,b){return vfcTime_(a.endDate)-vfcTime_(b.endDate)||String(a.fileName).localeCompare(String(b.fileName));});return rows.slice(Math.max(0,rows.length-VFC_BANK_ENGINE.MAX_STATEMENTS));
 }
 /** Exact frozen-fact fingerprint retained for diagnostics/regression only; it is not statement identity. */
@@ -77,7 +85,7 @@ function vfcCanonicalSignalRawFromRows_(rows,expectedBankId){
   return candidates.length?candidates[0].raw:'';
 }
 function vfcCanonicalPayloadForRow_(row){
-  const identity=vfcStatementIdentityKey_(row),pool=vfcSummaryRows_(row.companyName,row.period).filter(function(x){return vfcStatementIdentityKey_(x)===identity;}),expected=vfcDetectBankId_(row.bank||''),raw=vfcCanonicalSignalRawFromRows_(pool,expected)||String(row.signalRaw||'');
+  const all=vfcSummaryRows_(row.companyName,row.period),numbers=Array.isArray(row.logicalRowNumbers)?row.logicalRowNumbers:[],groups=vfcGroupLogicalStatementRows_(all);let pool=[];if(numbers.length)pool=all.filter(function(x){return numbers.indexOf(x.rowNumber)>=0;});if(!pool.length){groups.some(function(g){if(g.some(function(x){return x.rowNumber===row.rowNumber||(row.uploadId&&x.uploadId===row.uploadId);})) {pool=g;return true;}return false;});}if(!pool.length)pool=[row];const expected=vfcDetectBankId_(row.bank||''),raw=vfcCanonicalSignalRawFromRows_(pool,expected)||String(row.signalRaw||'');
   if(raw){const p=vfcParseBankCache_(raw);if(vfcPayloadUsable_(p))return vfcNormalizePayload_(p,row);}const exact=vfcParseBankCache_(row.signalRaw);return vfcPayloadUsable_(exact)&&(!expected||vfcPayloadBankId_(exact,row.bank)===expected)?vfcNormalizePayload_(exact,row):null;
 }
 function vfcParseBankCache_(raw){const s=String(raw||''),prefixes=[VFC_BANK_ENGINE.CACHE_PREFIX].concat(VFC_BANK_ENGINE.LEGACY_PREFIXES);for(let i=0;i<prefixes.length;i++){if(s.indexOf(prefixes[i])!==0)continue;try{return JSON.parse(s.slice(prefixes[i].length));}catch(e){return null;}}return null;}
