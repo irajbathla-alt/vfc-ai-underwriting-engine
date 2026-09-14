@@ -1,5 +1,5 @@
 /**
- * BMO BANK ENGINE v1.3 — CANDIDATE
+ * BMO BANK ENGINE v1.4 — CANDIDATE
  *
  * One permanent BMO module. All BMO-specific behavior lives here:
  * - extraction instructions
@@ -20,7 +20,7 @@ function vfcBmoBankProfile_(){
     id:'BMO',
     label:'BMO',
     status:'CANDIDATE',
-    rulesVersion:'BMO-1.3-CANDIDATE',
+    rulesVersion:'BMO-1.4-CANDIDATE',
     intakeContract:'BANK_MATCHED_FROZEN_LEDGER_V2',
     aliases:['BANK OF MONTREAL','BMO BANK OF MONTREAL','BMO.COM','BMO']
   };
@@ -30,8 +30,9 @@ function vfcBmoExtractionRules_(){return[
   'BMO Business Banking statements print a Summary of account with opening balance, total amounts debited, total amounts credited and closing balance. Those printed summary values control statement totals.',
   'Transaction direction is controlled only by the printed Amounts debited from your account versus Amounts credited to your account columns.',
   'Preserve the first transaction Opening balance row and the printed For the period ending date. BMO statement cycles do not always begin on the first day of a month.',
-  'Preserve Pre-Authorized Payment rows needed for financing analysis, including CANACAP, GREENBOX CAPITAL, 2M7 FINANCIAL, GFFG-CLOVERDALE, LNS/PRE, FORD CREDIT, NISSAN FINANCE and IPFS/premium-finance wording.',
+  'Preserve Pre-Authorized Payment rows needed for financing analysis, including CANACAP, GREENBOX CAPITAL, 2M7 FINANCIAL, GFFG-CLOVERDALE, LNS/PRE, FORD CREDIT, NISSAN FINANCE, AFFIRM CANADA and IPFS/premium-finance wording.',
   'BMO LNS/PRE is financing evidence, but it is a transaction code rather than a lender identity. Preserve the printed counterparty so different LNS/PRE lenders remain separate obligations.',
+  'AFFIRM CANADA is a financing counterparty. A recurring AFFIRM debit is confirmed financing debt; one observation remains unconfirmed. An AFFIRM credit is not automatically financing proceeds.',
   'Preserve financing credits such as CANACAP CLN/PEE, 2M7 FINANCIAL, known lender direct deposits and explicit LOAN/MCA/FINANCING/LOC proceeds. A large ordinary Deposit or Direct Deposit is not financing merely because it is large.',
   'Cheque Returned NSF, Returned Item Payment Stopped, Returned Item and explicit returned-payment credits are financing-return markers when they match a financing debit. Error Correction credits are broader non-operating reversals but are not financing-return markers by wording alone.',
   'Transfer, Online Transfer and account-to-account transfer credits are non-operating transfers. INTERAC e-Transfer Received is not automatically an internal transfer and remains an ordinary credit unless other evidence proves otherwise.',
@@ -40,6 +41,8 @@ function vfcBmoExtractionRules_(){return[
   'AMEX, VISA, Mastercard and M/C-CIBC bill payments remain informational revolving-card payments, not fixed financing debt.',
   'PAYWORKS and ordinary payroll activity are operating expenses, not financing debt.',
   'CANADA TXD/DIM, CRA, CCRA, GST, HST and explicit tax payments are tax/government obligations, not financing debt.',
+  'iCapital is treated as financing, not automatically MCA. Journey/OnDeck and Merchant Growth remain MCA-style funding when recurring.',
+  'Fee-only rows are not recurring obligations. A row containing fee wording is preserved only when it also contains independent financing evidence.',
   'An unknown recurring pre-authorized payment stays informational unless independent financing evidence exists.',
   'Same or near-identical dollar amount by itself never proves debt. Financing evidence plus observed recurrence is required for confirmed monthly debt.',
   'BMO statements can append cheque-image/support pages after the transaction activity. Do not duplicate those cheque images as new transactions.'
@@ -70,7 +73,8 @@ function vfcBmoNegativeBalanceFlag_(text,facts){if((facts&&facts.opening<0)||(fa
 
 function vfcBmoClassifyDebit_(t){
   const raw=String(t&&t.description||'').replace(/\s+/g,' ').trim(),s=raw.toUpperCase(),cp=String(t&&t.counterparty||raw).replace(/\s+/g,' ').trim(),cents=Math.round(vfcNum_(t&&t.amount)*100);if(!raw)return null;
-  if(/RETURNED\s+ITEM\s+FEE|DRAFT\s+FEE|WITHDRAWAL\s+FEE|BILL\s+PAYMENT\s+FEE|MONTHLY\s+(?:PLAN\s+)?FEE|PLAN\s+FEE|CASH\s+MGMT\s+FEE|SERVICE\s+CHARGE|TRANSACTION\s+FEE|OVERDRAFT\s+(?:INTEREST|PER\s+ITEM\s+CHARGE)|NSF\s+FEE|INTERAC\s+E-TRANSFER\s+FEE/.test(s))return null;if(vfcBmoIsTransferDebit_(s))return null;
+  const hasFinancingSignal=/\bLOAN\b|\bMORTGAGE\b|\bLOC\b|LINE\s+OF\s+CREDIT|CREDIT\s+LINE|\bMCA\b|\bLEASE\b|\bLNS\/PRE\b|\bFINANC(?:E|ING)?\b/.test(s),feeOnly=/\bFEES?\b|SERVICE\s+CHARGE|OVERDRAFT\s+(?:INTEREST|PER\s+ITEM\s+CHARGE)/.test(s);
+  if((feeOnly&&!hasFinancingSignal)||/RETURNED\s+ITEM\s+FEE|DRAFT\s+FEE|WITHDRAWAL\s+FEE|BILL\s+PAYMENT\s+FEE|MONTHLY\s+(?:PLAN\s+)?FEE|PLAN\s+FEE|CASH\s+MGMT\s+FEE|TRANSACTION\s+FEE|NSF\s+FEE|INTERAC\s+E-TRANSFER\s+FEE/.test(s))return null;if(vfcBmoIsTransferDebit_(s))return null;
   let family='',entityKey='',label=cp||raw,debtJustification='';
   if(/\bCANACAP\b/.test(s)){family='MCA';entityKey='BMO_CANACAP';label='Canacap';debtJustification='Known business financing/MCA counterparty on a BMO statement plus recurring observed payment cadence.';}
   else if(/GREENBOX\s+CAPIT/.test(s)){family='MCA';entityKey='BMO_GREENBOX_CAPITAL';label='Greenbox Capital';debtJustification='Known business financing/MCA counterparty on a BMO statement plus recurring observed payment cadence.';}
@@ -78,13 +82,16 @@ function vfcBmoClassifyDebit_(t){
   else if(/GFFG[- ]?CLOVERDALE/.test(s)){family='FINANCING';entityKey='BMO_GFFG_LOAN';label='GFFG / Loan';debtJustification='GFFG counterparty with BMO loan/pre-authorized-payment coding plus recurring observed cadence.';}
   else if(/FORD\s+CREDIT/.test(s)){family='FINANCING';entityKey='BMO_FORD_CREDIT';label='Ford Credit';debtJustification='Known vehicle-finance counterparty plus recurring observed payment cadence.';}
   else if(/NISSAN\s+FINANCE/.test(s)){family='FINANCING';entityKey='BMO_NISSAN_FINANCE';label='Nissan Finance';debtJustification='Known vehicle-finance counterparty plus recurring observed payment cadence.';}
+  else if(/\bAFFIRM(?:\s+CANADA)?\b/.test(s)){family='FINANCING';entityKey='BMO_AFFIRM_CANADA';label='Affirm Canada';debtJustification='Affirm Canada is a financing counterparty; recurring observed payments are treated as financing debt.';}
   else if(/\bIPFS\b|PREMIUM\s+FINANC/.test(s)){family='FINANCING';entityKey='BMO_PREMIUM_FINANCE_'+vfcCounterpartyKey_(cp||raw);label=cp||'Premium Finance';debtJustification='Explicit premium-finance wording plus recurring observed payment cadence.';}
   else if(/\bLNS\/PRE\b/.test(s)){family='FINANCING';entityKey='BMO_LNS_PRE_'+vfcCounterpartyKey_(cp||raw);label=cp||raw;debtJustification='BMO LNS/PRE financing code plus recurring observed cadence; the printed counterparty remains the debt identity.';}
   else if(/\bCANADA\s+TXD\/DIM\b|\bCRA\b|\bCCRA\b|\bGST\b|\bHST\b|\bTAX\b/.test(s)){family='TAX';entityKey='BMO_TAX_'+vfcCounterpartyKey_(cp||raw);label=cp||raw;}
   else if(/\bICBC\b|INSURANCE/.test(s)){family='OTHER';entityKey='BMO_INSURANCE_'+vfcCounterpartyKey_(cp||raw);label=cp||raw;}
   else if(/AMEX|AMERICAN\s+EXPRESS|\bVISA\b|MASTERCARD|M\/C-CIBC|CIBC\s+(?:MC|CARD)|BMO\s+MASTERCARD|ROYAL\s+BANK\s+VISA|CREDIT\s+CARD/.test(s)){family='OTHER';entityKey='BMO_CARD_'+vfcCounterpartyKey_(cp||raw);label=cp||raw;}
   else if(/PAYWORKS|PAYROLL/.test(s)){family='OTHER';entityKey='BMO_PAYROLL_'+vfcCounterpartyKey_(cp||raw);label=cp||raw;}
-  else if(/\bBDC\b|JOURNEY|ONDECK|MERCHANT\s+GROWTH|ICAPITAL/.test(s)){family=/JOURNEY|ONDECK|MERCHANT\s+GROWTH|ICAPITAL/.test(s)?'MCA':'FINANCING';entityKey='BMO_FIN_'+vfcCounterpartyKey_(cp||raw);label=cp||raw;debtJustification='Known financing counterparty plus recurring observed payment cadence.';}
+  else if(/\bICAPITAL\b/.test(s)){family='FINANCING';entityKey='BMO_ICAPITAL';label='iCapital';debtJustification='Known financing counterparty plus recurring observed payment cadence; iCapital is not assumed to be MCA without explicit MCA evidence.';}
+  else if(/\bBDC\b/.test(s)){family='FINANCING';entityKey='BMO_FIN_'+vfcCounterpartyKey_(cp||raw);label=cp||raw;debtJustification='Known financing counterparty plus recurring observed payment cadence.';}
+  else if(/JOURNEY|ONDECK|MERCHANT\s+GROWTH/.test(s)){family='MCA';entityKey='BMO_FIN_'+vfcCounterpartyKey_(cp||raw);label=cp||raw;debtJustification='Known MCA/funding counterparty plus recurring observed payment cadence.';}
   else if(/\bLOAN\b|\bMORTGAGE\b|\bLOC\b|LINE\s+OF\s+CREDIT|CREDIT\s+LINE|\bMCA\b|\bLEASE\b|\bFINANC(?:E|ING)?\b/.test(s)){family='FINANCING';entityKey='BMO_FINANCE_'+(vfcCounterpartyKey_(cp||raw)||cents);label=cp||raw;debtJustification='Explicit financing/loan/mortgage/LOC/lease wording plus recurring observed cadence.';}
   else if(/PRE[- ]?AUTHORIZED\s+PAYMENT|\bPAD\b/.test(s)){family='OTHER';entityKey='BMO_OTHER_PAD_'+vfcCounterpartyKey_(cp||raw);label=cp||raw;}
   else return null;return Object.assign({},t,{family:family,entityKey:entityKey,key:entityKey,label:label,debtJustification:debtJustification});
@@ -94,7 +101,7 @@ function vfcBmoIsReturnedFinancingCredit_(t){const s=String(t&&t.description||''
 function vfcBmoIsNonOperatingReversalCredit_(t){if(String(t&&t.direction||'').toUpperCase()!=='CREDIT')return false;return vfcBmoIsReturnedFinancingCredit_(t)||/ERROR\s+CORRECTION/.test(String(t&&t.description||'').toUpperCase());}
 function vfcBmoIsNonOperatingTransferCredit_(t){if(String(t&&t.direction||'').toUpperCase()!=='CREDIT')return false;const s=String(t&&t.description||'').toUpperCase();if(/INTERAC\s+E-TRANSFER\s+RECEIVED/.test(s))return false;return/^TRANSFER\b|\bTRANSFER,|ONLINE\s+TRANSFER|ACCOUNT\s+TRANSFER/.test(s);}
 function vfcBmoKnownFinancingCredit_(t){const s=String(t&&t.description||'').toUpperCase();if(vfcBmoIsNonOperatingReversalCredit_(t)||vfcBmoIsNonOperatingTransferCredit_(t))return false;return/\bCANACAP\b.*\bCLN\/PEE\b|\b2M7\s*FINANCIAL\b|JOURNEY|ONDECK|MERCHANT\s+GROWTH|GREENBOX\s+CAPIT|\bBDC\b|ICAPITAL|LOAN\s+(?:ADVANCE|PROCEEDS|CREDIT)|MCA\s+(?:ADVANCE|PROCEEDS)|FINANC(?:E|ING)\s+(?:ADVANCE|PROCEEDS)|(?:\bLOC\b|LINE\s+OF\s+CREDIT)\s+(?:ADVANCE|PROCEEDS)/.test(s);}
-function vfcBmoStrongEntityKey_(key){return/^(BMO_CANACAP|BMO_GREENBOX_CAPITAL|BMO_2M7_FINANCIAL|BMO_GFFG_LOAN|BMO_FORD_CREDIT|BMO_NISSAN_FINANCE|BMO_PREMIUM_FINANCE_|BMO_LNS_PRE_|BMO_FIN_|BMO_FINANCE_)/.test(String(key||'').toUpperCase());}
+function vfcBmoStrongEntityKey_(key){return/^(BMO_CANACAP|BMO_GREENBOX_CAPITAL|BMO_2M7_FINANCIAL|BMO_GFFG_LOAN|BMO_FORD_CREDIT|BMO_NISSAN_FINANCE|BMO_AFFIRM_CANADA|BMO_PREMIUM_FINANCE_|BMO_LNS_PRE_|BMO_ICAPITAL|BMO_FIN_|BMO_FINANCE_)/.test(String(key||'').toUpperCase());}
 function vfcBmoPreservePrintedDuplicate_(t){const direction=String(t&&t.direction||'').toUpperCase(),s=String(t&&t.description||'').toUpperCase();if(direction==='CREDIT')return vfcBmoKnownFinancingCredit_(t)||vfcBmoIsNonOperatingReversalCredit_(t)||vfcBmoIsNonOperatingTransferCredit_(t);if(direction!=='DEBIT'||!/PRE[- ]?AUTHORIZED\s+PAYMENT/.test(s))return false;const x=vfcBmoClassifyDebit_(t);return!!(x&&(x.family==='FINANCING'||x.family==='MCA'));}
 
 function runBmoBankingSelfTests(){
@@ -115,6 +122,9 @@ function runBmoBankingSelfTests(){
   test('BMO error correction is non-operating but not a financing return',function(){const t=tx('2026-02-03','Error Correction, 0709-1985-790 0749','CREDIT',5020.38);truthy(vfcBmoIsNonOperatingReversalCredit_(t),'non-operating');equal(vfcBmoIsReturnedFinancingCredit_(t),false,'financing return');return'separated';});
   test('BMO transfer memo containing LOAN is never debt',function(){equal(vfcBmoClassifyDebit_(tx('2025-09-02','Transfer, OWNER LOAN 0985-3976-719','DEBIT',1000)),null,'transfer loan memo');return'excluded';});
   test('BMO known financing counterparties classify correctly',function(){equal(vfcBmoClassifyDebit_(tx('2025-09-04','Pre-Authorized Payment, CANACAP BUS/ENT','DEBIT',637)).family,'MCA','Canacap');equal(vfcBmoClassifyDebit_(tx('2025-09-04','Pre-Authorized Payment, GREENBOX CAPITA LNS/PRE','DEBIT',493.62)).family,'MCA','Greenbox');equal(vfcBmoClassifyDebit_(tx('2025-09-04','Pre-Authorized Payment, 2M7 FINANCIAL MSP/DIV','DEBIT',340)).family,'FINANCING','2M7');equal(vfcBmoClassifyDebit_(tx('2025-09-04','Pre-Authorized Payment, GFFG-CLOVERDALE LNS/PRE','DEBIT',160)).family,'FINANCING','GFFG');equal(vfcBmoClassifyDebit_(tx('2025-09-23','Pre-Authorized Payment, FORD CREDIT CA APY/PAA','DEBIT',489.01)).family,'FINANCING','Ford');equal(vfcBmoClassifyDebit_(tx('2026-02-06','Pre-Authorized Payment, NISSAN FINANCE CLN/PEE','DEBIT',343.24)).family,'FINANCING','Nissan');return'known finance recognized';});
+  test('BMO recurring Affirm Canada becomes financing debt only after recurrence',function(){const d=vfcDebtProfile_([row('2026-01-31',[tx('2026-01-06','Pre-Authorized Payment, AFFIRM CANADA','DEBIT',66.62,'AFFIRM CANADA')]),row('2026-02-28',[tx('2026-02-06','Pre-Authorized Payment, AFFIRM CANADA','DEBIT',66.62,'AFFIRM CANADA')]),row('2026-03-31',[tx('2026-03-06','Pre-Authorized Payment, AFFIRM CANADA','DEBIT',66.62,'AFFIRM CANADA')])]);close(d.confirmedMonthlyDebtService,66.62,.02,'Affirm debt');equal(d.activeDebtObligations[0].entityKey,'BMO_AFFIRM_CANADA','Affirm identity');const one=vfcDebtProfile_([row('2026-01-31',[tx('2026-01-06','Pre-Authorized Payment, AFFIRM CANADA','DEBIT',66.62,'AFFIRM CANADA')])]);close(one.confirmedMonthlyDebtService,0,.001,'single Affirm');return'debt='+d.confirmedMonthlyDebtService;});
+  test('BMO fee-only rows are suppressed but financing lines containing fee wording survive',function(){equal(vfcBmoClassifyDebit_(tx('2026-01-02','PAY-FILE FEES','DEBIT',2)),null,'fee-only');const x=vfcBmoClassifyDebit_(tx('2026-01-02','Loan payment service fee NO.123456','DEBIT',250,'Loan NO.123456'));equal(x.family,'FINANCING','loan fee line');return'fees separated';});
+  test('BMO iCapital is financing, not automatically MCA',function(){const x=vfcBmoClassifyDebit_(tx('2026-01-12','Pre-Authorized Payment, ICAPITAL BUS/ENT','DEBIT',900,'ICAPITAL'));equal(x.family,'FINANCING','iCapital family');equal(x.entityKey,'BMO_ICAPITAL','iCapital identity');return'financing';});
   test('BMO LNS/PRE is financing evidence without merging unrelated lenders',function(){const a=vfcBmoClassifyDebit_(tx('2025-10-01','Pre-Authorized Payment, OTHER CAPITAL LNS/PRE','DEBIT',500)),b=vfcBmoClassifyDebit_(tx('2025-10-01','Pre-Authorized Payment, GFFG-CLOVERDALE LNS/PRE','DEBIT',500));equal(a.family,'FINANCING','generic LNS/PRE');equal(b.entityKey,'BMO_GFFG_LOAN','GFFG identity');truthy(a.entityKey!==b.entityKey,'separate identities');return'separate identities';});
   test('BMO ICBC cards payroll and unknown PAD remain non-debt',function(){equal(vfcBmoClassifyDebit_(tx('2025-12-01','Pre-Authorized Payment, ICBC INS/ASS','DEBIT',336.70)).family,'OTHER','ICBC');equal(vfcBmoClassifyDebit_(tx('2025-10-21','Online Bill Payment, BMO MASTERCARD','DEBIT',395.76)).family,'OTHER','card');equal(vfcBmoClassifyDebit_(tx('2025-11-12','Pre-Authorized Payment, B12937 PAYWORKS PAY/PAY','DEBIT',3274.89)).family,'OTHER','payroll');equal(vfcBmoClassifyDebit_(tx('2025-11-12','Pre-Authorized Payment, ABC SERVICES BUS/ENT','DEBIT',500)).family,'OTHER','unknown PAD');return'informational only';});
   test('BMO recurring Canacap becomes confirmed debt',function(){const d=vfcDebtProfile_([row('2025-08-29',[tx('2025-08-04','Pre-Authorized Payment, CANACAP BUS/ENT','DEBIT',637)]),row('2025-09-29',[tx('2025-09-04','Pre-Authorized Payment, CANACAP BUS/ENT','DEBIT',637)]),row('2025-10-31',[tx('2025-10-04','Pre-Authorized Payment, CANACAP BUS/ENT','DEBIT',637)])]);close(d.confirmedMonthlyDebtService,637,.02,'Canacap debt');equal(d.activeDebtObligations.length,1,'obligation count');return'debt='+d.confirmedMonthlyDebtService;});
