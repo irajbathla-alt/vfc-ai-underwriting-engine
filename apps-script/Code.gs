@@ -1,8 +1,11 @@
 const VFC_CONFIG = {
   ROOT_FOLDER_NAME: 'VFC AI Engine',
   OPENAI_MODEL: 'gpt-4.1-mini',
-  OCR_RETRY_ATTEMPTS: 4,
-  OCR_DELAY_MS: 1000,
+  OCR_RETRY_ATTEMPTS: 6,
+  OCR_DELAY_MS: 5000,
+  OCR_MIN_INTERVAL_MS: 6000,
+  OCR_RATE_LIMIT_BACKOFF_MS: 20000,
+  OCR_CACHE_FOLDER_NAME: '_OCR_TEXT_CACHE',
   MODEL_VERSION: 'VFC-V1.3-FAST-EQUIPMENT-LEASE-INTAKE',
   MAX_SIMILAR_CASES: 10,
   STATEMENT_TEXT_LIMIT: 50000
@@ -84,10 +87,77 @@ function collectHistoricalOutcomes_() {
   const seen={}; return rows.filter(function(row){return row.companyName&&row.lenderName&&row.decision;}).filter(function(row){const key=[row.companyName,row.period,row.lenderName,row.decision,row.approvedAmount,row.declineReason].map(function(v){return String(v).trim().toLowerCase();}).join('|');if(seen[key])return false;seen[key]=true;return true;});
 }
 
+function vfcPdfContentHash_(blob){
+  const bytes=Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256,blob.getBytes());
+  return bytes.map(function(b){const n=(b<0?b+256:b);return('0'+n.toString(16)).slice(-2);}).join('');
+}
+
+function vfcGetOcrCacheFolder_(){
+  return getOrCreateSubFolder_(getOrCreateRootFolder_(),VFC_CONFIG.OCR_CACHE_FOLDER_NAME);
+}
+
+function vfcGetCachedOcrText_(cacheKey){
+  if(!cacheKey)return'';
+  try{
+    const files=vfcGetOcrCacheFolder_().getFilesByName(cacheKey+'.txt');
+    if(!files.hasNext())return'';
+    return String(files.next().getBlob().getDataAsString('UTF-8')||'');
+  }catch(e){return'';}
+}
+
+function vfcPutCachedOcrText_(cacheKey,text){
+  const value=String(text||'');
+  if(!cacheKey||!value)return;
+  try{
+    const folder=vfcGetOcrCacheFolder_(),name=cacheKey+'.txt',files=folder.getFilesByName(name);
+    if(files.hasNext()){files.next().setContent(value);return;}
+    folder.createFile(name,value,MimeType.PLAIN_TEXT);
+  }catch(e){}
+}
+
+function vfcThrottleDriveOcr_(){
+  const props=PropertiesService.getScriptProperties(),now=Date.now(),last=Number(props.getProperty('VFC_LAST_DRIVE_OCR_MS')||0),minimum=Math.max(1000,Number(VFC_CONFIG.OCR_MIN_INTERVAL_MS||6000)),wait=Math.max(0,minimum-(now-last));
+  if(wait>0)Utilities.sleep(wait);
+  props.setProperty('VFC_LAST_DRIVE_OCR_MS',String(Date.now()));
+}
+
 function extractTextFromPdf_(fileId) {
-  const sourceFile=DriveApp.getFileById(fileId), pdfBlob=sourceFile.getBlob().setContentType('application/pdf').setName(sourceFile.getName()); let lastError=null;
-  for(let attempt=1;attempt<=VFC_CONFIG.OCR_RETRY_ATTEMPTS;attempt++){try{const converted=Drive.Files.insert({title:'OCR_'+sourceFile.getName()},pdfBlob,{convert:true,ocr:true,ocrLanguage:'en'});const doc=DocumentApp.openById(converted.id),text=doc.getBody().getText();DriveApp.getFileById(converted.id).setTrashed(true);return text||'';}catch(error){lastError=error;const message=String(error&&error.message||error),retryable=/rate limit|quota|user rate limit|backend error|internal error/i.test(message);if(!retryable||attempt===VFC_CONFIG.OCR_RETRY_ATTEMPTS)break;Utilities.sleep(Math.min(15000,VFC_CONFIG.OCR_DELAY_MS*Math.pow(2,attempt-1)));}}
-  throw new Error('Google Drive OCR is temporarily unavailable after automatic retries. Original error: '+String(lastError&&lastError.message||lastError));
+  const sourceFile=DriveApp.getFileById(fileId),pdfBlob=sourceFile.getBlob().setContentType('application/pdf').setName(sourceFile.getName()),cacheKey=vfcPdfContentHash_(pdfBlob);
+  const cached=vfcGetCachedOcrText_(cacheKey);
+  if(cached)return cached;
+
+  const lock=LockService.getScriptLock();
+  if(!lock.tryLock(300000))throw new Error('PDF text extraction queue is busy. Please retry the upload in a moment.');
+  let lastError=null;
+  try{
+    const cachedAfterLock=vfcGetCachedOcrText_(cacheKey);
+    if(cachedAfterLock)return cachedAfterLock;
+
+    for(let attempt=1;attempt<=VFC_CONFIG.OCR_RETRY_ATTEMPTS;attempt++){
+      let convertedId='';
+      try{
+        vfcThrottleDriveOcr_();
+        const converted=Drive.Files.insert({title:'OCR_'+sourceFile.getName()},pdfBlob,{convert:true,ocr:true,ocrLanguage:'en'});
+        convertedId=converted&&converted.id||'';
+        if(!convertedId)throw new Error('Drive OCR did not create a converted document.');
+        const doc=DocumentApp.openById(convertedId),text=String(doc.getBody().getText()||'');
+        if(!text.trim())throw new Error('Drive OCR returned empty text.');
+        vfcPutCachedOcrText_(cacheKey,text);
+        return text;
+      }catch(error){
+        lastError=error;
+        const message=String(error&&error.message||error),rateLimited=/user rate limit|rate limit|too many requests|quota.*ocr|ocr.*quota/i.test(message),retryable=rateLimited||/backend error|internal error|service unavailable|temporar/i.test(message);
+        if(!retryable||attempt===VFC_CONFIG.OCR_RETRY_ATTEMPTS)break;
+        const wait=rateLimited?Math.min(60000,Math.max(10000,Number(VFC_CONFIG.OCR_RATE_LIMIT_BACKOFF_MS||20000)*attempt)):Math.min(20000,Number(VFC_CONFIG.OCR_DELAY_MS||5000)*Math.pow(2,attempt-1));
+        Utilities.sleep(wait);
+      }finally{
+        if(convertedId){try{DriveApp.getFileById(convertedId).setTrashed(true);}catch(e){}}
+      }
+    }
+  }finally{
+    try{lock.releaseLock();}catch(e){}
+  }
+  throw new Error('PDF text extraction could not complete after paced OCR retries. The same PDF will use the persistent OCR cache once a read succeeds. Original error: '+String(lastError&&lastError.message||lastError));
 }
 
 function buildSingleBankStatementPrompt_(text, companyName, fileName) {
