@@ -1,5 +1,5 @@
 /**
- * RBC BANK ENGINE v3.1 — CANDIDATE / AUDITED REVALIDATION
+ * RBC BANK ENGINE v3.2 — CANDIDATE / AUDITED REVALIDATION
  * ONE PERMANENT RBC FILE.
  *
  * Architecture:
@@ -16,7 +16,7 @@ function vfcRbcBankProfile_(){
     id:'RBC',
     label:'RBC',
     status:'CANDIDATE',
-    rulesVersion:'RBC-3.1-CANDIDATE',
+    rulesVersion:'RBC-3.2-CANDIDATE',
     intakeContract:'BANK_MATCHED_FROZEN_LEDGER_V2',
     aliases:['ROYAL BANK OF CANADA','RBC ROYAL BANK','RBC']
   };
@@ -56,7 +56,7 @@ function vfcRbcLockFacts_(summary,text,fileName){
   }
 
   const statementDiff=Math.abs((facts.opening+facts.deposits-facts.withdrawals)-facts.closing);
-  if(statementDiff>.05)throw new Error('RBC printed Account Summary does not reconcile for '+name+'. Difference: 
+  if(statementDiff>.01)throw new Error('RBC printed Account Summary does not reconcile for '+name+'. Difference: 
 
 function vfcRbcPrintedActivityCounts_(text){
   const s=String(text||'').replace(/\u00a0/g,' '),
@@ -112,8 +112,8 @@ function vfcRbcAuditFullLedger_(items,facts,text,fileName){
 
   const creditCountOk=s.creditCount===printed.creditCount,
         debitCountOk=s.debitCount===printed.debitCount,
-        creditTotalOk=Math.abs(s.totalCredits-vfcNum_(facts.deposits))<=.05,
-        debitTotalOk=Math.abs(s.totalDebits-vfcNum_(facts.withdrawals))<=.05;
+        creditTotalOk=Math.abs(s.totalCredits-vfcNum_(facts.deposits))<=.01,
+        debitTotalOk=Math.abs(s.totalDebits-vfcNum_(facts.withdrawals))<=.01;
 
   if(!creditCountOk||!debitCountOk||!creditTotalOk||!debitTotalOk){
     throw new Error(
