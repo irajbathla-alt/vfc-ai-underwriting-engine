@@ -1,28 +1,24 @@
 /**
- * RBC BANK ENGINE v2.2 — CANDIDATE / FINAL REVALIDATION
+ * RBC BANK ENGINE v2.3 — CANDIDATE / FINAL REVALIDATION
  * ONE PERMANENT RBC FILE.
  *
- * RBC-specific responsibilities:
- * - extraction instructions
- * - printed statement header locking
- * - full Account Activity ledger completeness + direction reconciliation
- * - deterministic high-confidence direction corrections
- * - debit/debt classification
- * - PAD / premium-finance / lender identity
- * - NSF / return / retry recognition
- * - financing-credit classification
- * - internal-transfer classification
- * - exact printed-duplicate preservation after full-ledger verification
- * - RBC regression tests
- *
- * Shared recurrence math and frozen-fact storage remain in BankingCore.gs.
+ * Design goals:
+ * - printed RBC columns are authoritative for direction
+ * - every visible Account Activity amount row is frozen
+ * - transaction counts and sums must equal the printed Account Summary exactly
+ * - ambiguous wording is never used to guess direction
+ * - all visible PAD / pre-authorized debit families are preserved
+ * - all visible NSF / return / reversal families are preserved as risk facts
+ * - a failed financing debit is removed from debt service only when a same-amount RETURN CREDIT can be tied to it safely
+ * - unknown PADs stay informational unless independent financing evidence exists
+ * - bank-specific behavior stays in this one RBC file
  */
 function vfcRbcBankProfile_(){
   return{
     id:'RBC',
     label:'RBC',
     status:'CANDIDATE',
-    rulesVersion:'RBC-2.2-CANDIDATE',
+    rulesVersion:'RBC-2.3-CANDIDATE',
     intakeContract:'BANK_MATCHED_FROZEN_LEDGER_V2',
     aliases:['ROYAL BANK OF CANADA','RBC ROYAL BANK','RBC']
   };
@@ -30,27 +26,29 @@ function vfcRbcBankProfile_(){
 
 function vfcRbcExtractionRules_(){return[
   'RBC Account Summary: Total deposits & credits is total_deposits; Total cheques & debits is total_withdrawals.',
-  'RBC Account Activity: Cheques & Debits = DEBIT and Deposits & Credits = CREDIT. The printed column is authoritative; wording never overrides the printed column.',
-  'RBC FULL-LEDGER RULE: banking_transactions MUST contain EVERY visible Account Activity row carrying a transaction amount in either Cheques & Debits or Deposits & Credits, not only underwriting-relevant rows. Include fees, purchases, cheques, transfers, PADs, insurance, taxes, loan activity, refunds and deposits.',
-  'Do NOT add Opening balance, Closing balance, Account Fees summary totals, page headings, cheque-image/support pages or returned-instrument image pages as transactions. Cheque-image pages are support only and must never duplicate Account Activity.',
-  'The number of CREDIT and DEBIT transaction rows and the sum of their amounts must match the printed Account Summary counts and totals exactly. If they do not, the RBC file will fail closed and will not be saved.',
-  'Rows such as Misc Payment can appear in either column. A numeric reference or the words MISC PAYMENT do NOT determine direction. Follow only the printed RBC column.',
-  'Preserve every visible PAD / pre-authorized debit exactly, including Business PAD, PAD, PRE-AUTH/PREAUTHORIZED, AUTO PAYMENT and lender-specific PADs. Unknown PADs remain informational unless independent financing evidence exists.',
-  'Preserve every visible returned-payment / NSF / reversal event exactly, including CHEQUE RETURNED NSF, ITEM RETURNED NSF, ITEM RETURNED UNPAID, RETURNED ITEM, RETURNED PAYMENT, PAYMENT RETURNED, PAD RETURNED, PREAUTHORIZED DEBIT RETURNED and REVERSAL. Preserve any NSF/returned-item fee separately as a fee.',
-  'NSF/retry rule: preserve the original attempted debit, the returned/NSF or reversal credit, and any later retry as separate printed facts. Never erase the original attempt during extraction.',
+  'RBC Account Activity: Cheques & Debits = DEBIT and Deposits & Credits = CREDIT. The PRINTED COLUMN is authoritative. Description wording never overrides the printed column.',
+  'FULL-LEDGER RULE: banking_transactions MUST contain EVERY visible Account Activity row carrying a transaction amount in either Cheques & Debits or Deposits & Credits, not only underwriting-relevant rows. Include fees, purchases, cheques, transfers, PADs, direct debits, insurance, taxes, loan activity, refunds and deposits.',
+  'Do NOT add Opening balance, Closing balance, Account Fees summary totals, page headings, cheque-image/support pages or returned-instrument image pages as transactions. Cheque-image/support pages are evidence only and must never duplicate Account Activity.',
+  'The number of CREDIT and DEBIT transaction rows and the sum of their amounts must match the printed Account Summary counts and totals exactly. If count or dollar totals do not match, the RBC upload MUST fail closed instead of saving uncertain facts.',
+  'Rows such as MISC PAYMENT, BR TO BR, ONLINE BANKING TRANSFER and RETURNED/NSF items can appear in different directions depending on the transaction. Never decide direction from those words; use only the printed RBC column.',
+  'Preserve EVERY visible PAD-like debit exactly, including BUSINESS PAD, PAD, PRE-AUTH, PRE-AUTHORIZED, PREAUTHORIZED, PRE-AUTHORIZED DEBIT, DIRECT DEBIT, EFT DEBIT, ACH DEBIT, AUTOMATIC DEBIT, AUTO PAYMENT and lender-specific PAD wording.',
+  'Unknown PAD/direct-debit counterparties remain informational unless independent lender/loan/MCA/finance/lease evidence exists. Same amount or recurrence alone never proves financing debt.',
+  'Preserve EVERY visible return/NSF/reversal event exactly, including CHEQUE RETURNED NSF, CHECK RETURNED NSF, ITEM RETURNED NSF, ITEM RETURNED UNPAID, RETURNED ITEM, RETURNED CHEQUE/CHECK, RETURNED PAYMENT, PAYMENT RETURNED, PAD RETURNED, PREAUTHORIZED DEBIT RETURNED, DIRECT DEBIT RETURNED, EFT RETURNED, ACH RETURNED, DEBIT RETURNED, REVERSED/REVERSAL and similar bank return wording.',
+  'IMPORTANT RETURN DIRECTION RULE: return wording does NOT determine CREDIT versus DEBIT. A returned financing PAD may be a CREDIT reversing a debit, while a returned deposited cheque may be a DEBIT reversing a prior deposit. Preserve the printed RBC column exactly.',
+  'Preserve NSF item fee / returned-item fee separately as a DEBIT fee; a fee is not the returned principal amount and must never suppress debt service.',
+  'NSF/retry rule: preserve the original attempted debit, the return/reversal transaction and any later retry as separate printed facts. Deterministic Core suppression occurs only for a return transaction that is actually a CREDIT and safely matches a financing debit by amount/date/entity evidence.',
   'RBC printed opening balance, closing balance, deposits and withdrawals must reconcile to the cent before the statement is saved. Visible negative running balances are locked deterministically.',
   'Any debit explicitly containing LOAN, MORTGAGE, LOC/LINE OF CREDIT, FINANCING, MCA or LEASE is a financing-obligation candidate. It must recur before a fixed monthly equivalent is confirmed.',
-  'Same or near-identical dollar amount by itself NEVER proves debt. A recurring e-Transfer, online transfer, rent, tax, utility, payroll, card payment or unknown PAD remains informational or ignored for debt unless there is independent financing evidence.',
   'General e-Transfers, online transfers, BR TO BR transfers, ATM/cash withdrawals and ordinary cheques are not debt candidates merely because they repeat or use the same amount.',
   'For operating-deposit analysis, explicit BR TO BR credits and explicit TRANSFER FROM ACCOUNT credits are internal-account transfers unless the same credit is independently identified as financing proceeds. Generic customer e-Transfers are not excluded.',
-  'AUTO PAYMENT describes a payment method, not automatically a loan. Treat it as financing only when the counterparty/description is finance-like and the payment recurs.',
-  'A successful retry may print as MISC PAYMENT instead of AUTO PAYMENT. If the same finance-like counterparty appears, keep it under the same financing entity so recurrence is not broken.',
+  'AUTO PAYMENT describes a payment method, not automatically a loan. Treat it as financing only when the counterparty/description independently indicates financing and the payment recurs.',
+  'A successful retry may print as MISC PAYMENT instead of AUTO PAYMENT. If the same finance-like counterparty is explicit, keep it under the same financing entity so recurrence is not broken.',
   'A generic MISC PAYMENT without an identifiable financing/card/tax/insurance/business counterparty is not a recurring obligation merely because it repeats.',
   'A fee-related word only suppresses a line when there is no independent financing signal. A loan/financing/lease/MCA line that also contains a fee word must still be preserved for recurrence testing.',
-  'PAY-FILE FEE / PAY-FILE FEES and ordinary bank/service/transaction/NSF fees are fees only and must not become recurring obligations.',
+  'PAY-FILE FEE / PAY-FILE FEES and ordinary bank/service/transaction/NSF/returned-item fees are fees only and must not become recurring obligations.',
   'AFFIRM CANADA is a financing counterparty. Recurring AFFIRM debits are confirmed financing debt; one observation remains unconfirmed.',
   'Explicit PREMIUM FINANCE, PREMIUM FINANCING and IPFS payment wording is financing when recurring. Ordinary ICBC/life/insurance premium descriptions without financing wording remain informational.',
-  'BDC rules: Business PAD BDC is the recurring PAD stream. BDC-LOAN/PRET or other manual BDC loan-payment wording is a separate stream so a catch-up/manual payment cannot inflate the normal PAD obligation. Materially different BDC PAD amounts are separated into stable amount bands and require their own recurrence.',
+  'BDC rules: BUSINESS PAD BDC is the recurring PAD stream. BDC-LOAN/PRET or other manual BDC loan-payment wording is a separate stream so a catch-up/manual payment cannot inflate the normal PAD obligation. Materially different BDC PAD amounts are separated into stable amount bands and require their own recurrence.',
   'Extract LOAN CREDIT, generic LOAN PAYMENT, numbered Loan payment NO.x and Loan interest NO.x.',
   'Extract CSBFL advance / CSBFL loan advance credits as financing proceeds when printed in Deposits & Credits.',
   'Preserve COMM EQUIP RENT/LSE SILVERCHEF debits exactly; treat SilverChef as recurring equipment lease financing when recurring.',
@@ -100,12 +98,17 @@ function vfcRbcPrepareLedger_(items){
   });
 }
 
-/** Only direction rules that are unambiguous on RBC are forced. Ambiguous MISC PAYMENT/BR TO BR/online transfers keep the extracted printed-column direction. */
+/**
+ * Force only descriptions whose RBC direction is semantically unambiguous.
+ * Return/NSF/reversal wording is deliberately NOT forced because RBC can print a return as either
+ * CREDIT (reversing a debit/PAD) or DEBIT (reversing a deposited item). Full-ledger reconciliation
+ * is the final direction gate.
+ */
 function vfcRbcCertainDirection_(t){
   const s=String(t&&t.description||'').toUpperCase().replace(/\s+/g,' ').trim();
-  if(!s)return'';
-  if(vfcRbcReturnCreditText_(s)||/^LOAN\s+CREDIT\b/.test(s)||/\bPAYROLL\s+DEPOSIT\b|\bTAX\s+REFUND\b|E-TRANSFER\s+RECEIVED|INTERAC\s+PURCHASE\s+REFUND|E-TRANSFER\s+CANCEL|MOBILE\s+CHEQUE\s+DEPOSIT/.test(s))return'CREDIT';
-  if(/^BUSINESS\s+PAD\b|^PAD\b|PRE[- ]?AUTH(?:ORIZED)?\s+DEBIT|^AUTO\s+PAYMENT\b|^LOAN\s+PAYMENT\b|^LOAN\s+INTEREST\b|^BLIP\s+PAYMENT\s*-?\s*LOAN\b|^BILL\s+PAYMENT\b|^FUEL\s+BILL\s+PAYMENT\b|^COMM\s+GAS\s+BILL\s+PMT\b|^COMMERCIAL\s+TAXES\b|^AUTO\s+INSURANCE\b|^INSURANCE\b|^RENT\/LEASE\b|^CHEQUE\s*-\s*\d+\b|E-TRANSFER\s+SENT|E-TRANSFER\s+REQUEST\s+FULFILLED/.test(s))return'DEBIT';
+  if(!s||vfcRbcReturnEventText_(s))return'';
+  if(/^LOAN\s+CREDIT\b/.test(s)||/\bPAYROLL\s+DEPOSIT\b|\bTAX\s+REFUND\b|E-TRANSFER\s+RECEIVED|INTERAC\s+PURCHASE\s+REFUND|E-TRANSFER\s+CANCEL|MOBILE\s+CHEQUE\s+DEPOSIT/.test(s))return'CREDIT';
+  if(vfcRbcIsPadLikeText_(s)||/^LOAN\s+PAYMENT\b|^LOAN\s+INTEREST\b|^BLIP\s+PAYMENT\s*-?\s*LOAN\b|^BILL\s+PAYMENT\b|^FUEL\s+BILL\s+PAYMENT\b|^COMM\s+GAS\s+BILL\s+PMT\b|^COMMERCIAL\s+TAXES\b|^AUTO\s+INSURANCE\b|^INSURANCE\b|^RENT\/LEASE\b|^CHEQUE\s*-\s*\d+\b|E-TRANSFER\s+SENT|E-TRANSFER\s+REQUEST\s+FULFILLED/.test(s))return'DEBIT';
   return'';
 }
 
@@ -124,16 +127,25 @@ function vfcRbcAuditFullLedger_(items,facts,text,fileName){
   return{creditCount:creditCount,debitCount:debitCount,totalCredits:vfcRound_(creditTotal,.01),totalDebits:vfcRound_(debitTotal,.01)};
 }
 
-function vfcRbcReturnCreditText_(value){
+function vfcRbcIsPadLikeText_(value){
   const s=String(value||'').toUpperCase().replace(/\s+/g,' ').trim();
-  return/CHEQUE\s+RETURNED\s+NSF|CHECK\s+RETURNED\s+NSF|ITEM\s+RETURNED\s+NSF|ITEM\s+RETURNED\s+UNPAID|RETURNED\s+ITEM|RETURNED\s+CHEQUE|RETURNED\s+CHECK|RETURNED\s+PAYMENT|PAYMENT\s+RETURNED|PAD\s+RETURNED|PRE[- ]?AUTH(?:ORIZED)?\s+DEBIT\s+RETURNED|DEBIT\s+RETURNED|\bREVERSAL\b/.test(s);
+  if(!s||vfcRbcReturnEventText_(s))return false;
+  return/^(?:BUSINESS\s+)?PAD\b|PRE[- ]?AUTH(?:ORIZED)?(?:\s+DEBIT|\s+PAYMENT)?\b|PREAUTHORIZED(?:\s+DEBIT|\s+PAYMENT)?\b|DIRECT\s+DEBIT\b|EFT\s+DEBIT\b|ACH\s+DEBIT\b|AUTOMATIC\s+DEBIT\b|AUTO\s+PAYMENT\b/.test(s);
 }
+
+function vfcRbcReturnEventText_(value){
+  const s=String(value||'').toUpperCase().replace(/\s+/g,' ').trim();
+  if(!s||/\b(?:FEE|FEES|CHARGE)\b/.test(s))return false;
+  return/CHEQUE\s+RETURNED(?:\s+NSF)?|CHECK\s+RETURNED(?:\s+NSF)?|ITEM\s+RETURNED(?:\s+NSF|\s+UNPAID)?|RETURNED\s+(?:ITEM|CHEQUE|CHECK|PAYMENT|PAD|DEBIT|EFT|ACH|DEPOSIT)|(?:PAYMENT|PAD|DEBIT|EFT|ACH|DEPOSIT)\s+RETURNED|PRE[- ]?AUTH(?:ORIZED)?\s+(?:DEBIT|PAYMENT)\s+RETURNED|PREAUTHORIZED\s+(?:DEBIT|PAYMENT)\s+RETURNED|DIRECT\s+DEBIT\s+RETURNED|REJECTED\s+(?:PAD|DEBIT|PAYMENT)|\bREVERSAL\b|\bREVERSED\b|NSF\s+RETURN/.test(s);
+}
+/** Backward-compatible helper name: this identifies return wording only; caller must still verify CREDIT direction. */
+function vfcRbcReturnCreditText_(value){return vfcRbcReturnEventText_(value);}
 function vfcRbcCountReturnEvents_(items){
-  return(Array.isArray(items)?items:[]).filter(function(t){return String(t&&t.direction||'').toUpperCase()==='CREDIT'&&vfcRbcReturnCreditText_(t&&t.description);}).length;
+  return(Array.isArray(items)?items:[]).filter(function(t){return vfcRbcReturnEventText_(t&&t.description);}).length;
 }
 function vfcRbcCountNsf_(text){
-  const s=String(text||'').toUpperCase();
-  return(s.match(/CHEQUE\s+RETURNED\s+NSF|CHECK\s+RETURNED\s+NSF|ITEM\s+RETURNED\s+NSF|ITEM\s+RETURNED\s+UNPAID|RETURNED\s+ITEM\s+NSF|RETURNED\s+PAYMENT\s+NSF|PAYMENT\s+RETURNED\s+NSF/g)||[]).length;
+  const s=String(text||'').toUpperCase(),patterns=[/CHEQUE\s+RETURNED(?:\s+NSF)?/g,/CHECK\s+RETURNED(?:\s+NSF)?/g,/ITEM\s+RETURNED(?:\s+NSF|\s+UNPAID)?/g,/RETURNED\s+(?:PAYMENT|PAD|DEBIT|EFT|ACH)/g,/(?:PAYMENT|PAD|DEBIT|EFT|ACH)\s+RETURNED/g,/\bREVERSAL\b/g,/\bREVERSED\b/g];
+  let n=0;patterns.forEach(function(re){const m=s.match(re);if(m)n+=m.length;});return n;
 }
 function vfcRbcNegativeBalanceFlag_(text,facts){
   if((facts&&facts.opening<0)||(facts&&facts.closing<0))return true;
@@ -147,7 +159,7 @@ function vfcRbcAmountBand_(amount){
 }
 
 function vfcRbcClassifyDebit_(t){
-  const raw=String(t.description||'').replace(/\s+/g,' ').trim(),s=raw.toUpperCase(),cp=String(t.counterparty||'').replace(/\s+/g,' ').trim(),band=vfcRbcAmountBand_(t.amount),hasFinancingSignal=/\bLOAN\b|\bMORTGAGE\b|\bLOC\b|LINE\s+OF\s+CREDIT|CREDIT\s+LINE|\bFINANC(?:E|ING)?\b|\bMCA\b|\bLEASE\b|\bLSE\b/.test(s),isFeeLine=/\bFEES?\b|SERVICE\s+CHARGE|NSF\s+ITEM\s+FEES?|ITEM\s+RETURNED\s+UNPAID\s+FEE|OVERDRAFT\s+INTEREST|PAYMENT\s+COVERAGE|ACTIVITY\s+FEE|TRANSACTION\s+FEE|MONTHLY\s+FEE/.test(s);
+  const raw=String(t.description||'').replace(/\s+/g,' ').trim(),s=raw.toUpperCase(),cp=String(t.counterparty||'').replace(/\s+/g,' ').trim(),band=vfcRbcAmountBand_(t.amount),hasFinancingSignal=/\bLOAN\b|\bMORTGAGE\b|\bLOC\b|LINE\s+OF\s+CREDIT|CREDIT\s+LINE|\bFINANC(?:E|ING)?\b|\bMCA\b|\bLEASE\b|\bLSE\b/.test(s),isFeeLine=/\bFEES?\b|SERVICE\s+CHARGE|NSF\s+ITEM\s+FEES?|RETURNED[- ]?ITEM\s+FEE|ITEM\s+RETURNED\s+UNPAID\s+FEE|OVERDRAFT\s+INTEREST|PAYMENT\s+COVERAGE|ACTIVITY\s+FEE|TRANSACTION\s+FEE|MONTHLY\s+FEE/.test(s);
   if(isFeeLine&&!hasFinancingSignal)return null;
   let family='',entityKey='',label=cp||raw,debtJustification='';
   if(/COMM\s+EQUIP\s+RENT\/LSE\s+SILVERCHEF|\bSILVERCHEF\b/.test(s)){
@@ -156,7 +168,7 @@ function vfcRbcClassifyDebit_(t){
     family='MCA';entityKey='MERCHANT_GROWTH';label='Merchant Growth';debtJustification='Known MCA/funding entity plus recurring payment cadence.';
   }else if(/JOURNEY|ONDECK|\bJTO\b/.test(s)){
     family='MCA';entityKey='JOURNEY_ONDECK';label='Journey / OnDeck';debtJustification='Known MCA-style business financing entity plus recurring payment cadence.';
-  }else if(/\bBDC\b/.test(s)&&/\b(?:BUSINESS\s+)?PAD\b/.test(s)){
+  }else if(/\bBDC\b/.test(s)&&vfcRbcIsPadLikeText_(s)){
     family='FINANCING';entityKey='RBC_BDC_PAD_B'+band;label='BDC';debtJustification='Recurring BDC PAD stream. Materially different catch-up-sized amounts are isolated into separate amount bands and require independent recurrence.';
   }else if(/\bBDC\b/.test(s)&&(/BDC[- ]?LOAN\/PRET|ONLINE\s+BANKING\s+PAYMENT|\bLOAN\b|FINANC/.test(s))){
     family='FINANCING';entityKey='RBC_BDC_MANUAL_B'+band;label='BDC Manual / Loan Payment';debtJustification='BDC manual/loan payment stream is kept separate from the recurring BDC PAD so a one-time catch-up cannot inflate normal monthly debt service.';
@@ -201,8 +213,11 @@ function vfcRbcClassifyDebit_(t){
         else{entityKey='FINANCE_REF_'+n;label=(cp||raw)+' NO.'+n;}
       }else{const stable=(cp||raw).replace(/\b[0-9][0-9-]{4,}\b/g,'').replace(/\s+/g,' ').trim();entityKey='RBC_FINANCE_'+vfcCounterpartyKey_(stable||cp||raw);label=cp||raw;}
     }
-  }else if(/\bPAD\b|PRE[- ]?AUTH/.test(s)){
-    family='OTHER';entityKey='RBC_OTHER_PAD_'+vfcCounterpartyKey_(cp||raw);label=cp||raw;
+  }else if(vfcRbcIsPadLikeText_(s)){
+    family='OTHER';
+    if(/\bCAPITAL\b|\bFUNDING\b|\bADVANCE\b|\bFACTOR(?:ING)?\b/.test(s))entityKey='RBC_OTHER_POSSIBLE_FINANCE_PAD_'+vfcCounterpartyKey_(cp||raw);
+    else entityKey='RBC_OTHER_PAD_'+vfcCounterpartyKey_(cp||raw);
+    label=cp||raw;
   }else if(/\bCAPITAL\b|\bFUNDING\b|\bFACTOR(?:ING)?\b/.test(s)){
     family='OTHER';entityKey='RBC_OTHER_POSSIBLE_FINANCE_'+vfcCounterpartyKey_(cp||raw);label=cp||raw;
   }else if(/COMMERCIAL\s+RENT|\bRENT\b|HYDRO|FORTIS|TELUS|UTILITY|SUPERPASS|PETROLEUM|\bFUEL\b|EQUIPMENT\s+RENT|PAY\s+EMPLOYEE|PAYROLL/.test(s)){
@@ -216,7 +231,7 @@ function vfcRbcClassifyDebit_(t){
 
 function vfcRbcIsReturnedFinancingCredit_(t){
   if(String(t&&t.direction||'').toUpperCase()!=='CREDIT')return false;
-  return vfcRbcReturnCreditText_(t&&t.description);
+  return vfcRbcReturnEventText_(t&&t.description);
 }
 function vfcRbcIsNonOperatingTransferCredit_(t){
   if(String(t&&t.direction||'').toUpperCase()!=='CREDIT')return false;
@@ -244,20 +259,37 @@ function runRbcBankingSelfTests(){
   function truthy(value,label){if(!value)throw new Error((label||'value')+' expected truthy');}
   function test(name,fn){try{results.push({name:name,pass:true,detail:String(fn()||'')});}catch(e){results.push({name:name,pass:false,detail:String(e&&e.message||e)});}}
 
-  test('RBC return vocabulary recognizes cheque/item NSF and unpaid returns but not fees',function(){
-    truthy(vfcRbcIsReturnedFinancingCredit_(tx('2026-05-27','Cheque returned NSF','CREDIT',2606.59)),'cheque returned NSF');
-    truthy(vfcRbcIsReturnedFinancingCredit_(tx('2026-06-25','Item returned unpaid S02788','CREDIT',187.46)),'item returned unpaid');
+  test('RBC return vocabulary is broad and direction-neutral',function(){
+    truthy(vfcRbcReturnEventText_('Cheque returned NSF'),'cheque returned');
+    truthy(vfcRbcReturnEventText_('Item returned unpaid S02788'),'item returned unpaid');
+    truthy(vfcRbcReturnEventText_('PAD returned'),'PAD returned');
+    truthy(vfcRbcReturnEventText_('Direct debit returned'),'direct debit returned');
+    truthy(vfcRbcReturnEventText_('EFT returned'),'EFT returned');
+    truthy(vfcRbcReturnEventText_('Payment reversed'),'payment reversed');
+    equal(vfcRbcReturnEventText_('NSF item fee'),false,'fee not return principal');
+    equal(vfcRbcCertainDirection_(tx('2026-05-27','Cheque returned NSF','DEBIT',2606.59)),'','return direction not forced');
+    equal(vfcRbcCertainDirection_(tx('2026-06-25','Item returned unpaid S02788','CREDIT',187.46)),'','returned deposit direction not forced');
+    return'return wording preserved; printed column decides direction';
+  });
+
+  test('RBC returned-financing hook requires CREDIT direction',function(){
+    truthy(vfcRbcIsReturnedFinancingCredit_(tx('2026-05-27','Cheque returned NSF','CREDIT',2606.59)),'credit return');
+    equal(vfcRbcIsReturnedFinancingCredit_(tx('2026-06-25','Item returned unpaid S02788','DEBIT',187.46)),false,'debit return is not financing reversal credit');
     equal(vfcRbcIsReturnedFinancingCredit_(tx('2026-06-02','NSF item fee','DEBIT',45)),false,'NSF fee');
-    equal(vfcRbcCountNsf_('Cheque returned NSF 2606.59\nItem returned unpaid 187.46\nNSF item fee 45.00'),2,'return count');
-    return'expanded return vocabulary';
+    return'credit direction required for debt suppression';
   });
 
   test('RBC certain-direction rules never guess generic Misc Payment',function(){
     equal(vfcRbcCertainDirection_(tx('2026-03-12','Misc Payment 1469635','DEBIT',6585.81)),'','generic misc direction');
     equal(vfcRbcCertainDirection_(tx('2026-03-09','LOAN CREDIT','DEBIT',1000)),'CREDIT','loan credit');
     equal(vfcRbcCertainDirection_(tx('2026-05-27','Business PAD BDC','CREDIT',2606.59)),'DEBIT','business PAD');
-    equal(vfcRbcCertainDirection_(tx('2026-05-27','Cheque returned NSF','DEBIT',2606.59)),'CREDIT','return credit');
-    return'only unambiguous directions forced';
+    return'only unambiguous non-return directions forced';
+  });
+
+  test('RBC PAD vocabulary captures common future debit labels',function(){
+    ['Business PAD ABC','PAD ABC','PRE-AUTHORIZED DEBIT ABC','PREAUTHORIZED PAYMENT ABC','DIRECT DEBIT ABC','EFT DEBIT ABC','ACH DEBIT ABC','AUTOMATIC DEBIT ABC','AUTO PAYMENT ABC'].forEach(function(s){truthy(vfcRbcIsPadLikeText_(s),s);});
+    equal(vfcRbcIsPadLikeText_('PAD RETURNED ABC'),false,'returned PAD is return event, not new PAD debit');
+    return'PAD aliases covered';
   });
 
   test('RBC full-ledger audit is fail-closed on count, sum or direction mismatch',function(){
@@ -287,7 +319,9 @@ function runRbcBankingSelfTests(){
 
   test('RBC generic numeric Misc Payment never becomes an obligation',function(){equal(vfcRbcClassifyDebit_(tx('2026-03-12','Misc Payment 1469635','DEBIT',6585.81,'1469635')),null,'misc payment');return'ignored unless independently identified';});
 
-  test('RBC PAY-FILE/NSF/monthly fees are suppressed',function(){equal(vfcRbcClassifyDebit_(tx('2026-06-01','Misc Payment PAY-FILE FEES','DEBIT',2,'PAY-FILE FEES')),null,'PAY-FILE');equal(vfcRbcClassifyDebit_(tx('2026-06-02','NSF item fee','DEBIT',45,'NSF item fee')),null,'NSF fee');equal(vfcRbcClassifyDebit_(tx('2026-06-01','Monthly fee','DEBIT',6,'Monthly fee')),null,'monthly fee');return'fees excluded';});
+  test('RBC PAY-FILE/NSF/monthly/returned-item fees are suppressed',function(){
+    equal(vfcRbcClassifyDebit_(tx('2026-06-01','Misc Payment PAY-FILE FEES','DEBIT',2,'PAY-FILE FEES')),null,'PAY-FILE');equal(vfcRbcClassifyDebit_(tx('2026-06-02','NSF item fee','DEBIT',45,'NSF item fee')),null,'NSF fee');equal(vfcRbcClassifyDebit_(tx('2026-06-25','Item returned unpaid fee','DEBIT',7,'returned fee')),null,'returned-item fee');equal(vfcRbcClassifyDebit_(tx('2026-06-01','Monthly fee','DEBIT',6,'Monthly fee')),null,'monthly fee');return'fees excluded';
+  });
 
   test('RBC BDC amount bands separate regular PAD, catch-up and manual loan payment',function(){
     const regular=vfcRbcClassifyDebit_(tx('2026-03-27','Business PAD BDC','DEBIT',2578.34,'BDC')),regular2=vfcRbcClassifyDebit_(tx('2026-08-17','Business PAD BDC','DEBIT',2285.91,'BDC')),catchup=vfcRbcClassifyDebit_(tx('2026-07-27','Business PAD BDC','DEBIT',7952.39,'BDC')),manual=vfcRbcClassifyDebit_(tx('2026-07-28','Online Banking payment - 0071 BDC-LOAN/PRET','DEBIT',5324.91,'BDC'));
@@ -306,9 +340,24 @@ function runRbcBankingSelfTests(){
     const bdc=d.activeDebtObligations.filter(function(x){return x.counterparty==='BDC';});equal(bdc.length,1,'active recurring BDC PAD streams');close(bdc[0].monthlyEquivalent,2507.07,.05,'regular BDC monthly debt');truthy(d.returnedFinanceDebitsSuppressed>=2,'returned BDC debits suppressed');return'BDC='+bdc[0].monthlyEquivalent;
   });
 
+  test('RBC debit-side returned deposited item is risk only and never suppresses financing debt',function(){
+    const debits=[Object.assign({bankId:'RBC'},tx('2026-06-25','Item returned unpaid S02788','DEBIT',187.46,'Returned deposited item'))],credits=[];
+    equal(vfcSuppressReturnedFinanceDebits_(debits,credits).length,1,'debit-side return retained');
+    equal(vfcRbcIsReturnedFinancingCredit_(debits[0]),false,'not reversal credit');
+    return'direction-safe';
+  });
+
   test('RBC recurring IPFS 234.96 is financing; one-time 502.45 stays separate',function(){
     const d=vfcDebtProfile_([row('2026-06-30',[tx('2026-06-22','Business PAD IPFS Canada','DEBIT',502.45,'IPFS Canada')]),row('2026-07-31',[tx('2026-07-02','Business PAD IPFS Canada','DEBIT',234.96,'IPFS Canada')]),row('2026-08-31',[tx('2026-08-04','Business PAD IPFS Canada','DEBIT',234.96,'IPFS Canada')]),row('2026-09-30',[tx('2026-09-01','Business PAD IPFS Canada','DEBIT',234.96,'IPFS Canada')])]);
     const ipfs=d.activeDebtObligations.filter(function(x){return /IPFS/i.test(x.counterparty||'')});equal(ipfs.length,1,'recurring IPFS stream');close(ipfs[0].monthlyEquivalent,234.96,.02,'IPFS monthly');return'IPFS='+ipfs[0].monthlyEquivalent;
+  });
+
+  test('RBC generic PAD/direct debit aliases remain informational without finance evidence',function(){
+    const rows=[row('2026-01-31',[tx('2026-01-12','DIRECT DEBIT ABC SERVICES','DEBIT',500,'ABC SERVICES')]),row('2026-02-28',[tx('2026-02-12','EFT DEBIT ABC SERVICES','DEBIT',500,'ABC SERVICES')]),row('2026-03-31',[tx('2026-03-12','PREAUTHORIZED DEBIT ABC SERVICES','DEBIT',500,'ABC SERVICES')])],d=vfcDebtProfile_(rows);close(d.confirmedMonthlyDebtService,0,.001,'unknown direct debit debt');return'informational only';
+  });
+
+  test('RBC explicit finance PAD can become debt only after recurrence',function(){
+    const d=vfcDebtProfile_([row('2026-01-31',[tx('2026-01-12','PAD ABC FINANCING LOAN','DEBIT',500,'ABC FINANCING')]),row('2026-02-28',[tx('2026-02-12','PAD ABC FINANCING LOAN','DEBIT',500,'ABC FINANCING')]),row('2026-03-31',[tx('2026-03-12','PAD ABC FINANCING LOAN','DEBIT',500,'ABC FINANCING')])]);close(d.confirmedMonthlyDebtService,500,.02,'explicit finance PAD');return'confirmed after recurrence';
   });
 
   test('RBC MCA-style funders and iCapital use correct families',function(){equal(vfcRbcClassifyDebit_(tx('2026-01-03','JOURNEY/ONDECK BUS','DEBIT',900,'JOURNEY')).family,'MCA','Journey');equal(vfcRbcClassifyDebit_(tx('2026-01-03','CANACAP Funding payment','DEBIT',900,'CANACAP')).family,'MCA','Canacap');equal(vfcRbcClassifyDebit_(tx('2026-01-03','GREENBOX CAPITAL','DEBIT',900,'GREENBOX')).family,'MCA','Greenbox');equal(vfcRbcClassifyDebit_(tx('2026-01-03','ICAPITAL payment','DEBIT',900,'ICAPITAL')).family,'FINANCING','iCapital');return'families correct';});
