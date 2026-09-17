@@ -1,5 +1,5 @@
 /**
- * RBC BANK ENGINE v2.3 — CANDIDATE / FINAL REVALIDATION
+ * RBC BANK ENGINE v2.4 — CANDIDATE / FINAL REVALIDATION
  * ONE PERMANENT RBC FILE.
  *
  * Design goals:
@@ -9,6 +9,7 @@
  * - ambiguous wording is never used to guess direction
  * - all visible PAD / pre-authorized debit families are preserved
  * - all visible NSF / return / reversal families are preserved as risk facts
+ * - borrower NSF events are separated from returned-deposit events
  * - a failed financing debit is removed from debt service only when a same-amount RETURN CREDIT can be tied to it safely
  * - unknown PADs stay informational unless independent financing evidence exists
  * - bank-specific behavior stays in this one RBC file
@@ -18,7 +19,7 @@ function vfcRbcBankProfile_(){
     id:'RBC',
     label:'RBC',
     status:'CANDIDATE',
-    rulesVersion:'RBC-2.3-CANDIDATE',
+    rulesVersion:'RBC-2.4-CANDIDATE',
     intakeContract:'BANK_MATCHED_FROZEN_LEDGER_V2',
     aliases:['ROYAL BANK OF CANADA','RBC ROYAL BANK','RBC']
   };
@@ -35,6 +36,7 @@ function vfcRbcExtractionRules_(){return[
   'Unknown PAD/direct-debit counterparties remain informational unless independent lender/loan/MCA/finance/lease evidence exists. Same amount or recurrence alone never proves financing debt.',
   'Preserve EVERY visible return/NSF/reversal event exactly, including CHEQUE RETURNED NSF, CHECK RETURNED NSF, ITEM RETURNED NSF, ITEM RETURNED UNPAID, RETURNED ITEM, RETURNED CHEQUE/CHECK, RETURNED PAYMENT, PAYMENT RETURNED, PAD RETURNED, PREAUTHORIZED DEBIT RETURNED, DIRECT DEBIT RETURNED, EFT RETURNED, ACH RETURNED, DEBIT RETURNED, REVERSED/REVERSAL and similar bank return wording.',
   'IMPORTANT RETURN DIRECTION RULE: return wording does NOT determine CREDIT versus DEBIT. A returned financing PAD may be a CREDIT reversing a debit, while a returned deposited cheque may be a DEBIT reversing a prior deposit. Preserve the printed RBC column exactly.',
+  'BORROWER NSF COUNT: only return/reversal transactions printed as CREDIT and therefore reversing a borrower debit/PAD count as borrower failed-payment/NSF events. A returned deposited item printed as DEBIT remains a return risk fact but does not increase borrower NSF count.',
   'Preserve NSF item fee / returned-item fee separately as a DEBIT fee; a fee is not the returned principal amount and must never suppress debt service.',
   'NSF/retry rule: preserve the original attempted debit, the return/reversal transaction and any later retry as separate printed facts. Deterministic Core suppression occurs only for a return transaction that is actually a CREDIT and safely matches a financing debit by amount/date/entity evidence.',
   'RBC printed opening balance, closing balance, deposits and withdrawals must reconcile to the cent before the statement is saved. Visible negative running balances are locked deterministically.',
@@ -80,7 +82,7 @@ function vfcRbcLockFacts_(summary,text,fileName){
   locked.rbc_full_ledger_verified=true;
   locked.rbc_credit_transaction_count=ledgerAudit.creditCount;
   locked.rbc_debit_transaction_count=ledgerAudit.debitCount;
-  locked.nsf_count=vfcRbcCountReturnEvents_(locked.banking_transactions);
+  locked.nsf_count=vfcRbcCountBorrowerNsfEvents_(locked.banking_transactions);
   locked.negative_balance_detected=vfcRbcNegativeBalanceFlag_(text,facts);
   return locked;
 }
@@ -138,10 +140,13 @@ function vfcRbcReturnEventText_(value){
   if(!s||/\b(?:FEE|FEES|CHARGE)\b/.test(s))return false;
   return/CHEQUE\s+RETURNED(?:\s+NSF)?|CHECK\s+RETURNED(?:\s+NSF)?|ITEM\s+RETURNED(?:\s+NSF|\s+UNPAID)?|RETURNED\s+(?:ITEM|CHEQUE|CHECK|PAYMENT|PAD|DEBIT|EFT|ACH|DEPOSIT)|(?:PAYMENT|PAD|DEBIT|EFT|ACH|DEPOSIT)\s+RETURNED|PRE[- ]?AUTH(?:ORIZED)?\s+(?:DEBIT|PAYMENT)\s+RETURNED|PREAUTHORIZED\s+(?:DEBIT|PAYMENT)\s+RETURNED|DIRECT\s+DEBIT\s+RETURNED|REJECTED\s+(?:PAD|DEBIT|PAYMENT)|\bREVERSAL\b|\bREVERSED\b|NSF\s+RETURN/.test(s);
 }
-/** Backward-compatible helper name: this identifies return wording only; caller must still verify CREDIT direction. */
+/** Backward-compatible helper name: identifies return wording only; caller must still verify CREDIT direction. */
 function vfcRbcReturnCreditText_(value){return vfcRbcReturnEventText_(value);}
 function vfcRbcCountReturnEvents_(items){
   return(Array.isArray(items)?items:[]).filter(function(t){return vfcRbcReturnEventText_(t&&t.description);}).length;
+}
+function vfcRbcCountBorrowerNsfEvents_(items){
+  return(Array.isArray(items)?items:[]).filter(function(t){return String(t&&t.direction||'').toUpperCase()==='CREDIT'&&vfcRbcReturnEventText_(t&&t.description);}).length;
 }
 function vfcRbcCountNsf_(text){
   const s=String(text||'').toUpperCase(),patterns=[/CHEQUE\s+RETURNED(?:\s+NSF)?/g,/CHECK\s+RETURNED(?:\s+NSF)?/g,/ITEM\s+RETURNED(?:\s+NSF|\s+UNPAID)?/g,/RETURNED\s+(?:PAYMENT|PAD|DEBIT|EFT|ACH)/g,/(?:PAYMENT|PAD|DEBIT|EFT|ACH)\s+RETURNED/g,/\bREVERSAL\b/g,/\bREVERSED\b/g];
@@ -272,6 +277,13 @@ function runRbcBankingSelfTests(){
     return'return wording preserved; printed column decides direction';
   });
 
+  test('RBC borrower NSF count excludes debit-side returned deposits',function(){
+    const rows=[tx('2026-05-27','Cheque returned NSF','CREDIT',2606.59),tx('2026-06-29','Cheque returned NSF','CREDIT',5289.91),tx('2026-06-25','Item returned unpaid S02788','DEBIT',187.46),tx('2026-06-25','NSF item fee','DEBIT',45)];
+    equal(vfcRbcCountReturnEvents_(rows),3,'all principal return events');
+    equal(vfcRbcCountBorrowerNsfEvents_(rows),2,'borrower NSF events');
+    return'2 borrower NSF events, 1 returned-deposit event';
+  });
+
   test('RBC returned-financing hook requires CREDIT direction',function(){
     truthy(vfcRbcIsReturnedFinancingCredit_(tx('2026-05-27','Cheque returned NSF','CREDIT',2606.59)),'credit return');
     equal(vfcRbcIsReturnedFinancingCredit_(tx('2026-06-25','Item returned unpaid S02788','DEBIT',187.46)),false,'debit return is not financing reversal credit');
@@ -342,9 +354,7 @@ function runRbcBankingSelfTests(){
 
   test('RBC debit-side returned deposited item is risk only and never suppresses financing debt',function(){
     const debits=[Object.assign({bankId:'RBC'},tx('2026-06-25','Item returned unpaid S02788','DEBIT',187.46,'Returned deposited item'))],credits=[];
-    equal(vfcSuppressReturnedFinanceDebits_(debits,credits).length,1,'debit-side return retained');
-    equal(vfcRbcIsReturnedFinancingCredit_(debits[0]),false,'not reversal credit');
-    return'direction-safe';
+    equal(vfcSuppressReturnedFinanceDebits_(debits,credits).length,1,'debit-side return retained');equal(vfcRbcIsReturnedFinancingCredit_(debits[0]),false,'not reversal credit');return'direction-safe';
   });
 
   test('RBC recurring IPFS 234.96 is financing; one-time 502.45 stays separate',function(){
