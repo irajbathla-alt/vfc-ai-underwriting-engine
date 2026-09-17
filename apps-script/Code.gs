@@ -1,6 +1,7 @@
 const VFC_CONFIG = {
   ROOT_FOLDER_NAME: 'VFC AI Engine',
   OPENAI_MODEL: 'gpt-4.1-mini',
+  PDF_TEXT_PROVIDER: 'OPENAI_FILE_INPUT',
   OCR_RETRY_ATTEMPTS: 6,
   OCR_DELAY_MS: 5000,
   OCR_MIN_INTERVAL_MS: 6000,
@@ -115,10 +116,121 @@ function vfcPutCachedOcrText_(cacheKey,text){
   }catch(e){}
 }
 
+function vfcOpenAiResponseText_(body){
+  if(!body)return'';
+  if(body.output_text)return String(body.output_text);
+  const out=Array.isArray(body.output)?body.output:[];
+  for(let i=0;i<out.length;i++){
+    const content=Array.isArray(out[i]&&out[i].content)?out[i].content:[];
+    for(let j=0;j<content.length;j++){
+      if(content[j]&&typeof content[j].text==='string'&&content[j].text)return content[j].text;
+    }
+  }
+  return'';
+}
+
+/**
+ * Primary PDF text path.
+ * OpenAI Responses accepts PDF/file input directly, so statement intake no longer depends on
+ * Google Drive OCR availability. The temporary OpenAI file is deleted immediately after use.
+ */
+function vfcExtractPdfTextWithOpenAI_(pdfBlob,fileName){
+  const apiKey=PropertiesService.getScriptProperties().getProperty('OPENAI_API_KEY');
+  if(!apiKey)throw new Error('Missing OPENAI_API_KEY in Script Properties.');
+  const safeName=String(fileName||pdfBlob.getName()||'statement.pdf');
+  let openAiFileId='';
+  try{
+    const upload=UrlFetchApp.fetch('https://api.openai.com/v1/files',{
+      method:'post',
+      headers:{Authorization:'Bearer '+apiKey},
+      payload:{purpose:'user_data',file:pdfBlob.setName(safeName)},
+      muteHttpExceptions:true
+    });
+    const uploadCode=upload.getResponseCode(),uploadText=upload.getContentText();
+    let uploadBody={};
+    try{uploadBody=JSON.parse(uploadText);}catch(e){}
+    if(uploadCode<200||uploadCode>=300||!uploadBody.id){
+      const msg=uploadBody&&uploadBody.error&&uploadBody.error.message?uploadBody.error.message:uploadText;
+      throw new Error('OpenAI PDF upload failed (HTTP '+uploadCode+'): '+String(msg||'unknown error'));
+    }
+    openAiFileId=uploadBody.id;
+
+    const prompt=[
+      'Extract the complete visible text from this bank-statement PDF.',
+      'This is a transcription task only. Do not summarize, classify, underwrite or omit ordinary transactions.',
+      'Preserve page order, statement headings, account summary lines, Account Activity rows, dates, descriptions, amounts, debit/credit column meaning, balances, NSF/return wording, fees and cheque references.',
+      'Do not invent text. Do not duplicate cheque-image/support-page entries when they repeat Account Activity.',
+      'Return plain text only.'
+    ].join('\n');
+
+    const response=UrlFetchApp.fetch('https://api.openai.com/v1/responses',{
+      method:'post',
+      contentType:'application/json',
+      headers:{Authorization:'Bearer '+apiKey},
+      payload:JSON.stringify({
+        model:VFC_CONFIG.OPENAI_MODEL,
+        input:[{
+          role:'user',
+          content:[
+            {type:'input_file',file_id:openAiFileId},
+            {type:'input_text',text:prompt}
+          ]
+        }]
+      }),
+      muteHttpExceptions:true
+    });
+    const code=response.getResponseCode(),raw=response.getContentText();
+    let body={};
+    try{body=JSON.parse(raw);}catch(e){}
+    if(code<200||code>=300||body.error){
+      const msg=body&&body.error&&body.error.message?body.error.message:raw;
+      throw new Error('OpenAI PDF text extraction failed (HTTP '+code+'): '+String(msg||'unknown error'));
+    }
+    const text=vfcOpenAiResponseText_(body);
+    if(!String(text||'').trim())throw new Error('OpenAI PDF text extraction returned empty text.');
+    return String(text);
+  }finally{
+    if(openAiFileId){
+      try{
+        UrlFetchApp.fetch('https://api.openai.com/v1/files/'+encodeURIComponent(openAiFileId),{
+          method:'delete',
+          headers:{Authorization:'Bearer '+apiKey},
+          muteHttpExceptions:true
+        });
+      }catch(e){}
+    }
+  }
+}
+
 function vfcThrottleDriveOcr_(){
   const props=PropertiesService.getScriptProperties(),now=Date.now(),last=Number(props.getProperty('VFC_LAST_DRIVE_OCR_MS')||0),minimum=Math.max(1000,Number(VFC_CONFIG.OCR_MIN_INTERVAL_MS||6000)),wait=Math.max(0,minimum-(now-last));
   if(wait>0)Utilities.sleep(wait);
   props.setProperty('VFC_LAST_DRIVE_OCR_MS',String(Date.now()));
+}
+
+function vfcExtractPdfTextWithDriveOcr_(sourceFile,pdfBlob){
+  let lastError=null;
+  for(let attempt=1;attempt<=VFC_CONFIG.OCR_RETRY_ATTEMPTS;attempt++){
+    let convertedId='';
+    try{
+      vfcThrottleDriveOcr_();
+      const converted=Drive.Files.insert({title:'OCR_'+sourceFile.getName()},pdfBlob,{convert:true,ocr:true,ocrLanguage:'en'});
+      convertedId=converted&&converted.id||'';
+      if(!convertedId)throw new Error('Drive OCR did not create a converted document.');
+      const doc=DocumentApp.openById(convertedId),text=String(doc.getBody().getText()||'');
+      if(!text.trim())throw new Error('Drive OCR returned empty text.');
+      return text;
+    }catch(error){
+      lastError=error;
+      const message=String(error&&error.message||error),rateLimited=/user rate limit|rate limit|too many requests|quota.*ocr|ocr.*quota/i.test(message),retryable=rateLimited||/backend error|internal error|service unavailable|temporar/i.test(message);
+      if(!retryable||attempt===VFC_CONFIG.OCR_RETRY_ATTEMPTS)break;
+      const wait=rateLimited?Math.min(60000,Math.max(10000,Number(VFC_CONFIG.OCR_RATE_LIMIT_BACKOFF_MS||20000)*attempt)):Math.min(20000,Number(VFC_CONFIG.OCR_DELAY_MS||5000)*Math.pow(2,attempt-1));
+      Utilities.sleep(wait);
+    }finally{
+      if(convertedId){try{DriveApp.getFileById(convertedId).setTrashed(true);}catch(e){}}
+    }
+  }
+  throw new Error('Google Drive OCR fallback failed after paced retries: '+String(lastError&&lastError.message||lastError));
 }
 
 function extractTextFromPdf_(fileId) {
@@ -128,36 +240,34 @@ function extractTextFromPdf_(fileId) {
 
   const lock=LockService.getScriptLock();
   if(!lock.tryLock(300000))throw new Error('PDF text extraction queue is busy. Please retry the upload in a moment.');
-  let lastError=null;
   try{
     const cachedAfterLock=vfcGetCachedOcrText_(cacheKey);
     if(cachedAfterLock)return cachedAfterLock;
 
-    for(let attempt=1;attempt<=VFC_CONFIG.OCR_RETRY_ATTEMPTS;attempt++){
-      let convertedId='';
-      try{
-        vfcThrottleDriveOcr_();
-        const converted=Drive.Files.insert({title:'OCR_'+sourceFile.getName()},pdfBlob,{convert:true,ocr:true,ocrLanguage:'en'});
-        convertedId=converted&&converted.id||'';
-        if(!convertedId)throw new Error('Drive OCR did not create a converted document.');
-        const doc=DocumentApp.openById(convertedId),text=String(doc.getBody().getText()||'');
-        if(!text.trim())throw new Error('Drive OCR returned empty text.');
-        vfcPutCachedOcrText_(cacheKey,text);
-        return text;
-      }catch(error){
-        lastError=error;
-        const message=String(error&&error.message||error),rateLimited=/user rate limit|rate limit|too many requests|quota.*ocr|ocr.*quota/i.test(message),retryable=rateLimited||/backend error|internal error|service unavailable|temporar/i.test(message);
-        if(!retryable||attempt===VFC_CONFIG.OCR_RETRY_ATTEMPTS)break;
-        const wait=rateLimited?Math.min(60000,Math.max(10000,Number(VFC_CONFIG.OCR_RATE_LIMIT_BACKOFF_MS||20000)*attempt)):Math.min(20000,Number(VFC_CONFIG.OCR_DELAY_MS||5000)*Math.pow(2,attempt-1));
-        Utilities.sleep(wait);
-      }finally{
-        if(convertedId){try{DriveApp.getFileById(convertedId).setTrashed(true);}catch(e){}}
-      }
+    let openAiError=null;
+    try{
+      const text=vfcExtractPdfTextWithOpenAI_(pdfBlob,sourceFile.getName());
+      vfcPutCachedOcrText_(cacheKey,text);
+      return text;
+    }catch(e){
+      openAiError=e;
+    }
+
+    try{
+      const text=vfcExtractPdfTextWithDriveOcr_(sourceFile,pdfBlob);
+      vfcPutCachedOcrText_(cacheKey,text);
+      return text;
+    }catch(driveError){
+      throw new Error(
+        'PDF text extraction failed on both providers. OpenAI file input: '+
+        String(openAiError&&openAiError.message||openAiError)+
+        ' | Google Drive OCR fallback: '+
+        String(driveError&&driveError.message||driveError)
+      );
     }
   }finally{
     try{lock.releaseLock();}catch(e){}
   }
-  throw new Error('PDF text extraction could not complete after paced OCR retries. The same PDF will use the persistent OCR cache once a read succeeds. Original error: '+String(lastError&&lastError.message||lastError));
 }
 
 function buildSingleBankStatementPrompt_(text, companyName, fileName) {
