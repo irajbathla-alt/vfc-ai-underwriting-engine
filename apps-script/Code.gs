@@ -1,10 +1,12 @@
 const VFC_CONFIG = {
   ROOT_FOLDER_NAME: 'VFC AI Engine',
   OPENAI_MODEL: 'gpt-4.1-mini',
+  PDF_EXTRACTION_MODEL: 'gpt-4.1',
+  PDF_REPAIR_MODEL: 'gpt-4.1',
 
   // PDF intake: OpenAI file input is primary. Google Drive OCR is fallback only.
   PDF_TEXT_PROVIDER: 'OPENAI_FILE_INPUT',
-  PDF_TEXT_CACHE_VERSION: 'VFC-PDF-TEXT-2.0',
+  PDF_TEXT_CACHE_VERSION: 'VFC-PDF-TEXT-3.0-COLUMN-STRICT',
   PDF_TEXT_MAX_OUTPUT_TOKENS: 20000,
   PDF_TEXT_CACHE_FOLDER_NAME: '_PDF_TEXT_CACHE',
   DRIVE_OCR_FALLBACK_ENABLED: true,
@@ -141,6 +143,112 @@ function vfcOpenAiResponseText_(body){
   return parts.join('\n');
 }
 
+function vfcBankLedgerJsonSchema_(){
+  return{
+    type:'object',
+    additionalProperties:false,
+    properties:{
+      banking_transactions:{
+        type:'array',
+        items:{
+          type:'object',
+          additionalProperties:false,
+          properties:{
+            date:{type:'string'},
+            description:{type:'string'},
+            counterparty:{type:'string'},
+            direction:{type:'string',enum:['DEBIT','CREDIT']},
+            amount:{type:'number'}
+          },
+          required:['date','description','counterparty','direction','amount']
+        }
+      }
+    },
+    required:['banking_transactions']
+  };
+}
+
+/**
+ * Read a complete ledger directly from the original staged PDF. This deliberately
+ * bypasses the cached transcript when deterministic statement checks prove that
+ * the transcript-derived ledger has a missing row, wrong amount or wrong column.
+ */
+function vfcReadBankLedgerFromPdfWithOpenAI_(sourceFileId,prompt,label){
+  if(!sourceFileId)throw new Error('Original PDF file ID is required for ledger recovery.');
+  const apiKey=PropertiesService.getScriptProperties().getProperty('OPENAI_API_KEY');
+  if(!apiKey)throw new Error('Missing OPENAI_API_KEY in Script Properties.');
+
+  const sourceFile=DriveApp.getFileById(sourceFileId),
+        pdfBlob=sourceFile.getBlob().setContentType('application/pdf').setName(sourceFile.getName()),
+        requestLabel=String(label||'original PDF ledger recovery');
+  let openAiFileId='';
+  try{
+    const upload=UrlFetchApp.fetch('https://api.openai.com/v1/files',{
+      method:'post',
+      headers:{Authorization:'Bearer '+apiKey},
+      payload:{purpose:'user_data',file:pdfBlob},
+      muteHttpExceptions:true
+    });
+    const uploadCode=upload.getResponseCode(),uploadText=upload.getContentText();
+    let uploadBody={};
+    try{uploadBody=JSON.parse(uploadText);}catch(e){}
+    if(uploadCode<200||uploadCode>=300||!uploadBody.id){
+      const uploadMessage=uploadBody&&uploadBody.error&&uploadBody.error.message?uploadBody.error.message:uploadText;
+      throw new Error(requestLabel+' PDF upload failed (HTTP '+uploadCode+'): '+String(uploadMessage||'unknown error'));
+    }
+    openAiFileId=String(uploadBody.id);
+
+    const response=UrlFetchApp.fetch('https://api.openai.com/v1/responses',{
+      method:'post',
+      contentType:'application/json',
+      headers:{Authorization:'Bearer '+apiKey},
+      payload:JSON.stringify({
+        model:VFC_CONFIG.PDF_REPAIR_MODEL||VFC_CONFIG.PDF_EXTRACTION_MODEL||VFC_CONFIG.OPENAI_MODEL,
+        temperature:0,
+        max_output_tokens:Number(VFC_CONFIG.PDF_TEXT_MAX_OUTPUT_TOKENS||20000),
+        input:[{
+          role:'user',
+          content:[
+            {type:'input_file',file_id:openAiFileId},
+            {type:'input_text',text:String(prompt||'')}
+          ]
+        }],
+        text:{format:{
+          type:'json_schema',
+          name:'vfc_bank_statement_ledger',
+          strict:true,
+          schema:vfcBankLedgerJsonSchema_()
+        }}
+      }),
+      muteHttpExceptions:true
+    });
+
+    const code=response.getResponseCode(),raw=response.getContentText();
+    let body={};
+    try{body=JSON.parse(raw);}catch(e){}
+    if(code<200||code>=300||body.error){
+      const responseMessage=body&&body.error&&body.error.message?body.error.message:raw;
+      throw new Error(requestLabel+' failed (HTTP '+code+'): '+String(responseMessage||'unknown error'));
+    }
+    const outputText=vfcOpenAiResponseText_(body);
+    if(!String(outputText||'').trim())throw new Error(requestLabel+' returned no structured ledger.');
+    let parsed;
+    try{parsed=JSON.parse(outputText);}catch(e){throw new Error(requestLabel+' returned invalid ledger JSON.');}
+    if(!parsed||!Array.isArray(parsed.banking_transactions))throw new Error(requestLabel+' returned no banking_transactions array.');
+    return parsed;
+  }finally{
+    if(openAiFileId){
+      try{
+        UrlFetchApp.fetch('https://api.openai.com/v1/files/'+encodeURIComponent(openAiFileId),{
+          method:'delete',
+          headers:{Authorization:'Bearer '+apiKey},
+          muteHttpExceptions:true
+        });
+      }catch(e){}
+    }
+  }
+}
+
 /**
  * Primary PDF text provider.
  * The output is a provider-neutral transcript. It is cached by PDF SHA-256 + extractor version,
@@ -189,7 +297,7 @@ function vfcExtractPdfTextWithOpenAI_(pdfBlob,fileName){
       contentType:'application/json',
       headers:{Authorization:'Bearer '+apiKey},
       payload:JSON.stringify({
-        model:VFC_CONFIG.OPENAI_MODEL,
+        model:VFC_CONFIG.PDF_EXTRACTION_MODEL||VFC_CONFIG.OPENAI_MODEL,
         temperature:0,
         max_output_tokens:Number(VFC_CONFIG.PDF_TEXT_MAX_OUTPUT_TOKENS||20000),
         input:[{
@@ -335,6 +443,14 @@ function runPdfIntakeSelfTests(){
   test('Drive OCR is fallback, not primary',function(){
     equal(VFC_CONFIG.PDF_TEXT_PROVIDER,'OPENAI_FILE_INPUT','provider');
     return String(VFC_CONFIG.DRIVE_OCR_FALLBACK_ENABLED);
+  });
+
+  test('PDF extraction and recovery use fresh high-accuracy configuration',function(){
+    if(String(VFC_CONFIG.PDF_TEXT_CACHE_VERSION).indexOf('VFC-PDF-TEXT-3.0')!==0)throw new Error('stale PDF cache generation');
+    equal(VFC_CONFIG.PDF_EXTRACTION_MODEL,'gpt-4.1','extraction model');
+    equal(VFC_CONFIG.PDF_REPAIR_MODEL,'gpt-4.1','repair model');
+    equal(vfcBankLedgerJsonSchema_().required[0],'banking_transactions','ledger schema');
+    return VFC_CONFIG.PDF_TEXT_CACHE_VERSION;
   });
 
   const failed=results.filter(function(x){return!x.pass;});
