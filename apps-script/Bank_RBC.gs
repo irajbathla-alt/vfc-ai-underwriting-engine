@@ -1,5 +1,5 @@
 /**
- * RBC BANK ENGINE v3.6 — CANDIDATE / DATE-SAFE OBLIGATION CADENCE
+ * RBC BANK ENGINE v3.6.1 — CANDIDATE / SELF-CONTAINED DATE GUARD
  * ONE PERMANENT RBC FILE.
  *
  * Architecture:
@@ -19,8 +19,8 @@ function vfcRbcBankProfile_(){
     id:'RBC',
     label:'RBC',
     status:'CANDIDATE',
-    rulesVersion:'RBC-3.6-CANDIDATE',
-    runtimeFingerprint:'RBC-3.6-DATE-SAFE-OBLIGATIONS-20260918',
+    rulesVersion:'RBC-3.6.1-CANDIDATE',
+    runtimeFingerprint:'RBC-3.6.1-SELF-CONTAINED-DATE-GUARD-20260918',
     intakeContract:'BANK_MATCHED_FROZEN_LEDGER_V2',
     aliases:['ROYAL BANK OF CANADA','RBC ROYAL BANK','RBC']
   };
@@ -244,12 +244,26 @@ function vfcRbcLedgerPreview_(rows,direction){
   return(rows||[]).filter(function(t){return String(t&&t.direction||'').toUpperCase()===direction;}).slice(0,40).map(function(t){return String(t.date||'')+' '+String(t.description||'')+' $'+vfcNum_(t.amount);}).join(' | ');
 }
 
+/**
+ * RBC keeps its printed-period audit self-contained so a staged Apps Script
+ * deployment cannot fail merely because BankingCore was saved a moment later.
+ * Only an exact, valid ISO calendar date is accepted; no timezone conversion
+ * is allowed in this statement-level checksum guard.
+ */
+function vfcRbcIsoDayNumber_(value){
+  const m=String(value==null?'':value).trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if(!m)return null;
+  const year=Number(m[1]),month=Number(m[2]),day=Number(m[3]),date=new Date(Date.UTC(year,month-1,day));
+  if(date.getUTCFullYear()!==year||date.getUTCMonth()!==month-1||date.getUTCDate()!==day)return null;
+  return Math.floor(date.getTime()/86400000);
+}
+
 function vfcRbcAuditFullLedger_(items,facts,text,fileName){
   const rows=Array.isArray(items)?items:[],printed=vfcRbcPrintedActivityCounts_(text),s=vfcRbcLedgerStats_(rows);
   if(printed.creditCount===null||printed.debitCount===null)throw new Error('RBC printed transaction counts are missing for '+fileName+'.');
   if(s.bad.length)throw new Error('RBC full ledger contains incomplete transaction row(s) '+s.bad.join(', ')+' for '+fileName+'.');
-  const startDay=vfcIsoDayNumber_(facts&&facts.startDate),endDay=vfcIsoDayNumber_(facts&&facts.endDate),outside=[];
-  if(startDay!==null&&endDay!==null)rows.forEach(function(t,i){const day=vfcIsoDayNumber_(t&&t.date);if(day===null||day<startDay||day>endDay)outside.push((i+1)+':'+String(t&&t.date||''));});
+  const startDay=vfcRbcIsoDayNumber_(facts&&facts.startDate),endDay=vfcRbcIsoDayNumber_(facts&&facts.endDate),outside=[];
+  if(startDay!==null&&endDay!==null)rows.forEach(function(t,i){const day=vfcRbcIsoDayNumber_(t&&t.date);if(day===null||day<startDay||day>endDay)outside.push((i+1)+':'+String(t&&t.date||''));});
   if(outside.length)throw new Error('RBC ledger contains transaction date(s) outside the printed statement period for '+fileName+': '+outside.slice(0,12).join(', ')+'.');
 
   const creditCountOk=s.creditCount===printed.creditCount,
@@ -463,7 +477,7 @@ function runRbcBankingSelfTests(){
     equal(after.debitCount,56,'corrected debits');close(after.totalDebits,63781.21,.001,'corrected debit total');
     equal(locked.rbc_direction_repairs.length,5,'recorded direction repairs');
     equal(locked.rbc_ledger_repair_passes,0,'AI repair passes');
-    equal(locked.rbc_runtime_fingerprint,'RBC-3.6-DATE-SAFE-OBLIGATIONS-20260918','runtime fingerprint');
+    equal(locked.rbc_runtime_fingerprint,'RBC-3.6.1-SELF-CONTAINED-DATE-GUARD-20260918','runtime fingerprint');
     return'18 credits/$56889.45; 56 debits/$63781.21';
   });
   test('AIM HIGH Jun-Jul printed credits are exactly 24 and $90,909.53',function(){
@@ -495,6 +509,7 @@ function runRbcBankingSelfTests(){
   });
   test('Exact ledger audit passes only when count and totals both match',function(){const text='Total deposits & credits (2) + 150.00\nTotal cheques & debits (2) - 30.00',facts={deposits:150,withdrawals:30},good=[tx('2026-01-01','A','CREDIT',100),tx('2026-01-02','B','CREDIT',50),tx('2026-01-03','C','DEBIT',10),tx('2026-01-04','D','DEBIT',20)];const a=vfcRbcAuditFullLedger_(good,facts,text,'x.pdf');equal(a.creditCount,2,'credits');let failed=false;try{vfcRbcAuditFullLedger_(good.slice(1),facts,text,'x.pdf');}catch(e){failed=true;}truthy(failed,'missing row fails');return'exact';});
   test('Ledger audit rejects a transaction date outside the printed period',function(){const text='Total deposits & credits (0) + 0.00\nTotal cheques & debits (1) - 234.96',facts={startDate:'2026-08-03',endDate:'2026-09-02',deposits:0,withdrawals:234.96},rows=[tx('2026-08-01','Business PAD IPFS Canada','DEBIT',234.96,'IPFS Canada')];let failed=false;try{vfcRbcAuditFullLedger_(rows,facts,text,'Aug-Sep.pdf');}catch(e){failed=/outside the printed statement period/i.test(String(e&&e.message||e));}truthy(failed,'out-of-range date');return'rejected';});
+  test('RBC printed-period date guard has no BankingCore dependency',function(){equal(vfcRbcIsoDayNumber_('2026-09-01')-vfcRbcIsoDayNumber_('2026-08-31'),1,'day boundary');equal(vfcRbcIsoDayNumber_('2026-02-30'),null,'invalid calendar date');return'self-contained';});
   test('Opening/closing/support artifacts are excluded',function(){const p=vfcRbcPrepareLedger_([tx('2026-03-02','Opening balance','CREDIT',4710.90),tx('2026-03-03','Loan BK OF MONTREAL','DEBIT',599.22),tx('2026-04-02','Serial #: 343 Amount: $315.00','CREDIT',315)]);equal(p.length,1,'real rows');return'clean';});
   test('Verified RBC directions stay narrow and online transfers stay column-led',function(){equal(vfcRbcCertainDirection_(tx('2026-05-27','Cheque returned NSF','DEBIT',2606.59)),'CREDIT','NSF return');equal(vfcRbcCertainDirection_(tx('2026-06-25','Item returned unpaid S02788','CREDIT',187.46)),'DEBIT','returned deposit');equal(vfcRbcCertainDirection_(tx('2026-05-07','Online Banking transfer - 0040','CREDIT',500)),'','online transfer');equal(vfcRbcCertainDirection_(tx('2026-03-12','Misc Payment RBC CREDIT CARD','CREDIT',283)),'DEBIT','RBC card payment');truthy(vfcRbcIsReturnedFinancingCredit_(tx('2026-05-27','Cheque returned NSF','CREDIT',2606.59)),'credit return');return'direction safe';});
   test('Checksum reconciliation refuses a non-unique direction solution',function(){const text='Total deposits & credits (2) + 200.00\nTotal cheques & debits (1) - 100.00',facts={deposits:200,withdrawals:100},rows=[tx('2026-01-01','Misc Payment A','DEBIT',100),tx('2026-01-02','Misc Payment B','DEBIT',100),tx('2026-01-03','Misc Payment C','CREDIT',100)],r=vfcRbcReconcileDirectionOnly_(rows,facts,text);equal(r.changed,false,'no repair');equal(r.reason,'non-unique-minimum-solution','reason');return r.reason;});
