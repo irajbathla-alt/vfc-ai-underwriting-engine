@@ -1,5 +1,5 @@
 /**
- * RBC BANK ENGINE v3.2 — CANDIDATE / AUDITED REVALIDATION
+ * RBC BANK ENGINE v3.3 — CANDIDATE / DETERMINISTIC DIRECTION RECONCILIATION
  * ONE PERMANENT RBC FILE.
  *
  * Architecture:
@@ -16,7 +16,7 @@ function vfcRbcBankProfile_(){
     id:'RBC',
     label:'RBC',
     status:'CANDIDATE',
-    rulesVersion:'RBC-3.2-CANDIDATE',
+    rulesVersion:'RBC-3.3-CANDIDATE',
     intakeContract:'BANK_MATCHED_FROZEN_LEDGER_V2',
     aliases:['ROYAL BANK OF CANADA','RBC ROYAL BANK','RBC']
   };
@@ -66,7 +66,10 @@ function vfcRbcLockFacts_(summary,text,fileName){
   locked.total_deposits=facts.deposits;
   locked.total_withdrawals=facts.withdrawals;
 
-  let ledger=vfcRbcPrepareLedger_(locked.banking_transactions||[]),audit=null,lastError='',repairPasses=0;
+  let ledger=vfcRbcPrepareLedger_(locked.banking_transactions||[]),audit=null,lastError='',repairPasses=0,directionRepairs=[];
+  let directionFix=vfcRbcReconcileAmbiguousDirections_(ledger,facts,text);
+  if(directionFix.changed){ledger=directionFix.rows;directionRepairs=directionRepairs.concat(directionFix.flips);}
+
   for(let attempt=0;attempt<=2;attempt++){
     try{
       audit=vfcRbcAuditFullLedger_(ledger,facts,text,name);
@@ -76,14 +79,17 @@ function vfcRbcLockFacts_(summary,text,fileName){
       if(attempt>=2)throw new Error(lastError);
       repairPasses++;
       ledger=vfcRbcRepairLedger_(ledger,text,name,facts,lastError,repairPasses);
+      directionFix=vfcRbcReconcileAmbiguousDirections_(ledger,facts,text);
+      if(directionFix.changed){ledger=directionFix.rows;directionRepairs=directionRepairs.concat(directionFix.flips);}
     }
   }
 
   if(!audit)throw new Error('RBC ledger verification did not complete for '+name+'.');
   locked.banking_transactions=ledger;
   locked.rbc_full_ledger_verified=true;
-  locked.rbc_ledger_reconciled=repairPasses>0;
+  locked.rbc_ledger_reconciled=repairPasses>0||directionRepairs.length>0;
   locked.rbc_ledger_repair_passes=repairPasses;
+  locked.rbc_direction_repairs=directionRepairs;
   locked.rbc_credit_transaction_count=audit.creditCount;
   locked.rbc_debit_transaction_count=audit.debitCount;
   locked.nsf_count=vfcRbcCountBorrowerNsfEvents_(ledger);
@@ -119,10 +125,121 @@ function vfcRbcPrepareLedger_(items){
 function vfcRbcCertainDirection_(t){
   const s=String(t&&t.description||'').toUpperCase().replace(/\s+/g,' ').trim();
   if(!s||vfcRbcReturnEventText_(s))return'';
-  if(/^LOAN\s+CREDIT\b/.test(s)||/\bPAYROLL\s+DEPOSIT\b|\bTAX\s+REFUND\b|E-TRANSFER\s+RECEIVED|INTERAC\s+PURCHASE\s+REFUND|E-TRANSFER\s+CANCEL|MOBILE\s+CHEQUE\s+DEPOSIT/.test(s))return'CREDIT';
-  if(vfcRbcIsPadLikeText_(s)||/^LOAN\s+PAYMENT\b|^LOAN\s+INTEREST\b|^BLIP\s+PAYMENT\s*-?\s*LOAN\b|^BILL\s+PAYMENT\b|^FUEL\s+BILL\s+PAYMENT\b|^COMM\s+GAS\s+BILL\s+PMT\b|^COMMERCIAL\s+TAXES\b|^AUTO\s+INSURANCE\b|^INSURANCE\b|^RENT\/LEASE\b|^CHEQUE\s*-\s*\d+\b|E-TRANSFER\s+SENT|E-TRANSFER\s+REQUEST\s+FULFILLED/.test(s))return'DEBIT';
+
+  if(
+    /^LOAN\s+CREDIT\b/.test(s)||
+    /\bPAYROLL\s+DEPOSIT\b|\bTAX\s+REFUND\b|E-TRANSFER\s+RECEIVED|INTERAC\s+PURCHASE\s+REFUND|E-TRANSFER\s+CANCEL|MOBILE\s+CHEQUE\s+DEPOSIT/.test(s)
+  )return'CREDIT';
+
+  if(
+    vfcRbcIsPadLikeText_(s)||
+    /^LOAN\s+PAYMENT\b|^LOAN\s+INTEREST\b|^BLIP\s+PAYMENT\s*-?\s*LOAN\b|^BILL\s+PAYMENT\b|^FUEL\s+BILL\s+PAYMENT\b|^COMM\s+GAS\s+BILL\s+PMT\b|^COMMERCIAL\s+TAXES\b|^AUTO\s+INSURANCE\b|^INSURANCE\b|^RENT\/LEASE\b|^CHEQUE\s*-\s*\d+\b|^ATM\s+WITHDRAWAL\b|^INTERAC(?:-|\s)+(?:PURCHASE|SC)\b|^CONTACTLESS\s+INTERAC\s+PURCHASE\b|^ACTIVITY\s+FEE\b|^MONTHLY\s+FEE\b|^REGULAR\s+TRANSACTION\s+FEE\b|E-TRANSFER\s+SENT|E-TRANSFER\s+REQUEST\s+FULFILLED/.test(s)||
+    /^MISC\s+PAYMENT\s+RBC\s+CREDIT\s+CARD\b/.test(s)
+  )return'DEBIT';
+
   return'';
 }
+
+function vfcRbcDirectionCanFlip_(t){
+  if(!t)return false;
+  if(vfcRbcCertainDirection_(t))return false;
+  const s=String(t.description||'').toUpperCase().replace(/\s+/g,' ').trim();
+  if(!s)return false;
+  return /^MISC\s+PAYMENT\b|^ONLINE\s+BANKING\s+TRANSFER\b|\bBR\s+TO\s+BR\b|\bTRANSFER\b|\bRETURN(?:ED)?\b|\bREVERS(?:AL|ED)\b|^LOAN\s+[A-Z0-9]/.test(s);
+}
+
+function vfcRbcCombos_(items,count){
+  if(count===0)return[[]];
+  if(count<0||count>items.length)return[];
+  const out=[];
+  function walk(start,picked){
+    if(picked.length===count){out.push(picked.slice());return;}
+    for(let i=start;i<=items.length-(count-picked.length);i++){
+      picked.push(items[i]);walk(i+1,picked);picked.pop();
+    }
+  }
+  walk(0,[]);
+  return out;
+}
+
+/**
+ * Repair only transaction DIRECTION, never amount/date/description.
+ * The repair is allowed only when:
+ * - the total number of extracted activity rows already equals the printed total row count;
+ * - candidate rows have genuinely direction-ambiguous RBC descriptions;
+ * - one and only one cent-exact combination satisfies BOTH printed counts and printed totals.
+ * If there is no unique solution the ledger is left unchanged and the normal fail-closed audit/AI
+ * reconciliation path remains in control.
+ */
+function vfcRbcReconcileAmbiguousDirections_(items,facts,text){
+  const rows=(Array.isArray(items)?items:[]).map(function(t){return Object.assign({},t);}),
+        printed=vfcRbcPrintedActivityCounts_(text),
+        before=vfcRbcLedgerStats_(rows);
+
+  const result={rows:rows,changed:false,flips:[],reason:'not-needed'};
+  if(printed.creditCount===null||printed.debitCount===null)return Object.assign(result,{reason:'printed-counts-missing'});
+  if(before.bad.length)return Object.assign(result,{reason:'incomplete-rows'});
+  if(before.creditCount+before.debitCount!==printed.creditCount+printed.debitCount)return Object.assign(result,{reason:'row-count-mismatch'});
+
+  const targetCredits=vfcRound_(vfcNum_(facts.deposits),.01),
+        targetDebits=vfcRound_(vfcNum_(facts.withdrawals),.01),
+        creditDeltaCount=printed.creditCount-before.creditCount,
+        creditDeltaAmount=vfcRound_(targetCredits-before.totalCredits,.01),
+        debitDeltaAmount=vfcRound_(targetDebits-before.totalDebits,.01);
+
+  if(creditDeltaCount===0&&Math.abs(creditDeltaAmount)<=.01&&Math.abs(debitDeltaAmount)<=.01)return result;
+  if(Math.abs(creditDeltaAmount+debitDeltaAmount)>.02)return Object.assign(result,{reason:'totals-not-direction-only'});
+
+  const debitCandidates=[],creditCandidates=[];
+  rows.forEach(function(t,index){
+    if(!vfcRbcDirectionCanFlip_(t))return;
+    const x={index:index,amount:vfcRound_(vfcNum_(t.amount),.01),description:String(t.description||'')};
+    if(String(t.direction||'').toUpperCase()==='DEBIT')debitCandidates.push(x);
+    else if(String(t.direction||'').toUpperCase()==='CREDIT')creditCandidates.push(x);
+  });
+
+  const solutions=[],seen={};
+  for(let dCount=0;dCount<=Math.min(2,debitCandidates.length);dCount++){
+    for(let cCount=0;cCount<=Math.min(2,creditCandidates.length);cCount++){
+      if(dCount===0&&cCount===0)continue;
+      if(dCount-cCount!==creditDeltaCount)continue;
+      const dCombos=vfcRbcCombos_(debitCandidates,dCount),cCombos=vfcRbcCombos_(creditCandidates,cCount);
+      dCombos.forEach(function(ds){
+        const dSum=ds.reduce(function(s,x){return s+x.amount;},0);
+        cCombos.forEach(function(cs){
+          const cSum=cs.reduce(function(s,x){return s+x.amount;},0),
+                delta=vfcRound_(dSum-cSum,.01);
+          if(Math.abs(delta-creditDeltaAmount)>.01)return;
+          const sig=ds.map(function(x){return'D'+x.index;}).concat(cs.map(function(x){return'C'+x.index;})).sort().join('|');
+          if(seen[sig])return;seen[sig]=1;solutions.push({debitsToCredit:ds,creditsToDebit:cs});
+        });
+      });
+    }
+  }
+
+  if(solutions.length!==1)return Object.assign(result,{reason:solutions.length?'ambiguous-solution':'no-exact-solution'});
+
+  const solution=solutions[0],fixed=rows.map(function(t){return Object.assign({},t);}),flips=[];
+  solution.debitsToCredit.forEach(function(x){
+    fixed[x.index].direction='CREDIT';
+    flips.push({description:x.description,amount:x.amount,from:'DEBIT',to:'CREDIT'});
+  });
+  solution.creditsToDebit.forEach(function(x){
+    fixed[x.index].direction='DEBIT';
+    flips.push({description:x.description,amount:x.amount,from:'CREDIT',to:'DEBIT'});
+  });
+
+  const after=vfcRbcLedgerStats_(fixed);
+  if(
+    after.creditCount!==printed.creditCount||
+    after.debitCount!==printed.debitCount||
+    Math.abs(after.totalCredits-targetCredits)>.01||
+    Math.abs(after.totalDebits-targetDebits)>.01
+  )return Object.assign(result,{reason:'post-repair-audit-failed'});
+
+  return{rows:fixed,changed:true,flips:flips,reason:'unique-cent-exact-direction-solution'};
+}
+
 
 function vfcRbcLedgerStats_(items){
   const out={creditCount:0,debitCount:0,totalCredits:0,totalDebits:0,bad:[]};
@@ -329,6 +446,39 @@ function runRbcBankingSelfTests(){
     equal(a.creditCount,15,'amp credit');equal(a.debitCount,39,'amp debit');
     equal(b.creditCount,15,'and credit');equal(b.debitCount,39,'and debit');
     return'counts parsed';
+  });
+
+  test('AIM HIGH crossed Misc Payment directions reconcile exactly',function(){
+    const text='Total deposits & credits (2) + 6,585.81\nTotal cheques & debits (2) - 5,783.00',
+          facts={deposits:6585.81,withdrawals:5783.00},
+          wrong=[
+            tx('2026-03-12','Misc Payment 1469635','DEBIT',6585.81,'1469635'),
+            tx('2026-03-12','Misc Payment RBC CREDIT CARD','CREDIT',283.00,'RBC CREDIT CARD'),
+            tx('2026-03-12','LOAN PAYMENT','DEBIT',5500.00,'LOAN PAYMENT'),
+            tx('2026-03-09','LOAN CREDIT','CREDIT',6283.81,'LOAN CREDIT')
+          ],
+          prepared=vfcRbcPrepareLedger_(wrong),
+          fixed=vfcRbcReconcileAmbiguousDirections_(prepared,facts,text);
+    truthy(fixed.changed,'direction repair');
+    equal(fixed.flips.length,1,'only genuinely ambiguous row needs arithmetic flip after RBC card rule');
+    equal(fixed.flips[0].description,'Misc Payment 1469635','flipped row');
+    equal(fixed.flips[0].to,'CREDIT','new direction');
+    const a=vfcRbcAuditFullLedger_(fixed.rows,facts,text,'aim-high-test.pdf');
+    close(a.totalCredits,6585.81,.01,'credits');close(a.totalDebits,5783.00,.01,'debits');
+    return'cent exact';
+  });
+
+  test('Direction reconciliation refuses non-unique solutions',function(){
+    const text='Total deposits & credits (1) + 100.00\nTotal cheques & debits (2) - 200.00',
+          facts={deposits:100,withdrawals:200},
+          rows=[
+            tx('2026-01-01','Misc Payment A','DEBIT',100,'A'),
+            tx('2026-01-02','Misc Payment B','DEBIT',100,'B'),
+            tx('2026-01-03','Misc Payment C','CREDIT',100,'C')
+          ],
+          r=vfcRbcReconcileAmbiguousDirections_(rows,facts,text);
+    equal(r.changed,false,'ambiguous repair must not apply');
+    return r.reason;
   });
 
   const failed=results.filter(function(x){return!x.pass;});
