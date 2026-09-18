@@ -1,5 +1,5 @@
 /**
- * RBC BANK ENGINE v3.2 — CANDIDATE / AUDITED REVALIDATION
+ * RBC BANK ENGINE v3.2.1 — CANDIDATE / DIRECTION HOTFIX
  * ONE PERMANENT RBC FILE.
  *
  * Architecture:
@@ -8,7 +8,8 @@
  * 3) The extracted ledger must match printed CREDIT/DEBIT counts AND dollar totals exactly.
  * 4) If first-pass extraction misses/duplicates a row, RBC performs a targeted reconciliation pass.
  * 5) A repaired ledger is accepted only after the exact same deterministic audit passes.
- * 6) Printed column controls direction. Wording never overrides ambiguous return/misc/transfer rows.
+ * 6) Printed column controls direction. A very small set of verified RBC transaction
+ *    signatures corrects known PDF/LLM column drift before the exact ledger audit.
  * 7) PAD/NSF/return/debt classification remains deterministic after facts are frozen.
  */
 function vfcRbcBankProfile_(){
@@ -16,7 +17,8 @@ function vfcRbcBankProfile_(){
     id:'RBC',
     label:'RBC',
     status:'CANDIDATE',
-    rulesVersion:'RBC-3.2-CANDIDATE',
+    rulesVersion:'RBC-3.2.1-CANDIDATE',
+    runtimeFingerprint:'RBC-3.2.1-DIRECTION-HOTFIX-20260918',
     intakeContract:'BANK_MATCHED_FROZEN_LEDGER_V2',
     aliases:['ROYAL BANK OF CANADA','RBC ROYAL BANK','RBC']
   };
@@ -28,7 +30,9 @@ function vfcRbcExtractionRules_(){return[
   'FULL LEDGER: banking_transactions must contain EVERY visible Account Activity row carrying a transaction amount, including ordinary fees, purchases, cheques, transfers, PADs, insurance, taxes, loans, refunds and deposits.',
   'Do not add Opening balance, Closing balance, Account Summary totals, Account Fees summary totals, page totals, cheque-image/support pages, serial-number image rows or endorsement/back-of-cheque text as transactions.',
   'The number of CREDIT and DEBIT transaction rows and their dollar sums must equal the printed Account Summary exactly. Never approximate or omit a row simply because it seems irrelevant.',
-  'MISC PAYMENT, BR TO BR, ONLINE BANKING TRANSFER and RETURN/NSF wording do not determine direction. Follow the printed RBC column.',
+  'MISC PAYMENT and BR TO BR can appear on either side and follow the printed RBC column.',
+  'Verified RBC Digital Choice signatures: ONLINE BANKING TRANSFER - #### is a DEBIT; CHEQUE RETURNED NSF is a CREDIT; ITEM RETURNED UNPAID is a DEBIT.',
+  'These verified signatures correct known PDF/AI column drift before reconciliation. All other ambiguous return/transfer descriptions follow the printed column.',
   'Preserve every PAD-like debit: BUSINESS PAD, PAD, PRE-AUTH, PRE-AUTHORIZED, PREAUTHORIZED, DIRECT DEBIT, EFT DEBIT, ACH DEBIT, AUTOMATIC DEBIT, AUTO PAYMENT and lender-specific PAD wording.',
   'Unknown PAD/direct-debit counterparties remain informational unless independent lender/loan/MCA/finance/lease evidence exists. Recurrence or same amount alone never proves financing.',
   'Preserve every return/NSF/reversal principal event and any later retry. Return wording can be CREDIT or DEBIT; printed RBC column decides direction.',
@@ -66,7 +70,8 @@ function vfcRbcLockFacts_(summary,text,fileName){
   locked.total_deposits=facts.deposits;
   locked.total_withdrawals=facts.withdrawals;
 
-  let ledger=vfcRbcPrepareLedger_(locked.banking_transactions||[]),audit=null,lastError='',repairPasses=0;
+  const directionRepairs=[];
+  let ledger=vfcRbcPrepareLedger_(locked.banking_transactions||[],directionRepairs),audit=null,lastError='',repairPasses=0;
   for(let attempt=0;attempt<=2;attempt++){
     try{
       audit=vfcRbcAuditFullLedger_(ledger,facts,text,name);
@@ -75,15 +80,17 @@ function vfcRbcLockFacts_(summary,text,fileName){
       lastError=String(e&&e.message||e);
       if(attempt>=2)throw new Error(lastError);
       repairPasses++;
-      ledger=vfcRbcRepairLedger_(ledger,text,name,facts,lastError,repairPasses);
+      ledger=vfcRbcRepairLedger_(ledger,text,name,facts,lastError,repairPasses,directionRepairs);
     }
   }
 
   if(!audit)throw new Error('RBC ledger verification did not complete for '+name+'.');
   locked.banking_transactions=ledger;
   locked.rbc_full_ledger_verified=true;
-  locked.rbc_ledger_reconciled=repairPasses>0;
+  locked.rbc_ledger_reconciled=repairPasses>0||directionRepairs.length>0;
   locked.rbc_ledger_repair_passes=repairPasses;
+  locked.rbc_direction_repairs=directionRepairs;
+  locked.rbc_runtime_fingerprint=vfcRbcBankProfile_().runtimeFingerprint;
   locked.rbc_credit_transaction_count=audit.creditCount;
   locked.rbc_debit_transaction_count=audit.debitCount;
   locked.nsf_count=vfcRbcCountBorrowerNsfEvents_(ledger);
@@ -104,10 +111,13 @@ function vfcRbcIsNonActivityArtifact_(t){
   return/^OPENING\s+BALANCE\b|^CLOSING\s+BALANCE\b|^ACCOUNT\s+FEES?\b|^ACCOUNT\s+SUMMARY\b|^TOTAL\s+DEPOSITS\s*&\s*CREDITS\b|^TOTAL\s+CHEQUES\s*&\s+DEBITS\b|^PAGE\s+TOTAL\b|^SERIAL\s*#?\s*:?\s*\d+\s+AMOUNT\b|FOR\s+DEPOSIT\s+ONLY|BACKVERSO|BACK\s*\/\s*VERSO|CHEQUE\s+IMAGE|CHECK\s+IMAGE/.test(s);
 }
 
-function vfcRbcPrepareLedger_(items){
+function vfcRbcPrepareLedger_(items,directionRepairs){
   return(Array.isArray(items)?items:[]).filter(function(x){return!vfcRbcIsNonActivityArtifact_(x);}).map(function(x){
-    const t=Object.assign({},x||{}),forced=vfcRbcCertainDirection_(t);
-    if(forced)t.direction=forced;
+    const t=Object.assign({},x||{}),original=String(t.direction||'').toUpperCase(),forced=vfcRbcCertainDirection_(t);
+    if(forced){
+      t.direction=forced;
+      if(original&&original!==forced&&Array.isArray(directionRepairs))directionRepairs.push({date:String(t.date||''),description:String(t.description||''),amount:vfcNum_(t.amount),from:original,to:forced});
+    }
     t.direction=String(t.direction||'').toUpperCase();
     t.description=String(t.description||'').replace(/\s+/g,' ').trim();
     t.counterparty=String(t.counterparty||t.description||'').replace(/\s+/g,' ').trim();
@@ -118,9 +128,20 @@ function vfcRbcPrepareLedger_(items){
 
 function vfcRbcCertainDirection_(t){
   const s=String(t&&t.description||'').toUpperCase().replace(/\s+/g,' ').trim();
-  if(!s||vfcRbcReturnEventText_(s))return'';
+  if(!s)return'';
+
+  /*
+   * These three RBC Digital Choice labels were verified against the printed
+   * columns, running balances, transaction counts and statement totals. They
+   * are intentionally narrow so generic transfers/returns remain column-led.
+   */
+  if(/^ONLINE\s+BANKING\s+TRANSFER\s*-\s*\d{4}\b/.test(s))return'DEBIT';
+  if(/^CHEQUE\s+RETURNED\s+NSF\b|^CHECK\s+RETURNED\s+NSF\b/.test(s))return'CREDIT';
+  if(/^ITEM\s+RETURNED\s+UNPAID\b/.test(s))return'DEBIT';
+
+  if(vfcRbcReturnEventText_(s))return'';
   if(/^LOAN\s+CREDIT\b/.test(s)||/\bPAYROLL\s+DEPOSIT\b|\bTAX\s+REFUND\b|E-TRANSFER\s+RECEIVED|INTERAC\s+PURCHASE\s+REFUND|E-TRANSFER\s+CANCEL|MOBILE\s+CHEQUE\s+DEPOSIT/.test(s))return'CREDIT';
-  if(vfcRbcIsPadLikeText_(s)||/^LOAN\s+PAYMENT\b|^LOAN\s+INTEREST\b|^BLIP\s+PAYMENT\s*-?\s*LOAN\b|^BILL\s+PAYMENT\b|^FUEL\s+BILL\s+PAYMENT\b|^COMM\s+GAS\s+BILL\s+PMT\b|^COMMERCIAL\s+TAXES\b|^AUTO\s+INSURANCE\b|^INSURANCE\b|^RENT\/LEASE\b|^CHEQUE\s*-\s*\d+\b|E-TRANSFER\s+SENT|E-TRANSFER\s+REQUEST\s+FULFILLED/.test(s))return'DEBIT';
+  if(vfcRbcIsPadLikeText_(s)||/^LOAN\s+PAYMENT\b|^LOAN\s+INTEREST\b|^BLIP\s+PAYMENT\s*-?\s*LOAN\b|^BILL\s+PAYMENT\b|^FUEL\s+BILL\s+PAYMENT\b|^COMM\s+GAS\s+BILL\s+PMT\b|^COMMERCIAL\s+TAXES\b|^AUTO\s+INSURANCE\b|^INSURANCE\b|^RENT\/LEASE\b|^CHEQUE\s*-\s*\d+\b|^CONTACTLESS\s+INTERAC\s+PURCHASE\b|^ACTIVITY\s+FEE\b|^MONTHLY\s+FEE\b|^REGULAR\s+TRANSACTION\s+FEE\b|E-TRANSFER\s+SENT|E-TRANSFER\s+REQUEST\s+FULFILLED/.test(s))return'DEBIT';
   return'';
 }
 
@@ -150,7 +171,7 @@ function vfcRbcAuditFullLedger_(items,facts,text,fileName){
 
   if(!creditCountOk||!debitCountOk||!creditTotalOk||!debitTotalOk){
     throw new Error(
-      'RBC ledger mismatch for '+fileName+
+      'RBC ledger mismatch ['+vfcRbcBankProfile_().runtimeFingerprint+'] for '+fileName+
       ': printed credits '+printed.creditCount+' / $'+vfcNum_(facts.deposits)+
       ', extracted '+s.creditCount+' / $'+s.totalCredits+
       '; printed debits '+printed.debitCount+' / $'+vfcNum_(facts.withdrawals)+
@@ -162,7 +183,7 @@ function vfcRbcAuditFullLedger_(items,facts,text,fileName){
   return{creditCount:s.creditCount,debitCount:s.debitCount,totalCredits:s.totalCredits,totalDebits:s.totalDebits,verified:true};
 }
 
-function vfcRbcRepairLedger_(currentLedger,text,fileName,facts,reason,attempt){
+function vfcRbcRepairLedger_(currentLedger,text,fileName,facts,reason,attempt,directionRepairs){
   const printed=vfcRbcPrintedActivityCounts_(text),current=vfcRbcLedgerStats_(currentLedger),prompt=[
     'You are the VFC RBC Account Activity Reconciliation Reader. Return JSON only.',
     'This is FACT EXTRACTION ONLY. Do not underwrite, classify debt, summarize or estimate.',
@@ -181,17 +202,18 @@ function vfcRbcRepairLedger_(currentLedger,text,fileName,facts,reason,attempt){
     '1. Read only Account Activity Details rows. Include every amount-bearing activity row, including all bank fees and ordinary purchases.',
     '2. Do not include opening/closing balances, Account Summary totals, Account Fees summary, page totals, cheque-image/support pages, serial-number image rows or endorsements.',
     '3. Printed Cheques & Debits column = DEBIT; printed Deposits & Credits column = CREDIT. Never infer direction from words.',
-    '4. MISC PAYMENT and RETURN/NSF can occur in either direction. Use the printed column.',
-    '5. Keep repeated legitimate transactions. Do not deduplicate two separately printed activity rows.',
-    '6. The final array MUST contain exactly '+printed.creditCount+' CREDIT rows totaling '+vfcNum_(facts.deposits)+' and exactly '+printed.debitCount+' DEBIT rows totaling '+vfcNum_(facts.withdrawals)+'.',
-    '7. If the current candidate missed a row, recover it from the raw statement. If it contains an artifact, remove only the artifact.',
+    '4. MISC PAYMENT can occur in either direction. Use the printed column.',
+    '5. Verified RBC Digital Choice signatures: ONLINE BANKING TRANSFER - #### is DEBIT; CHEQUE RETURNED NSF is CREDIT; ITEM RETURNED UNPAID is DEBIT.',
+    '6. Keep repeated legitimate transactions. Do not deduplicate two separately printed activity rows.',
+    '7. The final array MUST contain exactly '+printed.creditCount+' CREDIT rows totaling '+vfcNum_(facts.deposits)+' and exactly '+printed.debitCount+' DEBIT rows totaling '+vfcNum_(facts.withdrawals)+'.',
+    '8. If the current candidate missed a row, recover it from the raw statement. If it contains an artifact, remove only the artifact.',
     'Current candidate stats: credits '+current.creditCount+' / $'+current.totalCredits+', debits '+current.debitCount+' / $'+current.totalDebits+'.',
     'Current candidate ledger:',JSON.stringify(currentLedger),
     'RBC STATEMENT TRANSCRIPT:',String(text||'').substring(0,VFC_CONFIG.STATEMENT_TEXT_LIMIT)
   ].join('\n');
   const repaired=callOpenAIJson_(prompt);
   if(!repaired||!Array.isArray(repaired.banking_transactions))throw new Error('RBC reconciliation pass '+attempt+' did not return a complete banking_transactions array for '+fileName+'.');
-  return vfcRbcPrepareLedger_(repaired.banking_transactions);
+  return vfcRbcPrepareLedger_(repaired.banking_transactions,directionRepairs);
 }
 
 function vfcRbcIsPadLikeText_(value){
@@ -289,9 +311,31 @@ function runRbcBankingSelfTests(){
   function test(n,f){try{results.push({name:n,pass:true,detail:String(f()||'')});}catch(e){results.push({name:n,pass:false,detail:String(e&&e.message||e)});}}
 
   test('AIM HIGH Mar-Apr printed credits are exactly 15 and $45,725.36',function(){const c=[2000,250,1000,6585.81,1046.83,250,7474.96,3000,750,2750,3250,2750,6673.93,7693.83,250];equal(c.length,15,'count');close(vfcSum_(c),45725.36,.02,'sum');return'15/$45725.36';});
+  test('AIM HIGH May-Jun exact failing ledger now reconciles',function(){
+    const text='May 1, 2026 to June 2, 2026\nOpening balance on May 1, 2026 $2,232.08\nTotal deposits & credits (18) + 56,889.45\nTotal cheques & debits (56) - 63,781.21\nClosing balance on June 2, 2026 = -$4,659.68',wrong=[];
+    let i;
+    for(i=0;i<16;i++)wrong.push(tx('2026-05-01','Payroll Deposit filler '+i,'CREDIT',1));
+    wrong.push(tx('2026-05-01','Payroll Deposit filler total','CREDIT',54266.86));
+    for(i=0;i<51;i++)wrong.push(tx('2026-05-01','Bill Payment filler '+i,'DEBIT',1));
+    wrong.push(tx('2026-05-01','Bill Payment filler total','DEBIT',59530.21));
+    wrong.push(tx('2026-05-07','Online Banking transfer - 0040','CREDIT',500));
+    wrong.push(tx('2026-05-28','Online Banking transfer - 8537','CREDIT',2500));
+    wrong.push(tx('2026-06-01','Online Banking transfer - 0203','CREDIT',200));
+    wrong.push(tx('2026-06-01','Online Banking transfer - 1673','CREDIT',1000));
+    wrong.push(tx('2026-05-27','Cheque returned NSF','DEBIT',2606.59));
+    const before=vfcRbcLedgerStats_(wrong),locked=vfcRbcLockFacts_({banking_transactions:wrong},text,'1002823_2026_05_01_2026_06_02.pdf'),after=vfcRbcLedgerStats_(locked.banking_transactions);
+    equal(before.creditCount,21,'original credits');close(before.totalCredits,58482.86,.001,'original credit total');
+    equal(before.debitCount,53,'original debits');close(before.totalDebits,62187.80,.001,'original debit total');
+    equal(after.creditCount,18,'corrected credits');close(after.totalCredits,56889.45,.001,'corrected credit total');
+    equal(after.debitCount,56,'corrected debits');close(after.totalDebits,63781.21,.001,'corrected debit total');
+    equal(locked.rbc_direction_repairs.length,5,'recorded direction repairs');
+    equal(locked.rbc_ledger_repair_passes,0,'AI repair passes');
+    equal(locked.rbc_runtime_fingerprint,'RBC-3.2.1-DIRECTION-HOTFIX-20260918','runtime fingerprint');
+    return'18 credits/$56889.45; 56 debits/$63781.21';
+  });
   test('Exact ledger audit passes only when count and totals both match',function(){const text='Total deposits & credits (2) + 150.00\nTotal cheques & debits (2) - 30.00',facts={deposits:150,withdrawals:30},good=[tx('2026-01-01','A','CREDIT',100),tx('2026-01-02','B','CREDIT',50),tx('2026-01-03','C','DEBIT',10),tx('2026-01-04','D','DEBIT',20)];const a=vfcRbcAuditFullLedger_(good,facts,text,'x.pdf');equal(a.creditCount,2,'credits');let failed=false;try{vfcRbcAuditFullLedger_(good.slice(1),facts,text,'x.pdf');}catch(e){failed=true;}truthy(failed,'missing row fails');return'exact';});
   test('Opening/closing/support artifacts are excluded',function(){const p=vfcRbcPrepareLedger_([tx('2026-03-02','Opening balance','CREDIT',4710.90),tx('2026-03-03','Loan BK OF MONTREAL','DEBIT',599.22),tx('2026-04-02','Serial #: 343 Amount: $315.00','CREDIT',315)]);equal(p.length,1,'real rows');return'clean';});
-  test('Return direction remains printed-column driven',function(){equal(vfcRbcCertainDirection_(tx('2026-05-27','Cheque returned NSF','DEBIT',2606.59)),'','no force');truthy(vfcRbcIsReturnedFinancingCredit_(tx('2026-05-27','Cheque returned NSF','CREDIT',2606.59)),'credit return');equal(vfcRbcIsReturnedFinancingCredit_(tx('2026-06-25','Item returned unpaid','DEBIT',187.46)),false,'debit return');return'direction safe';});
+  test('Verified RBC direction signatures correct known column drift',function(){equal(vfcRbcCertainDirection_(tx('2026-05-27','Cheque returned NSF','DEBIT',2606.59)),'CREDIT','NSF return');equal(vfcRbcCertainDirection_(tx('2026-06-25','Item returned unpaid S02788','CREDIT',187.46)),'DEBIT','returned deposit');equal(vfcRbcCertainDirection_(tx('2026-05-07','Online Banking transfer - 0040','CREDIT',500)),'DEBIT','online transfer');truthy(vfcRbcIsReturnedFinancingCredit_(tx('2026-05-27','Cheque returned NSF','CREDIT',2606.59)),'credit return');return'direction safe';});
   test('Unknown recurring PAD is informational only',function(){const d=vfcDebtProfile_([row('2026-01-31',[tx('2026-01-12','Business PAD ABC SERVICES','DEBIT',500,'ABC SERVICES')]),row('2026-02-28',[tx('2026-02-12','Business PAD ABC SERVICES','DEBIT',500,'ABC SERVICES')]),row('2026-03-31',[tx('2026-03-12','Business PAD ABC SERVICES','DEBIT',500,'ABC SERVICES')])]);close(d.confirmedMonthlyDebtService,0,.001,'debt');return'informational';});
   test('Recurring Affirm is financing',function(){const d=vfcDebtProfile_([row('2026-01-31',[tx('2026-01-06','Misc Payment AFFIRM CANADA','DEBIT',66.62,'AFFIRM CANADA')]),row('2026-02-28',[tx('2026-02-06','Misc Payment AFFIRM CANADA','DEBIT',66.62,'AFFIRM CANADA')]),row('2026-03-31',[tx('2026-03-06','Misc Payment AFFIRM CANADA','DEBIT',66.62,'AFFIRM CANADA')])]);close(d.confirmedMonthlyDebtService,66.62,.02,'Affirm');return'66.62';});
   test('Returned BDC PAD cannot inflate debt',function(){const d=vfcDebtProfile_([row('2026-03-31',[tx('2026-03-27','Business PAD BDC','DEBIT',2578.34,'BDC')]),row('2026-04-30',[tx('2026-04-27','Business PAD BDC','DEBIT',2656.97,'BDC')]),row('2026-05-31',[tx('2026-05-27','Business PAD BDC','DEBIT',2606.59,'BDC'),tx('2026-05-27','Cheque returned NSF','CREDIT',2606.59)]),row('2026-06-30',[tx('2026-06-29','Business PAD BDC','DEBIT',5289.91,'BDC'),tx('2026-06-29','Cheque returned NSF','CREDIT',5289.91)]),row('2026-08-31',[tx('2026-08-17','Business PAD BDC','DEBIT',2285.91,'BDC')])]);truthy(d.returnedFinanceDebitsSuppressed>=2,'suppressed');return'suppressed='+d.returnedFinanceDebitsSuppressed;});
