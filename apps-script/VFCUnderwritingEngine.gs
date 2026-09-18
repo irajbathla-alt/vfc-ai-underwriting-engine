@@ -179,15 +179,30 @@ function calculateFundamentalScore_(f) {
   if (f.negativeBalanceFlag) { balance -= 32; risks.push('Negative balances were detected.'); }
   if (f.overdraftFlag) { balance -= 15; risks.push('Overdraft activity was detected.'); }
   if (f.returnedPaymentFlag) { balance -= 12; risks.push('Returned-payment activity was detected.'); }
-  if (f.averageClosingBalance > 0 && f.averageMonthlyDeposits > 0) {
-    const days = f.averageClosingBalance / (f.averageMonthlyDeposits / 30);
+  const grossDeposits = Math.max(0, toNumber_(f.averageMonthlyDeposits));
+  const hasOperatingDeposits = f.estimatedOperatingMonthlyDeposits !== undefined && f.estimatedOperatingMonthlyDeposits !== null && f.estimatedOperatingMonthlyDeposits !== '';
+  const operatingDeposits = hasOperatingDeposits ? Math.max(0, toNumber_(f.estimatedOperatingMonthlyDeposits)) : grossDeposits;
+  if (f.averageClosingBalance > 0 && operatingDeposits > 0) {
+    const days = f.averageClosingBalance / (operatingDeposits / 30);
     if (days >= 7) { balance += 10; strengths.push('Closing balances provide a reasonable operating cushion.'); }
     else if (days < 2) { balance -= 10; risks.push('The average closing-balance cushion is thin.'); }
   }
   balance = clamp_(balance,0,100);
 
   let debt = 88;
-  if (f.mcaPaymentFlag) { debt -= 25; risks.push('Existing MCA or loan payments were identified.'); }
+  const monthlyDebt = Math.max(0, toNumber_(f.existingMonthlyDebtService));
+  const debtRatio = monthlyDebt > 0 ? (operatingDeposits > 0 ? monthlyDebt / operatingDeposits : 1) : 0;
+  if (monthlyDebt > 0) {
+    if (debtRatio <= 0.05) debt -= 10;
+    else if (debtRatio <= 0.10) debt -= 18;
+    else if (debtRatio <= 0.20) debt -= 25;
+    else if (debtRatio <= 0.30) debt -= 35;
+    else debt -= 45;
+    risks.push('Confirmed recurring debt service is ' + Math.round(debtRatio * 100) + '% of estimated operating deposits.');
+  } else if (f.mcaPaymentFlag) {
+    debt -= 25;
+    risks.push('Existing MCA or loan payments were identified, but a reliable monthly amount was unavailable.');
+  }
   if (f.suspectedStacking) { debt -= 28; risks.push('Possible stacking was identified.'); }
   debt = clamp_(debt,0,100);
 
@@ -203,7 +218,7 @@ function calculateFundamentalScore_(f) {
 
   const score = Math.round(cashFlow*0.30 + nsf*0.18 + balance*0.17 + debt*0.17 + coverage*0.10 + data*0.08);
   const grade = score >= 82 ? 'Strong' : score >= 70 ? 'Acceptable' : score >= 58 ? 'Caution' : score >= 45 ? 'Elevated Risk' : 'High Risk';
-  return {score:score,grade:grade,cashFlowScore:cashFlow,nsfScore:nsf,balanceScore:balance,debtLoadScore:debt,coverageScore:coverage,dataQualityScore:data,strengths:unique_(strengths),risks:unique_(risks)};
+  return {score:score,grade:grade,cashFlowScore:cashFlow,nsfScore:nsf,balanceScore:balance,debtLoadScore:debt,debtServiceRatio:debtRatio,coverageScore:coverage,dataQualityScore:data,strengths:unique_(strengths),risks:unique_(risks)};
 }
 
 function scorePowerLender_(lenderName, current, outcomes, fundamental, aiReview) {

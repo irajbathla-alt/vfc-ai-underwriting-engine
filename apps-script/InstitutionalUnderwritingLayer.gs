@@ -1,5 +1,5 @@
 const VFC_SIMPLE_CONFIG = {
-  MODEL_VERSION: 'VFC-SIMPLE-HISTORICAL-8.2-CURRENT-ONLY-BANKING',
+  MODEL_VERSION: 'VFC-SIMPLE-HISTORICAL-8.3-OPERATING-CAPACITY',
   MAX_COMPARABLE_CASES: 12,
   MAX_APPROVAL_CASES: 8,
   MIN_SIMILARITY: 0.40,
@@ -34,6 +34,9 @@ function generateInstitutionalAssessmentSafe(companyOrRequest, requestedPeriod) 
   if (!current || !current.statementCount) {
     throw new Error('No bank-statement summaries were found for this company and period.');
   }
+  const grossDeposits = Math.max(0, toNumber_(current.averageMonthlyDeposits));
+  const operatingDeposits = simpleOperatingDeposits_(current);
+  const capacityDeposits = simpleNetCapacityDeposits_(current);
 
   const outcomes = collectHistoricalOutcomes_().filter(function(row) {
     return !(sameText_(row.companyName, companyName) && simplePeriodMatches_(row.period, period));
@@ -83,14 +86,10 @@ function generateInstitutionalAssessmentSafe(companyOrRequest, requestedPeriod) 
     maximumLoanAmount = Math.max(maximumLoanAmount, historicalAmount * 0.90);
   }
 
-  const deposits = Math.max(0, toNumber_(current.averageMonthlyDeposits));
   const score = toNumber_(fundamental.score);
-  const marketCap = deposits * (score >= 75 ? 1.25 : score >= 60 ? 1.05 : 0.85);
+  const marketCap = capacityDeposits * (score >= 75 ? 1.25 : score >= 60 ? 1.05 : 0.85);
   if (marketCap > 0) {
-    maximumLoanAmount = Math.min(
-      maximumLoanAmount,
-      Math.max(marketCap, historicalAmount * 1.05)
-    );
+    maximumLoanAmount = Math.min(maximumLoanAmount, marketCap);
   }
 
   maximumLoanAmount = roundToNearest_(
@@ -98,11 +97,11 @@ function generateInstitutionalAssessmentSafe(companyOrRequest, requestedPeriod) 
     VFC_SIMPLE_CONFIG.ROUNDING
   );
 
-  if (score < 40 || !deposits) maximumLoanAmount = 0;
+  if (score < 40 || !operatingDeposits || !capacityDeposits) maximumLoanAmount = 0;
   if (
     maximumLoanAmount > 0 &&
     maximumLoanAmount < VFC_SIMPLE_CONFIG.MIN_AMOUNT &&
-    score >= 45
+    score >= 45 && marketCap >= VFC_SIMPLE_CONFIG.MIN_AMOUNT
   ) {
     maximumLoanAmount = VFC_SIMPLE_CONFIG.MIN_AMOUNT;
   }
@@ -136,8 +135,10 @@ function generateInstitutionalAssessmentSafe(companyOrRequest, requestedPeriod) 
     'Observed approval rate among closest cases: ' + Math.round(approvalRate * 100) + '%',
     'Current banking-risk factor: ' + Math.round(risk.factor * 100) + '%',
     'Validated months reviewed: ' + toNumber_(current.monthsCovered),
-    'Validated average monthly deposits: ' + roundToNearest_(deposits, 1),
+    'Validated gross monthly deposits: ' + roundToNearest_(grossDeposits, 1),
+    'Estimated operating monthly deposits: ' + roundToNearest_(operatingDeposits, 1),
     'Detected recurring financing debt service: ' + roundToNearest_(toNumber_(current.existingMonthlyDebtService), 1),
+    'Operating deposits after confirmed monthly debt: ' + roundToNearest_(capacityDeposits, 1),
     risk.reasons.length
       ? 'Banking-risk adjustments: ' + risk.reasons.join(', ')
       : 'No material banking-risk reduction applied.'
@@ -193,8 +194,9 @@ function generateInstitutionalAssessmentSafe(companyOrRequest, requestedPeriod) 
       amountConfidenceScore: confidenceScore,
       businessHealthScore: score,
       riskGrade: fundamental.grade || '',
-      averageMonthlyDeposits: deposits,
+      averageMonthlyDeposits: grossDeposits,
       estimatedOperatingMonthlyDeposits: toNumber_(current.estimatedOperatingMonthlyDeposits),
+      capacityMonthlyDeposits: capacityDeposits,
       existingMonthlyDebtService: toNumber_(current.existingMonthlyDebtService),
       otherRecurringMonthlyObligations: toNumber_(current.otherRecurringMonthlyObligations),
       debtServiceToDepositsRatio: toNumber_(current.debtServiceToDepositsRatio),
@@ -221,7 +223,7 @@ function generateInstitutionalAssessmentSafe(companyOrRequest, requestedPeriod) 
         ? 'Maximum recommended loan'
         : 'No automated loan amount recommended',
       methodologyNote:
-        'One simple model is active: closest historical training outcomes are adjusted to validated current business deposits and checked against current banking conduct. Recurring debt/PAD amounts are extracted for visibility and OpenAI review but no new debt-service multiplier has been added to Our Max.'
+        'One production model is active: closest historical outcomes are scaled to validated operating deposits, while banking capacity and the final revenue cap use operating deposits after confirmed recurring financing debt. Gross deposits remain visible for audit but do not size Our Max when an operating-deposit estimate is available.'
     },
     disclaimer:
       'VFC internal decision support only. This recommendation is based on uploaded bank statements and recorded historical lender outcomes and is not a lender approval or guarantee.'
@@ -229,7 +231,7 @@ function generateInstitutionalAssessmentSafe(companyOrRequest, requestedPeriod) 
 }
 
 function simpleBuildComparableCases_(current, outcomes) {
-  const currentDeposits = Math.max(0, toNumber_(current.averageMonthlyDeposits));
+  const currentDeposits = simpleOperatingDeposits_(current);
   const cases = [];
 
   (outcomes || []).forEach(function(outcome) {
@@ -251,10 +253,9 @@ function simpleBuildComparableCases_(current, outcomes) {
     if (similarity < VFC_SIMPLE_CONFIG.MIN_SIMILARITY) return;
 
     const approvedAmount = Math.max(0, toNumber_(outcome.approvedAmount));
-    const historicalDeposits = Math.max(0, toNumber_(features.averageMonthlyDeposits));
-    const depositRatio = historicalDeposits > 0
-      ? clamp_(currentDeposits / historicalDeposits, 0.60, 1.45)
-      : 1;
+    const historicalDeposits = simpleOperatingDeposits_(features);
+    if (!(historicalDeposits > 0)) return;
+    const depositRatio = clamp_(currentDeposits / historicalDeposits, 0.60, 1.45);
     const isPositive = decision === 'Approved' || decision === 'Conditional';
 
     cases.push({
@@ -324,7 +325,7 @@ function simpleApprovalRate_(cases) {
 }
 
 function simpleBankingAmount_(features, fundamental) {
-  const deposits = Math.max(0, toNumber_(features.averageMonthlyDeposits));
+  const deposits = simpleNetCapacityDeposits_(features);
   const score = toNumber_(fundamental.score);
   const multiple = score >= 82 ? 1.05 :
     score >= 70 ? 0.90 :
@@ -336,6 +337,18 @@ function simpleBankingAmount_(features, fundamental) {
 function simpleRiskAdjustment_(features, fundamental) {
   let factor = 1;
   const reasons = [];
+  const debtRatio = simpleDebtBurdenRatio_(features);
+
+  if (debtRatio > 0.30) {
+    factor *= 0.82;
+    reasons.push('confirmed debt exceeds 30% of operating deposits');
+  } else if (debtRatio > 0.20) {
+    factor *= 0.90;
+    reasons.push('confirmed debt exceeds 20% of operating deposits');
+  } else if (debtRatio > 0.10) {
+    factor *= 0.95;
+    reasons.push('confirmed debt exceeds 10% of operating deposits');
+  }
 
   if (toNumber_(features.nsfPerMonth) > 2) {
     factor *= 0.88;
@@ -366,6 +379,37 @@ function simpleRiskAdjustment_(features, fundamental) {
     factor: clamp_(factor, 0.65, 1),
     reasons: reasons
   };
+}
+
+function simpleOperatingDeposits_(features) {
+  features = features || {};
+  const gross = Math.max(0, toNumber_(features.averageMonthlyDeposits));
+  const hasOperating = features.estimatedOperatingMonthlyDeposits !== undefined && features.estimatedOperatingMonthlyDeposits !== null && features.estimatedOperatingMonthlyDeposits !== '';
+  if (!hasOperating) return gross;
+  const operating = Math.max(0, toNumber_(features.estimatedOperatingMonthlyDeposits));
+  return gross > 0 ? Math.min(gross, operating) : operating;
+}
+
+function simpleNetCapacityDeposits_(features) {
+  return Math.max(0, simpleOperatingDeposits_(features) - Math.max(0, toNumber_(features && features.existingMonthlyDebtService)));
+}
+
+function simpleDebtBurdenRatio_(features) {
+  const operating = simpleOperatingDeposits_(features);
+  const debt = Math.max(0, toNumber_(features && features.existingMonthlyDebtService));
+  return debt > 0 ? (operating > 0 ? debt / operating : 1) : 0;
+}
+
+function runInstitutionalUnderwritingSelfTests() {
+  const results = [];
+  function test(name, fn) { try { results.push({name:name,pass:true,detail:String(fn()||'')}); } catch (e) { results.push({name:name,pass:false,detail:String(e&&e.message||e)}); } }
+  function close(actual, expected, tolerance, label) { if (Math.abs(Number(actual||0)-Number(expected||0)) > (tolerance==null?.02:tolerance)) throw new Error((label||'value')+' expected '+expected+' got '+actual); }
+  test('Operating deposits override gross deposits for capacity',function(){const f={averageMonthlyDeposits:100000,estimatedOperatingMonthlyDeposits:60000,existingMonthlyDebtService:10000};close(simpleOperatingDeposits_(f),60000,.001,'operating');close(simpleNetCapacityDeposits_(f),50000,.001,'net');return'$50000';});
+  test('Banking amount subtracts confirmed debt before score multiple',function(){const f={averageMonthlyDeposits:100000,estimatedOperatingMonthlyDeposits:60000,existingMonthlyDebtService:10000};close(simpleBankingAmount_(f,{score:70}),45000,.001,'banking amount');return'$45000';});
+  test('Legacy cases without operating facts fall back to gross deposits',function(){const f={averageMonthlyDeposits:100000,existingMonthlyDebtService:10000};close(simpleOperatingDeposits_(f),100000,.001,'legacy operating');close(simpleNetCapacityDeposits_(f),90000,.001,'legacy net');return'$90000';});
+  test('Debt burden applies a deterministic operating-cash adjustment',function(){const r=simpleRiskAdjustment_({averageMonthlyDeposits:100000,estimatedOperatingMonthlyDeposits:60000,existingMonthlyDebtService:10000},{dataQualityScore:100});close(r.factor,.95,.0001,'risk factor');return'95%';});
+  const failed=results.filter(function(x){return!x.pass;});
+  return{ok:failed.length===0,modelVersion:VFC_SIMPLE_CONFIG.MODEL_VERSION,total:results.length,passed:results.length-failed.length,failed:failed.length,results:results};
 }
 
 function simpleConfidenceScore_(approvals, cases, fundamental, features) {

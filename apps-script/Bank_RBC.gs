@@ -1,5 +1,5 @@
 /**
- * RBC BANK ENGINE v3.4 — CANDIDATE / ORIGINAL-PDF LEDGER RECOVERY
+ * RBC BANK ENGINE v3.5 — CANDIDATE / OPERATING-CASH + DEBT GROUPING
  * ONE PERMANENT RBC FILE.
  *
  * Architecture:
@@ -19,8 +19,8 @@ function vfcRbcBankProfile_(){
     id:'RBC',
     label:'RBC',
     status:'CANDIDATE',
-    rulesVersion:'RBC-3.4-CANDIDATE',
-    runtimeFingerprint:'RBC-3.4-ORIGINAL-PDF-RECOVERY-20260918',
+    rulesVersion:'RBC-3.5-CANDIDATE',
+    runtimeFingerprint:'RBC-3.5-OPERATING-CASH-DEBT-GROUPING-20260918',
     intakeContract:'BANK_MATCHED_FROZEN_LEDGER_V2',
     aliases:['ROYAL BANK OF CANADA','RBC ROYAL BANK','RBC']
   };
@@ -48,7 +48,7 @@ function vfcRbcExtractionRules_(){return[
   'Journey/OnDeck, Merchant Growth, Canacap and Greenbox are MCA-style exposures when recurring. iCapital remains general financing unless statement wording proves MCA.',
   'Known financing entities include BDC, Canacap, iCapital, Greenbox, Journey/OnDeck, Merchant Growth, SilverChef, Affirm Canada and explicit premium finance/IPFS.',
   'LOAN CREDIT, CSBFL advances and credits from known financing entities are financing-credit candidates only when printed in Deposits & Credits.',
-  'BR TO BR credits and explicit TRANSFER FROM ACCOUNT credits are internal transfers unless independently identified as financing proceeds. Generic customer e-Transfers are not excluded.',
+  'BR TO BR credits, explicit TRANSFER FROM ACCOUNT credits and credit-side ONLINE BANKING TRANSFER - #### rows are internal account transfers unless independently identified as financing proceeds. Generic customer e-Transfers are not excluded.',
   'Do not duplicate cheque-image/support pages.'
 ].join('\n');}
 
@@ -374,7 +374,7 @@ function vfcRbcClassifyDebit_(t){
     if(/^LOAN\s+PAYMENT$/i.test(raw)){entityKey='GENERIC_LOAN_PAYMENT';label='Generic LOAN PAYMENT';}
     else{
       const numbered=s.match(/(?:NO\.?|NUMBER|#)\s*([0-9-]{5,})/),generic=s.match(/\b(?:LOAN|MORTGAGE|LOC)\b[^0-9]{0,30}([0-9][0-9-]{5,})\b/),ref=numbered||generic;
-      if(ref){const n=ref[1].replace(/[^0-9]/g,'');if(/LOAN\s+INTEREST/.test(s)){entityKey='LOAN_INTEREST_'+n;label='Loan interest NO.'+n;}else if(/\bLOAN\b/.test(s)){entityKey='LOAN_'+n;label='Loan payment NO.'+n;}else if(/\bLEASE\b|\bLSE\b/.test(s)){entityKey='LEASE_'+n;label='Lease payment NO.'+n;}else{entityKey='FINANCE_REF_'+n;}}
+      if(ref){const n=ref[1].replace(/[^0-9]/g,'');if(/\bLOAN\b/.test(s)){entityKey='LOAN_ACCOUNT_'+n;label='RBC Loan NO.'+n;debtJustification='Interest, BLIP and principal debits sharing the same printed loan reference are one obligation.';}else if(/\bLEASE\b|\bLSE\b/.test(s)){entityKey='LEASE_'+n;label='Lease payment NO.'+n;}else{entityKey='FINANCE_REF_'+n;}}
       else{const stable=(cp||raw).replace(/\b[0-9][0-9-]{4,}\b/g,'').replace(/\s+/g,' ').trim();entityKey='RBC_FINANCE_'+vfcCounterpartyKey_(stable||cp||raw);}
     }
   }
@@ -387,10 +387,10 @@ function vfcRbcClassifyDebit_(t){
 }
 
 function vfcRbcIsReturnedFinancingCredit_(t){return String(t&&t.direction||'').toUpperCase()==='CREDIT'&&vfcRbcReturnEventText_(t&&t.description);}
-function vfcRbcIsNonOperatingTransferCredit_(t){if(String(t&&t.direction||'').toUpperCase()!=='CREDIT')return false;const s=String(t&&t.description||'').toUpperCase();if(/E-TRANSFER|INTERAC/.test(s))return false;return/\bBR\s+TO\s+BR\b|\bTRANSFER\s+FROM\s+(?:ACCOUNT|A\/C|ACCT)\b|\bINTERNAL\s+TRANSFER\b/.test(s);}
+function vfcRbcIsNonOperatingTransferCredit_(t){if(String(t&&t.direction||'').toUpperCase()!=='CREDIT')return false;const s=String(t&&t.description||'').toUpperCase();if(/E-TRANSFER|INTERAC/.test(s))return false;return/\bBR\s+TO\s+BR\b|\bTRANSFER\s+FROM\s+(?:ACCOUNT|A\/C|ACCT)\b|\bINTERNAL\s+TRANSFER\b|\bONLINE\s+BANKING\s+TRANSFER\s*-\s*\d{3,}\b/.test(s);}
 function vfcRbcKnownFinancingCredit_(t){const s=String(t&&t.description||'').toUpperCase();if(vfcRbcIsReturnedFinancingCredit_(t))return false;return/\bBDC\b|MERCHANT\s+GROWTH|JOURNEY|ONDECK|\bJTO\b|CANACAP|\bICAPITAL\b|GREENBOX|\bCSBFL\b|\bLOAN\b|\bMCA\b|\bMORTGAGE\b|\bLOC\b|LINE\s+OF\s+CREDIT|CREDIT\s+LINE/.test(s);}
 function vfcRbcPreservePrintedDuplicate_(){return true;}
-function vfcRbcStrongEntityKey_(key){return/^(RBC_AFFIRM_CANADA|RBC_PREMIUM_FINANCE_|RBC_BDC_|MERCHANT_GROWTH|JOURNEY_ONDECK|CANACAP|ICAPITAL|GREENBOX|SILVERCHEF_EQUIPMENT_LEASE|AUTO_PAYMENT_FINANCE_|RBC_FINANCE_|INSURANCE_|LEASE_[0-9]|FINANCE_REF_[0-9])/.test(String(key||'').toUpperCase());}
+function vfcRbcStrongEntityKey_(key){return/^(RBC_AFFIRM_CANADA|RBC_PREMIUM_FINANCE_|RBC_BDC_|MERCHANT_GROWTH|JOURNEY_ONDECK|CANACAP|ICAPITAL|GREENBOX|SILVERCHEF_EQUIPMENT_LEASE|AUTO_PAYMENT_FINANCE_|RBC_FINANCE_|INSURANCE_|LOAN_ACCOUNT_[0-9]|LEASE_[0-9]|FINANCE_REF_[0-9])/.test(String(key||'').toUpperCase());}
 
 function runRbcBankingSelfTests(){
   const results=[];
@@ -457,7 +457,7 @@ function runRbcBankingSelfTests(){
     equal(after.debitCount,56,'corrected debits');close(after.totalDebits,63781.21,.001,'corrected debit total');
     equal(locked.rbc_direction_repairs.length,5,'recorded direction repairs');
     equal(locked.rbc_ledger_repair_passes,0,'AI repair passes');
-    equal(locked.rbc_runtime_fingerprint,'RBC-3.4-ORIGINAL-PDF-RECOVERY-20260918','runtime fingerprint');
+    equal(locked.rbc_runtime_fingerprint,'RBC-3.5-OPERATING-CASH-DEBT-GROUPING-20260918','runtime fingerprint');
     return'18 credits/$56889.45; 56 debits/$63781.21';
   });
   test('AIM HIGH Jun-Jul printed credits are exactly 24 and $90,909.53',function(){
@@ -494,9 +494,11 @@ function runRbcBankingSelfTests(){
   test('Checksum reconciliation refuses when grand totals show a missing or wrong amount',function(){const text='Total deposits & credits (2) + 200.00\nTotal cheques & debits (1) - 100.00',facts={deposits:200,withdrawals:100},rows=[tx('2026-01-01','Misc Payment A','DEBIT',90),tx('2026-01-02','Misc Payment B','DEBIT',100),tx('2026-01-03','Misc Payment C','CREDIT',100)],r=vfcRbcReconcileDirectionOnly_(rows,facts,text);equal(r.changed,false,'no repair');equal(r.reason,'grand-total-mismatch','reason');return r.reason;});
   test('Unknown recurring PAD is informational only',function(){const d=vfcDebtProfile_([row('2026-01-31',[tx('2026-01-12','Business PAD ABC SERVICES','DEBIT',500,'ABC SERVICES')]),row('2026-02-28',[tx('2026-02-12','Business PAD ABC SERVICES','DEBIT',500,'ABC SERVICES')]),row('2026-03-31',[tx('2026-03-12','Business PAD ABC SERVICES','DEBIT',500,'ABC SERVICES')])]);close(d.confirmedMonthlyDebtService,0,.001,'debt');return'informational';});
   test('Recurring Affirm is financing',function(){const d=vfcDebtProfile_([row('2026-01-31',[tx('2026-01-06','Misc Payment AFFIRM CANADA','DEBIT',66.62,'AFFIRM CANADA')]),row('2026-02-28',[tx('2026-02-06','Misc Payment AFFIRM CANADA','DEBIT',66.62,'AFFIRM CANADA')]),row('2026-03-31',[tx('2026-03-06','Misc Payment AFFIRM CANADA','DEBIT',66.62,'AFFIRM CANADA')])]);close(d.confirmedMonthlyDebtService,66.62,.02,'Affirm');return'66.62';});
-  test('Returned BDC PAD cannot inflate debt',function(){const d=vfcDebtProfile_([row('2026-03-31',[tx('2026-03-27','Business PAD BDC','DEBIT',2578.34,'BDC')]),row('2026-04-30',[tx('2026-04-27','Business PAD BDC','DEBIT',2656.97,'BDC')]),row('2026-05-31',[tx('2026-05-27','Business PAD BDC','DEBIT',2606.59,'BDC'),tx('2026-05-27','Cheque returned NSF','CREDIT',2606.59)]),row('2026-06-30',[tx('2026-06-29','Business PAD BDC','DEBIT',5289.91,'BDC'),tx('2026-06-29','Cheque returned NSF','CREDIT',5289.91)]),row('2026-08-31',[tx('2026-08-17','Business PAD BDC','DEBIT',2285.91,'BDC')])]);truthy(d.returnedFinanceDebitsSuppressed>=2,'suppressed');return'suppressed='+d.returnedFinanceDebitsSuppressed;});
-  test('Recurring IPFS is financing while ordinary insurance is informational',function(){const ip=vfcRbcClassifyDebit_(tx('2026-08-04','Business PAD IPFS Canada','DEBIT',234.96,'IPFS Canada')),ins=vfcRbcClassifyDebit_(tx('2026-08-04','Auto Insurance ICBC','DEBIT',234.96,'ICBC'));equal(ip.family,'FINANCING','IPFS');equal(ins.family,'OTHER','insurance');return'correct';});
-  test('BR TO BR credit excluded but customer e-transfer not',function(){truthy(vfcRbcIsNonOperatingTransferCredit_(tx('2026-01-01','BR TO BR - 0863','CREDIT',5000)),'internal');equal(vfcRbcIsNonOperatingTransferCredit_(tx('2026-01-01','e-Transfer received CUSTOMER','CREDIT',5000)),false,'customer');return'correct';});
+  test('Returned BDC PAD cannot inflate debt',function(){const d=vfcDebtProfile_([row('2026-03-31',[tx('2026-03-27','Business PAD BDC','DEBIT',2578.34,'BDC')]),row('2026-04-30',[tx('2026-04-27','Business PAD BDC','DEBIT',2656.97,'BDC')]),row('2026-05-31',[tx('2026-05-27','Business PAD BDC','DEBIT',2606.59,'BDC'),tx('2026-05-27','Cheque returned NSF','CREDIT',2606.59)]),row('2026-06-30',[tx('2026-06-29','Business PAD BDC','DEBIT',5289.91,'BDC'),tx('2026-06-29','Cheque returned NSF','CREDIT',5289.91)]),row('2026-07-31',[tx('2026-07-27','Business PAD BDC','DEBIT',7952.39,'BDC')]),row('2026-08-31',[tx('2026-08-17','Business PAD BDC','DEBIT',2285.91,'BDC')])]),bdc=d.activeDebtObligations.filter(function(x){return x.counterparty==='BDC';});equal(d.returnedFinanceDebitsSuppressed,2,'suppressed');equal(bdc.length,1,'normal BDC stream');close(bdc[0].monthlyEquivalent,2507.07,.02,'BDC monthly');return'suppressed=2; BDC=$2507.07';});
+  test('Recurring IPFS amount wins while one catch-up debit stays separate',function(){const d=vfcDebtProfile_([row('2026-06-30',[tx('2026-06-22','Business PAD IPFS Canada','DEBIT',502.45,'IPFS Canada')]),row('2026-07-31',[tx('2026-07-02','Business PAD IPFS Canada','DEBIT',234.96,'IPFS Canada')]),row('2026-08-31',[tx('2026-08-04','Business PAD IPFS Canada','DEBIT',234.96,'IPFS Canada')]),row('2026-09-30',[tx('2026-09-01','Business PAD IPFS Canada','DEBIT',234.96,'IPFS Canada')])]),ip=d.activeDebtObligations.filter(function(x){return /IPFS/i.test(x.counterparty);}),ins=vfcRbcClassifyDebit_(tx('2026-08-04','Auto Insurance ICBC','DEBIT',234.96,'ICBC'));equal(ip.length,1,'IPFS stream');equal(ip[0].family,'FINANCING','IPFS family');close(ip[0].monthlyEquivalent,234.96,.02,'IPFS monthly');equal(ins.family,'OTHER','insurance');return'IPFS=$234.96';});
+  test('Same numbered RBC loan merges interest and BLIP components',function(){const d=vfcDebtProfile_([row('2026-03-31',[tx('2026-03-23','Loan interest NO.02243790 001','DEBIT',36.80),tx('2026-03-23','BLIP payment - loan NO.02243790 001','DEBIT',.73)]),row('2026-04-30',[tx('2026-04-21','Loan interest NO.02243790 001','DEBIT',61.05),tx('2026-04-21','BLIP payment - loan NO.02243790 001','DEBIT',1.47)]),row('2026-05-31',[tx('2026-05-22','Loan interest NO.02243790 001','DEBIT',44.05),tx('2026-05-22','BLIP payment - loan NO.02243790 001','DEBIT',1.06)]),row('2026-06-30',[tx('2026-06-22','Loan interest NO.02243790 001','DEBIT',79.17),tx('2026-06-22','BLIP payment - loan NO.02243790 001','DEBIT',2.11)]),row('2026-07-31',[tx('2026-07-22','Loan interest NO.02243790 001','DEBIT',20.91),tx('2026-07-22','BLIP payment - loan NO.02243790 001','DEBIT',.53)]),row('2026-08-31',[tx('2026-08-22','Loan interest NO.02243790 001','DEBIT',.16)])]),loan=d.activeDebtObligations.filter(function(x){return x.entityKey==='LOAN_ACCOUNT_02243790';});equal(loan.length,1,'loan obligation');close(loan[0].monthlyEquivalent,41.34,.02,'combined monthly');equal(loan[0].monthlyEquivalentMethod,'MONTHLY_ACCOUNT_TOTAL_MEAN','method');return'one loan/$41.34';});
+  test('Explicit RBC account-transfer credits excluded but customer e-transfer not',function(){truthy(vfcRbcIsNonOperatingTransferCredit_(tx('2026-01-01','BR TO BR - 0863','CREDIT',5000)),'BR TO BR');truthy(vfcRbcIsNonOperatingTransferCredit_(tx('2026-01-01','Online Banking transfer - 0040','CREDIT',500)),'online credit');equal(vfcRbcIsNonOperatingTransferCredit_(tx('2026-01-01','Online Banking transfer - 0040','DEBIT',500)),false,'online debit');equal(vfcRbcIsNonOperatingTransferCredit_(tx('2026-01-01','e-Transfer received CUSTOMER','CREDIT',5000)),false,'customer');return'correct';});
+  test('AIM HIGH six-statement operating deposits exclude financing, returns and account transfers',function(){const gross=363872.65,financing=104074.91,branchTransfers=44039.07,returns=10709.81,onlineTransfers=9066,operating=gross-financing-branchTransfers-returns-onlineTransfers;close(operating,195982.86,.02,'operating total');close(operating/6,32663.81,.02,'operating monthly');return'$32663.81/month';});
   test('Generic numeric Misc Payment never becomes obligation by itself',function(){equal(vfcRbcClassifyDebit_(tx('2026-03-12','Misc Payment 1469635','DEBIT',6585.81,'1469635')),null,'misc');return'ignored';});
 
   test('Summary debit sign does not create a false negative-balance flag',function(){
