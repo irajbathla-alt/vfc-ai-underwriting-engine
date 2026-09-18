@@ -449,13 +449,13 @@ function runRbcBankingSelfTests(){
   });
 
   test('AIM HIGH crossed Misc Payment directions reconcile exactly',function(){
-    const text='Total deposits & credits (2) + 6,585.81\nTotal cheques & debits (2) - 5,783.00',
-          facts={deposits:6585.81,withdrawals:5783.00},
+    const text='Total deposits & credits (2) + 7,585.81\nTotal cheques & debits (2) - 5,783.00',
+          facts={deposits:7585.81,withdrawals:5783.00},
           wrong=[
             tx('2026-03-12','Misc Payment 1469635','DEBIT',6585.81,'1469635'),
             tx('2026-03-12','Misc Payment RBC CREDIT CARD','CREDIT',283.00,'RBC CREDIT CARD'),
             tx('2026-03-12','LOAN PAYMENT','DEBIT',5500.00,'LOAN PAYMENT'),
-            tx('2026-03-09','LOAN CREDIT','CREDIT',6283.81,'LOAN CREDIT')
+            tx('2026-03-09','LOAN CREDIT','CREDIT',1000.00,'LOAN CREDIT')
           ],
           prepared=vfcRbcPrepareLedger_(wrong),
           fixed=vfcRbcReconcileAmbiguousDirections_(prepared,facts,text);
@@ -464,7 +464,7 @@ function runRbcBankingSelfTests(){
     equal(fixed.flips[0].description,'Misc Payment 1469635','flipped row');
     equal(fixed.flips[0].to,'CREDIT','new direction');
     const a=vfcRbcAuditFullLedger_(fixed.rows,facts,text,'aim-high-test.pdf');
-    close(a.totalCredits,6585.81,.01,'credits');close(a.totalDebits,5783.00,.01,'debits');
+    close(a.totalCredits,7585.81,.01,'credits');close(a.totalDebits,5783.00,.01,'debits');
     return'cent exact';
   });
 
