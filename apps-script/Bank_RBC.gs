@@ -1,5 +1,5 @@
 /**
- * RBC BANK ENGINE v3.7 — CANDIDATE / CHECKSUM-SAFE MISSING-ROW RECOVERY
+ * RBC BANK ENGINE v3.8 — CANDIDATE / FOCUSED ROW RECOVERY
  * ONE PERMANENT RBC FILE.
  *
  * Architecture:
@@ -11,18 +11,20 @@
  * 6) Printed column controls direction. Verified narrow signatures correct known drift.
  * 7) If row count and grand total are already exact, a unique minimum-flip checksum
  *    solution may correct direction-only PDF/LLM drift without changing any row fact.
- * 8) A narrowly parsed transcript row may be restored only when one unique subset
- *    exactly fills one printed count/total deficit; otherwise the engine fails closed.
- * 9) Other missing rows or wrong amounts trigger a fresh structured read of the PDF.
- * 10) PAD/NSF/return/debt classification remains deterministic after facts are frozen.
+ * 8) Transcript-visible transfer rows may be canonicalized only when one unique
+ *    assignment exactly satisfies all four printed controls.
+ * 9) If the cached transcript split a row, a focused original-PDF pass reads only
+ *    that narrow row family before any full-ledger reread is allowed.
+ * 10) Other missing rows or wrong amounts trigger a fresh structured read of the PDF.
+ * 11) PAD/NSF/return/debt classification remains deterministic after facts are frozen.
  */
 function vfcRbcBankProfile_(){
   return{
     id:'RBC',
     label:'RBC',
     status:'CANDIDATE',
-    rulesVersion:'RBC-3.7-CANDIDATE',
-    runtimeFingerprint:'RBC-3.7-CHECKSUM-MISSING-ROW-RECOVERY-20260922',
+    rulesVersion:'RBC-3.8-CANDIDATE',
+    runtimeFingerprint:'RBC-3.8-FOCUSED-ROW-RECOVERY-20260922',
     intakeContract:'BANK_MATCHED_FROZEN_LEDGER_V2',
     aliases:['ROYAL BANK OF CANADA','RBC ROYAL BANK','RBC']
   };
@@ -76,7 +78,7 @@ function vfcRbcLockFacts_(summary,text,fileName,sourceFileId){
   locked.total_withdrawals=facts.withdrawals;
 
   const directionRepairs=[],missingRowRepairs=[];
-  let ledger=vfcRbcPrepareLedger_(locked.banking_transactions||[],directionRepairs),audit=null,lastError='',repairPasses=0;
+  let ledger=vfcRbcPrepareLedger_(locked.banking_transactions||[],directionRepairs),audit=null,lastError='',repairPasses=0,focusedRepairPasses=0;
   let missingRepair=vfcRbcRecoverMissingOnlineTransfers_(ledger,text,facts);
   if(missingRepair.changed){ledger=missingRepair.rows;Array.prototype.push.apply(missingRowRepairs,missingRepair.added);}
   let checksumRepair=vfcRbcReconcileDirectionOnly_(ledger,facts,text);
@@ -87,6 +89,14 @@ function vfcRbcLockFacts_(summary,text,fileName,sourceFileId){
       break;
     }catch(e){
       lastError=String(e&&e.message||e);
+      if(!focusedRepairPasses&&sourceFileId&&vfcRbcHasOneSidedPositiveDeficit_(ledger,text,facts)){
+        focusedRepairPasses++;
+        try{
+          const focusedRows=vfcRbcReadFocusedOnlineTransfersFromPdf_(sourceFileId,name,facts,focusedRepairPasses);
+          missingRepair=vfcRbcRecoverMissingOnlineTransfers_(ledger,text,facts,focusedRows);
+          if(missingRepair.changed){ledger=missingRepair.rows;Array.prototype.push.apply(missingRowRepairs,missingRepair.added);continue;}
+        }catch(focusedError){lastError+=' | Focused RBC transfer recovery: '+String(focusedError&&focusedError.message||focusedError);}
+      }
       if(attempt>=2)throw new Error(lastError);
       repairPasses++;
       ledger=vfcRbcRepairLedger_(ledger,text,name,facts,lastError,repairPasses,directionRepairs,sourceFileId);
@@ -102,7 +112,8 @@ function vfcRbcLockFacts_(summary,text,fileName,sourceFileId){
   locked.rbc_full_ledger_verified=true;
   locked.rbc_ledger_reconciled=repairPasses>0||directionRepairs.length>0||missingRowRepairs.length>0;
   locked.rbc_ledger_repair_passes=repairPasses;
-  locked.rbc_original_pdf_repair_used=!!sourceFileId&&repairPasses>0;
+  locked.rbc_focused_pdf_repair_passes=focusedRepairPasses;
+  locked.rbc_original_pdf_repair_used=!!sourceFileId&&(repairPasses>0||focusedRepairPasses>0);
   locked.rbc_direction_repairs=directionRepairs;
   locked.rbc_missing_row_repairs=missingRowRepairs;
   locked.rbc_runtime_fingerprint=vfcRbcBankProfile_().runtimeFingerprint;
@@ -192,42 +203,65 @@ function vfcRbcActivityIsoDate_(dayValue,monthValue,facts){
   return'';
 }
 
-/**
- * Read only the narrow RBC row family that the PDF reader has repeatedly
- * omitted. Direction is intentionally left unknown here: it may be restored
- * only when the printed summary has one exact, one-sided checksum deficit.
- */
-function vfcRbcOnlineTransferCandidates_(text,facts){
-  const source=String(text||'').replace(/\u00a0/g,' '),activity=source.search(/Account\s+Activity\s+Details/i);
-  if(activity<0)return[];
-  const lines=source.substring(activity).split(/\r?\n/),out=[];let currentDate='';
-  for(let i=0;i<lines.length;i++){
-    const line=String(lines[i]||'');
-    if(i>0&&/\bClosing\s+balance\b/i.test(line))break;
-    const isoMatch=line.match(/^\s*(\d{4}-\d{2}-\d{2})\b/);
-    if(isoMatch){const isoDay=vfcRbcIsoDayNumber_(isoMatch[1]),startDay=vfcRbcIsoDayNumber_(facts&&facts.startDate),endDay=vfcRbcIsoDayNumber_(facts&&facts.endDate);if(isoDay!==null&&startDay!==null&&endDay!==null&&isoDay>=startDay&&isoDay<=endDay)currentDate=isoMatch[1];}
-    let dateMatch=line.match(/^\s*(\d{1,2})\s+(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\b/i),day='',month='';
-    if(dateMatch){day=dateMatch[1];month=dateMatch[2];}
-    else{
-      dateMatch=line.match(/^\s*(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+(\d{1,2})\b/i);
-      if(dateMatch){day=dateMatch[2];month=dateMatch[1];}
-    }
-    if(day&&month){const parsed=vfcRbcActivityIsoDate_(day,month,facts);if(parsed)currentDate=parsed;}
+function vfcRbcTranscriptLines_(text){
+  const source=String(text||'').replace(/\u00a0/g,' '),activity=source.search(/Account\s+Activity(?:\s+Details)?/i);
+  return(activity>=0?source.substring(activity):source).split(/\r?\n/);
+}
 
+function vfcRbcTranscriptDateFromLine_(line,facts,currentDate){
+  const s=String(line||''),prefix='^\\s*(?:[-*]\\s*)?(?:["\\\']?DATE["\\\']?\\s*[:=|-]\\s*)?["\\\']?',
+        iso=s.match(new RegExp(prefix+'(\\d{4}-\\d{2}-\\d{2})\\b','i')),
+        start=vfcRbcIsoDayNumber_(facts&&facts.startDate),end=vfcRbcIsoDayNumber_(facts&&facts.endDate);
+  if(iso){const day=vfcRbcIsoDayNumber_(iso[1]);if(day!==null&&start!==null&&end!==null&&day>=start&&day<=end)return iso[1];}
+  const month='(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)',
+        dayMonth=s.match(new RegExp(prefix+'(\\d{1,2})\\s+'+month+'\\b','i')),
+        monthDay=s.match(new RegExp(prefix+month+'\\s+(\\d{1,2})\\b','i'));
+  if(dayMonth)return vfcRbcActivityIsoDate_(dayMonth[1],dayMonth[2],facts)||currentDate||'';
+  if(monthDay)return vfcRbcActivityIsoDate_(monthDay[2],monthDay[1],facts)||currentDate||'';
+  return currentDate||'';
+}
+
+function vfcRbcTranscriptMoneyForRow_(lines,index,matchEnd){
+  const first=String(lines[index]||'').substring(Math.max(0,Number(matchEnd||0))),parts=[first];
+  let money=first.match(/\$?([0-9][0-9,]*\.\d{2})/);
+  if(money)return{amount:Number(money[1].replace(/,/g,'')),fragment:parts.join(' ')};
+  for(let offset=1;offset<=3&&index+offset<lines.length;offset++){
+    const next=String(lines[index+offset]||'');
+    if(/ONLINE\s+BANKING\s+TRANSFER\s*-\s*\d{3,}|CHEQUE\s*-\s*\d+|E-TRANSFER|BILL\s+PAYMENT|ACCOUNT\s+PAYABLE|BR\s+TO\s+BR|CLOSING\s+BALANCE/i.test(next))break;
+    parts.push(next);money=next.match(/\$?([0-9][0-9,]*\.\d{2})/);
+    if(money)return{amount:Number(money[1].replace(/,/g,'')),fragment:parts.join(' ')};
+  }
+  return null;
+}
+
+/** Parse the exact RBC transfer label even when the provider splits amount/date onto nearby lines. */
+function vfcRbcOnlineTransferCandidates_(text,facts){
+  const lines=vfcRbcTranscriptLines_(text),out=[];let currentDate='',seen=false;
+  for(let i=0;i<lines.length;i++){
+    const line=String(lines[i]||'');currentDate=vfcRbcTranscriptDateFromLine_(line,facts,currentDate);
+    if(seen&&/\bClosing\s+balance\b/i.test(line))break;
     const transfer=line.match(/ONLINE\s+BANKING\s+TRANSFER\s*-\s*(\d{3,})/i);
     if(!transfer||!currentDate)continue;
-    const tail=line.substring(Number(transfer.index||0)+transfer[0].length),money=tail.match(/\$?([0-9][0-9,]*\.\d{2})/);
-    if(!money)continue;
-    const amount=Number(money[1].replace(/,/g,''));
-    if(!(amount>0))continue;
-    out.push({
-      date:currentDate,
-      description:'Online Banking transfer - '+transfer[1],
-      counterparty:'Online Banking transfer - '+transfer[1],
-      amount:amount,
-      cents:Math.round(amount*100),
-      sourceLine:line.replace(/\s+/g,' ').trim()
-    });
+    const money=vfcRbcTranscriptMoneyForRow_(lines,i,Number(transfer.index||0)+transfer[0].length);
+    if(!money||!(money.amount>0))continue;
+    const fragment=(line+' '+money.fragment).replace(/\s+/g,' ').trim().toUpperCase();let hint='';
+    if(/\b(?:DEBIT|CHEQUES?\s*&\s*DEBITS?)\b/.test(fragment)&&!/\b(?:CREDIT|DEPOSITS?\s*&\s*CREDITS?)\b/.test(fragment))hint='DEBIT';
+    else if(/\b(?:CREDIT|DEPOSITS?\s*&\s*CREDITS?)\b/.test(fragment)&&!/\b(?:DEBIT|CHEQUES?\s*&\s*DEBITS?)\b/.test(fragment))hint='CREDIT';
+    out.push({date:currentDate,description:'Online Banking transfer - '+transfer[1],counterparty:'Online Banking transfer - '+transfer[1],amount:money.amount,cents:Math.round(money.amount*100),directionHint:hint,sourceLine:(line+' '+money.fragment).replace(/\s+/g,' ').trim()});seen=true;
+  }
+  return out;
+}
+
+function vfcRbcChequeCandidates_(text,facts){
+  const lines=vfcRbcTranscriptLines_(text),out=[];let currentDate='',seen=false;
+  for(let i=0;i<lines.length;i++){
+    const line=String(lines[i]||'');currentDate=vfcRbcTranscriptDateFromLine_(line,facts,currentDate);
+    if(seen&&/\bClosing\s+balance\b/i.test(line))break;
+    const cheque=line.match(/\bCHEQUE\s*-\s*(\d+)\b/i);
+    if(!cheque||!currentDate)continue;
+    const money=vfcRbcTranscriptMoneyForRow_(lines,i,Number(cheque.index||0)+cheque[0].length);
+    if(!money||!(money.amount>0))continue;
+    out.push({date:currentDate,description:'Cheque - '+cheque[1],amount:money.amount,cents:Math.round(money.amount*100),reference:cheque[1]});seen=true;
   }
   return out;
 }
@@ -235,71 +269,119 @@ function vfcRbcOnlineTransferCandidates_(text,facts){
 function vfcRbcOnlineTransferKey_(t){
   const match=String(t&&t.description||'').match(/ONLINE\s+BANKING\s+TRANSFER\s*-\s*(\d{3,})/i);
   if(!match)return'';
-  return[vfcIso_(t&&t.date),match[1],Math.round(vfcNum_(t&&t.amount)*100)].join('|');
+  return[vfcIso_(t&&t.date),String(Number(match[1])),Math.round(vfcNum_(t&&t.amount)*100)].join('|');
+}
+
+function vfcRbcNormalizeTransferCandidates_(items,facts){
+  const out=[],seen={},start=vfcRbcIsoDayNumber_(facts&&facts.startDate),end=vfcRbcIsoDayNumber_(facts&&facts.endDate);
+  (Array.isArray(items)?items:[]).forEach(function(t,index){
+    const match=String(t&&t.description||'').match(/ONLINE\s+BANKING\s+TRANSFER\s*-\s*(\d{3,})/i),date=vfcIso_(t&&t.date),day=vfcRbcIsoDayNumber_(date),amount=vfcNum_(t&&t.amount);
+    if(!match||!date||day===null||start===null||end===null||day<start||day>end||!(amount>0))return;
+    const row={date:date,description:'Online Banking transfer - '+match[1],counterparty:'Online Banking transfer - '+match[1],amount:amount,cents:Math.round(amount*100),directionHint:/^(?:DEBIT|CREDIT)$/.test(String(t.directionHint||t.direction||'').toUpperCase())?String(t.directionHint||t.direction).toUpperCase():'',sourceLine:String(t.sourceLine||t.description||''),candidateId:'T'+index},key='';
+    row.key=vfcRbcOnlineTransferKey_(row);if(!row.key||seen[row.key])return;seen[row.key]=1;out.push(row);
+  });
+  return out;
+}
+
+function vfcRbcChequeKey_(t){const m=String(t&&t.description||'').match(/\bCHEQUE\s*-\s*(\d+)\b/i);return m?[vfcIso_(t&&t.date),String(Number(m[1])),Math.round(vfcNum_(t&&t.amount)*100)].join('|'):'';}
+function vfcRbcChequeSignature_(t){const m=String(t&&t.description||'').match(/\bCHEQUE\s*-\s*(\d+)\b/i);return m?[String(Number(m[1])),Math.round(vfcNum_(t&&t.amount)*100)].join('|'):'';}
+
+function vfcRbcProvenExtraChequeIndexes_(rows,text,facts){
+  const transcript=vfcRbcChequeCandidates_(text,facts),bySignature={},ledgerBySignature={},remove=[];
+  transcript.forEach(function(t){const sig=vfcRbcChequeSignature_(t);if(sig){if(!bySignature[sig])bySignature[sig]=[];bySignature[sig].push(t);}});
+  (rows||[]).forEach(function(t,index){const sig=vfcRbcChequeSignature_(t);if(sig){if(!ledgerBySignature[sig])ledgerBySignature[sig]=[];ledgerBySignature[sig].push({row:t,index:index});}});
+  Object.keys(ledgerBySignature).forEach(function(sig){
+    const expected=bySignature[sig]||[],actual=ledgerBySignature[sig];if(!expected.length||actual.length<=expected.length||actual.length-expected.length>2)return;
+    const counts={};expected.forEach(function(t){const key=vfcRbcChequeKey_(t);counts[key]=(counts[key]||0)+1;});const extras=[];
+    actual.forEach(function(item){const key=vfcRbcChequeKey_(item.row);if((counts[key]||0)>0)counts[key]--;else extras.push(item);});
+    if(extras.length!==actual.length-expected.length)return;
+    const adjacent=extras.every(function(item){const day=vfcRbcIsoDayNumber_(item.row&&item.row.date);return expected.some(function(t){const other=vfcRbcIsoDayNumber_(t.date);return day!==null&&other!==null&&Math.abs(day-other)<=1;});});
+    if(adjacent)extras.forEach(function(item){remove.push(item.index);});
+  });
+  return remove.slice(0,3);
 }
 
 function vfcRbcUniqueCandidateSubset_(candidates,count,targetCents){
   const rows=Array.isArray(candidates)?candidates:[];
-  if(!(count>0)||count>rows.length||!(targetCents>0))return null;
-  if(count===rows.length){
-    const total=rows.reduce(function(sum,row){return sum+row.cents;},0);
-    return total===targetCents?rows.slice():null;
-  }
-
-  const dp=[];for(let n=0;n<=count;n++)dp[n]={};
-  dp[0]['0']={ways:1,indexes:[]};
+  if(count===0)return targetCents===0?[]:null;
+  if(count<0||count>rows.length||!(targetCents>0))return null;
+  if(count===rows.length){const total=rows.reduce(function(sum,row){return sum+row.cents;},0);return total===targetCents?rows.slice():null;}
+  const dp=[];for(let n=0;n<=count;n++)dp[n]={};dp[0]['0']={ways:1,indexes:[]};
   for(let i=0;i<rows.length;i++){
     const cents=rows[i].cents;
     for(let n=Math.min(count,i+1);n>=1;n--){
       const previous=dp[n-1],keys=Object.keys(previous);
       for(let k=0;k<keys.length;k++){
-        const prior=previous[keys[k]],sum=Number(keys[k])+cents;
-        if(sum>targetCents)continue;
-        const key=String(sum),existing=dp[n][key];
-        if(!existing)dp[n][key]={ways:prior.ways,indexes:prior.indexes.concat([i])};
-        else existing.ways=Math.min(2,existing.ways+prior.ways);
+        const prior=previous[keys[k]],sum=Number(keys[k])+cents;if(sum>targetCents)continue;
+        const key=String(sum),existing=dp[n][key];if(!existing)dp[n][key]={ways:prior.ways,indexes:prior.indexes.concat([i])};else existing.ways=Math.min(2,existing.ways+prior.ways);
       }
       if(Object.keys(dp[n]).length>25000)return null;
     }
   }
-  const solution=dp[count][String(targetCents)];
-  return solution&&solution.ways===1?solution.indexes.map(function(index){return rows[index];}):null;
+  const solution=dp[count][String(targetCents)];return solution&&solution.ways===1?solution.indexes.map(function(index){return rows[index];}):null;
+}
+
+function vfcRbcHasOneSidedPositiveDeficit_(items,text,facts){
+  const printed=vfcRbcPrintedActivityCounts_(text),stats=vfcRbcLedgerStats_(items),creditCount=printed.creditCount-stats.creditCount,debitCount=printed.debitCount-stats.debitCount,creditCents=Math.round(vfcNum_(facts&&facts.deposits)*100)-Math.round(stats.totalCredits*100),debitCents=Math.round(vfcNum_(facts&&facts.withdrawals)*100)-Math.round(stats.totalDebits*100);
+  return(creditCount===0&&creditCents===0&&debitCount>0&&debitCents>0)||(debitCount===0&&debitCents===0&&creditCount>0&&creditCents>0);
+}
+
+function vfcRbcReadFocusedOnlineTransfersFromPdf_(sourceFileId,fileName,facts,attempt){
+  const prompt=[
+    'You are the VFC focused RBC row reader. Return JSON only.',
+    'File: '+fileName,
+    'Read the original PDF Account Activity Details, not cheque-image/support pages.',
+    'Return banking_transactions containing ONLY every row whose printed description is ONLINE BANKING TRANSFER - ####. Return no other row.',
+    'For each such row return {date:"YYYY-MM-DD",description:"exact printed description",counterparty:"Online Banking transfer - ####",direction:"DEBIT" or "CREDIT",amount:number}.',
+    'Use the printed Cheques & Debits or Deposits & Credits column for direction. Never infer direction from the word transfer.',
+    'Carry a printed date forward to its undated following rows. Preserve leading zeroes in the four-digit reference.',
+    'Statement period: '+String(facts&&facts.startDate||'')+' through '+String(facts&&facts.endDate||'')+'.',
+    'Before returning, count the visible ONLINE BANKING TRANSFER rows again. Do not return opening/closing balances or any cheque image.'
+  ].join('\n');
+  const result=vfcReadBankLedgerFromPdfWithOpenAI_(sourceFileId,prompt,'RBC focused online-transfer recovery pass '+attempt);
+  return result&&Array.isArray(result.banking_transactions)?result.banking_transactions:[];
 }
 
 /**
- * Restore transcript-visible ONLINE BANKING TRANSFER rows only when all four
- * printed controls prove one unique result. No wording-based direction guess is
- * permitted, and an ambiguous/mixed deficit is left for the PDF repair pass.
+ * Replace the narrow transfer family with transcript/PDF-proven rows, remove only
+ * a transcript-proven adjacent cheque duplicate, and accept the result solely if
+ * one unique direction assignment satisfies all four printed controls.
  */
-function vfcRbcRecoverMissingOnlineTransfers_(items,text,facts){
-  const rows=(Array.isArray(items)?items:[]).map(function(t){return Object.assign({},t);}),
-        result={rows:rows,changed:false,added:[],reason:'not-needed'},printed=vfcRbcPrintedActivityCounts_(text),before=vfcRbcLedgerStats_(rows);
+function vfcRbcRecoverMissingOnlineTransfers_(items,text,facts,providedCandidates){
+  const rows=(Array.isArray(items)?items:[]).map(function(t){return Object.assign({},t);}),result={rows:rows,changed:false,added:[],reason:'not-needed'},printed=vfcRbcPrintedActivityCounts_(text),before=vfcRbcLedgerStats_(rows);
   if(printed.creditCount===null||printed.debitCount===null)return Object.assign(result,{reason:'printed-counts-missing'});
   if(before.bad.length)return Object.assign(result,{reason:'incomplete-rows'});
+  const sourceCandidates=Array.isArray(providedCandidates)?providedCandidates:vfcRbcOnlineTransferCandidates_(text,facts),candidates=vfcRbcNormalizeTransferCandidates_(sourceCandidates,facts);
+  if(!candidates.length)return Object.assign(result,{reason:'no-transfer-candidates'});
 
-  const deficits={
-    CREDIT:{count:printed.creditCount-before.creditCount,cents:Math.round(vfcNum_(facts&&facts.deposits)*100)-Math.round(before.totalCredits*100)},
-    DEBIT:{count:printed.debitCount-before.debitCount,cents:Math.round(vfcNum_(facts&&facts.withdrawals)*100)-Math.round(before.totalDebits*100)}
-  },creditExact=deficits.CREDIT.count===0&&deficits.CREDIT.cents===0,debitExact=deficits.DEBIT.count===0&&deficits.DEBIT.cents===0;
-  let direction='';
-  if(creditExact&&deficits.DEBIT.count>0&&deficits.DEBIT.cents>0)direction='DEBIT';
-  else if(debitExact&&deficits.CREDIT.count>0&&deficits.CREDIT.cents>0)direction='CREDIT';
-  else return Object.assign(result,{reason:'not-one-sided-positive-deficit'});
+  const candidateCounts={},existingPools={};candidates.forEach(function(t){candidateCounts[t.key]=(candidateCounts[t.key]||0)+1;});
+  rows.forEach(function(t){const key=vfcRbcOnlineTransferKey_(t);if(key){if(!existingPools[key])existingPools[key]=[];existingPools[key].push(t);}});
+  const unknown=Object.keys(existingPools).some(function(key){return!candidateCounts[key]||existingPools[key].length>candidateCounts[key];});
+  if(unknown)return Object.assign(result,{reason:'ledger-transfer-not-proven-by-source'});
 
-  const candidates=vfcRbcOnlineTransferCandidates_(text,facts),existing={},seen={},missing=[];
-  rows.forEach(function(t){const key=vfcRbcOnlineTransferKey_(t);if(key)existing[key]=(existing[key]||0)+1;});
-  candidates.forEach(function(t){const key=vfcRbcOnlineTransferKey_(t);if(!key)return;seen[key]=(seen[key]||0)+1;if(seen[key]>(existing[key]||0))missing.push(t);});
-  const target=deficits[direction],subset=vfcRbcUniqueCandidateSubset_(missing,target.count,target.cents);
-  if(!subset)return Object.assign(result,{reason:'no-unique-transcript-checksum-subset'});
+  const extraCheques=vfcRbcProvenExtraChequeIndexes_(rows,text,facts),removeMap={};extraCheques.forEach(function(index){removeMap[index]=1;});
+  const base=rows.filter(function(t,index){return!vfcRbcOnlineTransferKey_(t)&&!removeMap[index];}),baseStats=vfcRbcLedgerStats_(base),
+        creditNeed={count:printed.creditCount-baseStats.creditCount,cents:Math.round(vfcNum_(facts&&facts.deposits)*100)-Math.round(baseStats.totalCredits*100)},
+        debitNeed={count:printed.debitCount-baseStats.debitCount,cents:Math.round(vfcNum_(facts&&facts.withdrawals)*100)-Math.round(baseStats.totalDebits*100)};
+  if(creditNeed.count<0||creditNeed.cents<0||debitNeed.count<0||debitNeed.cents<0||creditNeed.count+debitNeed.count!==candidates.length||creditNeed.cents+debitNeed.cents!==candidates.reduce(function(sum,t){return sum+t.cents;},0))return Object.assign(result,{reason:'source-rows-cannot-fill-printed-controls'});
 
-  const fixed=rows.slice(),added=[];
-  subset.forEach(function(candidate){
-    const row={date:candidate.date,description:candidate.description,counterparty:candidate.counterparty,direction:direction,amount:candidate.amount};
-    fixed.push(row);added.push(Object.assign({},row,{reason:'UNIQUE_TRANSCRIPT_CHECKSUM',sourceLine:candidate.sourceLine}));
+  let creditRows=null;const allHinted=candidates.every(function(t){return t.directionHint==='CREDIT'||t.directionHint==='DEBIT';});
+  if(allHinted){const hinted=candidates.filter(function(t){return t.directionHint==='CREDIT';}),hintedCents=hinted.reduce(function(sum,t){return sum+t.cents;},0);if(hinted.length===creditNeed.count&&hintedCents===creditNeed.cents)creditRows=hinted;}
+  if(creditRows===null)creditRows=vfcRbcUniqueCandidateSubset_(candidates,creditNeed.count,creditNeed.cents);
+  if(creditRows===null)return Object.assign(result,{reason:'no-unique-transfer-direction-assignment'});
+
+  const creditIds={};creditRows.forEach(function(t){creditIds[t.candidateId]=1;});const fixed=base.slice(),changes=[];
+  extraCheques.forEach(function(index){const t=rows[index];changes.push({action:'REMOVE_DUPLICATE',date:String(t.date||''),description:String(t.description||''),amount:vfcNum_(t.amount),direction:String(t.direction||''),reason:'TRANSCRIPT_PROVEN_ADJACENT_DUPLICATE'});});
+  candidates.forEach(function(candidate){
+    const direction=creditIds[candidate.candidateId]?'CREDIT':'DEBIT',pool=existingPools[candidate.key]||[],existing=pool.length?pool.shift():null,
+          row=existing?Object.assign({},existing,{direction:direction}):{date:candidate.date,description:candidate.description,counterparty:candidate.counterparty,direction:direction,amount:candidate.amount};
+    fixed.push(row);
+    if(!existing)changes.push(Object.assign({},row,{action:'ADD',reason:'UNIQUE_SOURCE_CHECKSUM',sourceLine:candidate.sourceLine}));
+    else if(String(existing.direction||'').toUpperCase()!==direction)changes.push(Object.assign({},row,{action:'FLIP',from:String(existing.direction||'').toUpperCase(),to:direction,reason:'UNIQUE_SOURCE_CHECKSUM',sourceLine:candidate.sourceLine}));
   });
   const after=vfcRbcLedgerStats_(fixed),creditTarget=Math.round(vfcNum_(facts&&facts.deposits)*100),debitTarget=Math.round(vfcNum_(facts&&facts.withdrawals)*100);
   if(after.creditCount!==printed.creditCount||after.debitCount!==printed.debitCount||Math.round(after.totalCredits*100)!==creditTarget||Math.round(after.totalDebits*100)!==debitTarget)return Object.assign(result,{reason:'post-recovery-audit-failed'});
-  return{rows:fixed,changed:true,added:added,reason:'unique-transcript-checksum-subset'};
+  return changes.length?{rows:fixed,changed:true,added:changes,reason:'unique-source-checksum-solution'}:result;
 }
 
 /**
@@ -442,7 +524,7 @@ function vfcRbcRepairLedger_(currentLedger,text,fileName,facts,reason,attempt,di
     '2. Do not include opening/closing balances, Account Summary totals, Account Fees summary, page totals, cheque-image/support pages, serial-number image rows or endorsements.',
     '3. Take each amount from the SAME printed row as its date and description. Printed Cheques & Debits column = DEBIT; printed Deposits & Credits column = CREDIT.',
     '4. Never infer direction from wording. ONLINE BANKING TRANSFER, MISC PAYMENT, BR TO BR and return/NSF descriptions can appear in either printed column.',
-    '5. Keep every separately printed row. Repeated identical fee rows, including multiple $1.50 e-Transfer fees on the same date, are separate transactions and must not be deduplicated. Debit-side ONLINE BANKING TRANSFER - #### rows are mandatory and must never be skipped as irrelevant internal transfers.',
+    '5. Keep every separately printed row. Repeated identical fee rows, including multiple $1.50 e-Transfer fees on the same date, are separate transactions and must not be deduplicated. Debit-side ONLINE BANKING TRANSFER - #### rows are mandatory and must never be skipped as irrelevant internal transfers. Never invent a second copy of a cheque on an adjacent carried date; a cheque appears once unless the PDF visibly prints it twice.',
     '6. Use running-balance changes and neighboring row boundaries to verify that an amount was not borrowed from the row above or below.',
     '7. Every transaction date must be inside the printed statement period. Carry a printed activity date forward to its following undated continuation rows until the next printed date.',
     '8. The final array MUST contain exactly '+printed.creditCount+' CREDIT rows totaling '+vfcNum_(facts.deposits)+' and exactly '+printed.debitCount+' DEBIT rows totaling '+vfcNum_(facts.withdrawals)+'.',
@@ -615,7 +697,7 @@ function runRbcBankingSelfTests(){
     equal(after.debitCount,56,'corrected debits');close(after.totalDebits,63781.21,.001,'corrected debit total');
     equal(locked.rbc_direction_repairs.length,5,'recorded direction repairs');
     equal(locked.rbc_ledger_repair_passes,0,'AI repair passes');
-    equal(locked.rbc_runtime_fingerprint,'RBC-3.7-CHECKSUM-MISSING-ROW-RECOVERY-20260922','runtime fingerprint');
+    equal(locked.rbc_runtime_fingerprint,'RBC-3.8-FOCUSED-ROW-RECOVERY-20260922','runtime fingerprint');
     return'18 credits/$56889.45; 56 debits/$63781.21';
   });
   test('AIM HIGH Jun-Jul printed credits are exactly 24 and $90,909.53',function(){
@@ -659,14 +741,64 @@ function runRbcBankingSelfTests(){
     ].join('\n'),locked=vfcRbcLockFacts_({banking_transactions:[]},text,'1037324_2026_04_27_2026_05_27.pdf'),stats=vfcRbcLedgerStats_(locked.banking_transactions);
     equal(stats.creditCount,0,'credits');equal(stats.debitCount,9,'debits');close(stats.totalDebits,18700,.001,'debit total');
     equal(locked.rbc_missing_row_repairs.length,9,'restored rows');equal(locked.rbc_ledger_repair_passes,0,'AI repair passes');
-    equal(locked.rbc_missing_row_repairs[0].reason,'UNIQUE_TRANSCRIPT_CHECKSUM','repair reason');
-    equal(locked.rbc_runtime_fingerprint,'RBC-3.7-CHECKSUM-MISSING-ROW-RECOVERY-20260922','runtime fingerprint');
+    equal(locked.rbc_missing_row_repairs[0].reason,'UNIQUE_SOURCE_CHECKSUM','repair reason');
+    equal(locked.rbc_runtime_fingerprint,'RBC-3.8-FOCUSED-ROW-RECOVERY-20260922','runtime fingerprint');
     return'9 debit rows/$18700 restored without guessing direction';
+  });
+  test('Split-line provider transcript still exposes every online transfer row',function(){
+    const text=[
+      'Account Activity Details',
+      'Date: 2026-05-13',
+      'Online Banking transfer - 7051',
+      'DEBIT 3,000.00',
+      'Online Banking transfer - 6870',
+      'Cheques & Debits: 3,700.00',
+      'Closing balance'
+    ].join('\n'),rows=vfcRbcOnlineTransferCandidates_(text,{startDate:'2026-04-27',endDate:'2026-05-27'});
+    equal(rows.length,2,'candidate rows');close(rows[0].amount,3000,.001,'first amount');close(rows[1].amount,3700,.001,'second amount');
+    equal(rows[0].date,'2026-05-13','carried date');equal(rows[0].directionHint,'DEBIT','explicit debit hint');return'2 split rows recovered';
+  });
+  test('1037324 exact 15-credit 62-debit fallback error is fully reconciled',function(){
+    const text=[
+      'April 27, 2026 to May 27, 2026',
+      'Opening balance on April 27, 2026 $6,085.02',
+      'Total deposits & credits (10) + 107,067.24',
+      'Total cheques & debits (70) - 96,253.18',
+      'Closing balance on May 27, 2026 = $16,899.08',
+      'Account Activity Details',
+      '13 May Online Banking transfer - 7051 3,000.00',
+      '       Online Banking transfer - 6870 3,700.00',
+      '14 May Cheque - 21 591.34',
+      '15 May Online Banking transfer - 9202 4,000.00',
+      '19 May Online Banking transfer - 4711 1,000.00',
+      '       Online Banking transfer - 4802 1,000.00',
+      '21 May Online Banking transfer - 2678 1,000.00',
+      '       Online Banking transfer - 9829 1,000.00',
+      '22 May Online Banking transfer - 3848 1,000.00',
+      '       Online Banking transfer - 0454 3,000.00',
+      '       Closing balance 16,899.08'
+    ].join('\n'),wrong=[];let i;
+    for(i=0;i<9;i++)wrong.push(tx('2026-04-29','Credit filler '+i,'CREDIT',1));
+    wrong.push(tx('2026-04-29','Credit filler total','CREDIT',107058.24));
+    wrong.push(tx('2026-05-15','Online Banking transfer - 9202','CREDIT',4000));
+    wrong.push(tx('2026-05-21','Online Banking transfer - 2678','CREDIT',1000));
+    wrong.push(tx('2026-05-21','Online Banking transfer - 9829','CREDIT',1000));
+    wrong.push(tx('2026-05-22','Online Banking transfer - 3848','CREDIT',1000));
+    wrong.push(tx('2026-05-22','Online Banking transfer - 0454','CREDIT',3000));
+    for(i=0;i<59;i++)wrong.push(tx('2026-04-29','Debit filler '+i,'DEBIT',1));
+    wrong.push(tx('2026-04-29','Debit filler total','DEBIT',76902.84));
+    wrong.push(tx('2026-05-13','Cheque - 21','DEBIT',591.34));
+    wrong.push(tx('2026-05-14','Cheque - 21','DEBIT',591.34));
+    const before=vfcRbcLedgerStats_(wrong),locked=vfcRbcLockFacts_({banking_transactions:wrong},text,'1037324_2026_04_27_2026_05_27.pdf'),after=vfcRbcLedgerStats_(locked.banking_transactions),changes=locked.rbc_missing_row_repairs;
+    equal(before.creditCount,15,'bad credit count');close(before.totalCredits,117067.24,.001,'bad credit total');equal(before.debitCount,62,'bad debit count');close(before.totalDebits,78144.52,.001,'bad debit total');
+    equal(after.creditCount,10,'fixed credits');close(after.totalCredits,107067.24,.001,'fixed credit total');equal(after.debitCount,70,'fixed debits');close(after.totalDebits,96253.18,.001,'fixed debit total');
+    equal(changes.filter(function(x){return x.action==='FLIP';}).length,5,'direction flips');equal(changes.filter(function(x){return x.action==='ADD';}).length,4,'missing transfers');equal(changes.filter(function(x){return x.action==='REMOVE_DUPLICATE';}).length,1,'duplicate removed');
+    const cheque21=locked.banking_transactions.filter(function(x){return /^Cheque - 21$/i.test(x.description);});equal(cheque21.length,1,'one cheque 21');equal(cheque21[0].date,'2026-05-14','printed cheque date');equal(locked.rbc_ledger_repair_passes,0,'full PDF repair passes');return'10/107067.24 and 70/96253.18';
   });
   test('Missing-row recovery refuses mixed credit and debit deficits',function(){
     const text='Total deposits & credits (1) + 1000.00\nTotal cheques & debits (1) - 1000.00\nAccount Activity Details\n13 May Online Banking transfer - 7051 1,000.00\nClosing balance',
           r=vfcRbcRecoverMissingOnlineTransfers_([],text,{startDate:'2026-04-27',endDate:'2026-05-27',deposits:1000,withdrawals:1000});
-    equal(r.changed,false,'no repair');equal(r.reason,'not-one-sided-positive-deficit','reason');return r.reason;
+    equal(r.changed,false,'no repair');equal(r.reason,'source-rows-cannot-fill-printed-controls','reason');return r.reason;
   });
   test('AIM HIGH Jun-Jul discrepancy identifies one wrong amount and two omitted fees',function(){
     const reportedCreditGap=90909.53-76280.65,reportedDebitOverage=103898.56-89562.99,
