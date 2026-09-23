@@ -1,10 +1,10 @@
 /**
- * VFC Banking Core 4.4
+ * VFC Banking Core 4.5
  * Shared bank-agnostic banking math over frozen statement facts.
  * No PDF or OpenAI call occurs during underwriting.
  */
 const VFC_BANK_ENGINE={
-  VERSION:'VFC-BANKING-CORE-4.4',
+  VERSION:'VFC-BANKING-CORE-4.5',
   FACTS_VERSION:'VFC-BANK-FACTS-1.1',
   INTAKE_CONTRACT:'BANK_MATCHED_FROZEN_LEDGER_V2',
   CACHE_PREFIX:'VFC_BANK_FACTS_V1:',
@@ -129,13 +129,13 @@ function vfcNonOperatingTransferCredits_(transactions){
 
 function vfcDebtProfile_(rows){
   let tx=[],latest='';rows.forEach(function(x){if(!latest||vfcTime_(x.payload.statementEndDate)>vfcTime_(latest))latest=x.payload.statementEndDate;(x.payload.transactions||[]).forEach(function(t){tx.push(Object.assign({bankId:x.payload.bankId||'UNKNOWN'},t));});});
-  tx=vfcDedupeTx_(tx);const rawDebits=tx.filter(function(t){return t.direction==='DEBIT';}),credits=tx.filter(function(t){return t.direction==='CREDIT';}),returnedCredits=credits.filter(function(c){return vfcBankIsReturnedFinancingCredit_(c.bankId||'UNKNOWN',c);}),returnedCreditsTotal=returnedCredits.reduce(function(s,c){return s+vfcPos_(c.amount);},0),debits=vfcSuppressReturnedFinanceDebits_(rawDebits,credits),returnedFinanceDebitsSuppressed=Math.max(0,rawDebits.length-debits.length),classified=debits.map(function(t){return vfcClassifyDebitForBank_(t.bankId,t);}).filter(Boolean),groups={};
+  tx=vfcDedupeTx_(tx);const rawDebits=tx.filter(function(t){return t.direction==='DEBIT';}),credits=tx.filter(function(t){return t.direction==='CREDIT';}),returnedCredits=credits.filter(function(c){return vfcBankIsReturnedFinancingCredit_(c.bankId||'UNKNOWN',c);}),returnedCreditsTotal=returnedCredits.reduce(function(s,c){return s+vfcPos_(c.amount);},0),debits=vfcSuppressReturnedFinanceDebits_(rawDebits,credits),returnedFinanceDebitsSuppressed=Math.max(0,rawDebits.length-debits.length),classified=debits.map(function(t){return vfcClassifyDebitForBank_(t.bankId,t)||vfcResidualRecurringClassifyDebit_(t.bankId,t);}).filter(Boolean),groups={};
   classified.forEach(function(t){const key=t.bankId+'|'+t.family+'|'+t.entityKey;if(!groups[key])groups[key]={bankId:t.bankId,family:t.family,entityKey:t.entityKey,label:t.label,debtJustification:t.debtJustification||'',items:[]};if(!groups[key].debtJustification&&t.debtJustification)groups[key].debtJustification=t.debtJustification;groups[key].items.push(t);});
   let summaries=Object.keys(groups).sort().map(function(k){return vfcSummarizeGroup_(groups[k],latest);}).filter(Boolean);summaries=vfcMergeGenericAmountMatches_(summaries);
   const sweepByBank={};credits.forEach(function(c){if(/\bLOAN\s+CREDIT\b/i.test(c.description))sweepByBank[c.bankId]=(sweepByBank[c.bankId]||0)+1;});const active=[],revolving=[],tax=[],other=[],inactive=[],once=[];
   summaries.forEach(function(g){if((sweepByBank[g.bankId]||0)>=2&&g.entityKey==='GENERIC_LOAN_PAYMENT'){revolving.push(g);return;}if(!g.recurring){once.push(g);return;}if(g.family==='FINANCING'||g.family==='MCA'||g.family==='PAD'){if(g.active)active.push(g);else once.push(g);}else if(g.family==='TAX'){if(g.active)tax.push(g);else inactive.push(g);}else{if(g.active)other.push(g);else inactive.push(g);}});
   const financing=vfcFinancingCredits_(credits,classified);active.sort(vfcObligationSort_);tax.sort(vfcObligationSort_);other.sort(vfcObligationSort_);const confirmed=active.reduce(function(s,x){return s+x.monthlyEquivalent;},0),info=tax.concat(other).reduce(function(s,x){return s+x.monthlyEquivalent;},0),warnings=[];
-  if(revolving.length)warnings.push('Generic revolving loan sweep activity is excluded from fixed monthly debt.');if(returnedFinanceDebitsSuppressed)warnings.push(returnedFinanceDebitsSuppressed+' returned/reversed financing debit'+(returnedFinanceDebitsSuppressed===1?' was':'s were')+' excluded from recurring debt service while the return event remains a risk fact.');if(inactive.length)warnings.push('Stale informational obligations are retained without a fabricated monthly equivalent.');if(financing.possible.length)warnings.push('Possible financing credits are shown separately and are not removed from operating deposits unless confirmed.');
+  if(other.some(function(x){return/^RESIDUAL_RECURRING_/.test(String(x.entityKey||''));}))warnings.push('Unclassified recurring outflows are shown as informational obligations and are not counted as debt without financing evidence.');if(revolving.length)warnings.push('Generic revolving loan sweep activity is excluded from fixed monthly debt.');if(returnedFinanceDebitsSuppressed)warnings.push(returnedFinanceDebitsSuppressed+' returned/reversed financing debit'+(returnedFinanceDebitsSuppressed===1?' was':'s were')+' excluded from recurring debt service while the return event remains a risk fact.');if(inactive.length)warnings.push('Stale informational obligations are retained without a fabricated monthly equivalent.');if(financing.possible.length)warnings.push('Possible financing credits are shown separately and are not removed from operating deposits unless confirmed.');
   return{confirmedMonthlyDebtService:vfcRound_(confirmed,.01),informationalMonthlyObligations:vfcRound_(info,.01),activeDebtObligations:active,revolvingFinancingActivity:revolving,taxGovernmentPads:tax,otherRecurringObligations:other,inactiveInformationalObligations:inactive,observedOnce:once,allDetectedObligations:summaries,financingCredits:financing.confirmed,possibleFinancingCredits:financing.possible,financingCreditsTotal:vfcRound_(financing.total,.01),returnedCredits:returnedCredits,returnedCreditsTotal:vfcRound_(returnedCreditsTotal,.01),returnedFinanceDebitsSuppressed:returnedFinanceDebitsSuppressed,warnings:warnings};
 }
 
@@ -147,6 +147,48 @@ function vfcSuppressReturnedFinanceDebits_(debits,credits){
     const generic={ITEM:1,RETURNED:1,NSF:1,PAYMENT:1,REVERSAL:1,UNPAID:1,CREDIT:1,DEBIT:1};const ct=vfcTokens_(c.counterparty||c.description).filter(function(x){return!generic[x];});if(!ct.length)return;const scored=nearest.map(function(x){const dt=vfcTokens_(x.debit.counterparty||x.debit.description);let score=0;ct.forEach(function(a){if(dt.indexOf(a)>=0)score++;});return{index:x.index,score:score};}).sort(function(a,b){return b.score-a.score||a.index-b.index;});if(scored.length&&scored[0].score>0&&(scored.length===1||scored[0].score>scored[1].score))suppressed[scored[0].index]=1;
   });
   return(debits||[]).filter(function(d,i){return!suppressed[i];});
+}
+
+function vfcResidualRecurringLabel_(t){
+  const raw=String(t&&t.description||'').replace(/\s+/g,' ').trim(),cp=String(t&&t.counterparty||'').replace(/\s+/g,' ').trim();
+  function meaningful(v){
+    const x=String(v||'').toUpperCase().replace(/[^A-Z0-9 ]/g,' ').replace(/\s+/g,' ').trim();
+    if(!x||/^\d+$/.test(x))return false;
+    if(/^(MISC|MISC PAYMENT|PAYMENT|BILL PAYMENT|BUSINESS PAD|PAD|AUTO PAYMENT|ONLINE BANKING|ONLINE BANKING PAYMENT|ONLINE BANKING TRANSFER|TRANSFER|E TRANSFER|INTERAC|CHEQUE|ATM|PURCHASE|DEBIT|WITHDRAWAL|ACCOUNT PAYABLE PMT|ACCOUNT PAYABLE PAYMENT)$/.test(x))return false;
+    return vfcTokens_(x).length>0;
+  }
+  if(meaningful(cp))return cp;
+  let clean=raw
+    .replace(/^MISC\s+PAYMENT\s*/i,'')
+    .replace(/^BILL\s+PAYMENT\s*/i,'')
+    .replace(/^BUSINESS\s+PAD\s*/i,'')
+    .replace(/^AUTO\s+PAYMENT\s*/i,'')
+    .replace(/^PRE[- ]?AUTH(?:ORIZED)?\s+(?:PAYMENT|DEBIT)?\s*/i,'')
+    .replace(/^ONLINE\s+BANKING\s+PAYMENT\s*-?\s*\d*\s*/i,'')
+    .replace(/^ACCOUNT\s+PAYABLE\s+(?:PMT|PAYMENT)\s*/i,'')
+    .replace(/^E-?TRANSFER\s+SENT\s*/i,'')
+    .replace(/^INTERAC\s+E-?TRANSFER\s*/i,'')
+    .replace(/\s+/g,' ').trim();
+  if(!meaningful(clean))return'';
+  return clean;
+}
+
+function vfcResidualRecurringClassifyDebit_(bankId,t){
+  if(!t||String(t.direction||'').toUpperCase()!=='DEBIT'||!(vfcPos_(t.amount)>0))return null;
+  const raw=String(t.description||'').replace(/\s+/g,' ').trim(),s=raw.toUpperCase();
+  if(!raw)return null;
+  // Never convert fees, returns, reversals, cash withdrawals, card purchases or bare cheque rows into residual obligations.
+  if(/\bNSF\b|RETURNED|REVERSAL|REFUND|MONTHLY\s+FEE|TRANSACTION\s+FEE|SERVICE\s+CHARGE|OVERDRAFT\s+INTEREST|E-?TRANSFER\s+FEE/.test(s))return null;
+  if(/^CHEQUE\b|^ATM\b|CASH\s+WITHDRAWAL|INTERAC\s+PURCHASE|CONTACTLESS\s+INTERAC\s+PURCHASE|\bPOS\s+PURCHASE\b/.test(s))return null;
+  const label=vfcResidualRecurringLabel_(t);if(!label)return null;
+  const key=vfcCounterpartyKey_(label);if(!key)return null;
+  return Object.assign({},t,{
+    family:'OTHER',
+    entityKey:'RESIDUAL_RECURRING_'+String(bankId||'UNKNOWN').toUpperCase()+'_'+key,
+    key:'RESIDUAL_RECURRING_'+String(bankId||'UNKNOWN').toUpperCase()+'_'+key,
+    label:label,
+    debtJustification:'Unclassified recurring outflow. It is surfaced as informational because recurrence can establish an obligation pattern, but no financing evidence is present.'
+  });
 }
 
 function vfcStableInstallmentComponents_(items,totalDistinctMonths){
@@ -221,6 +263,36 @@ function runBankingCoreRecurrenceSelfTests(){
     close(r.monthlyEquivalent,3000,.05,'two-component total');
     return r.monthlyEquivalent;
   });
+  test('Unknown monthly counterparty becomes informational recurring obligation',function(){
+    const rows=[
+      {payload:{bankId:'UNKNOWN',statementEndDate:'2026-01-31',transactions:[{date:'2026-01-10',description:'Bill Payment ABC123',counterparty:'ABC123',direction:'DEBIT',amount:1250}]}},
+      {payload:{bankId:'UNKNOWN',statementEndDate:'2026-02-28',transactions:[{date:'2026-02-10',description:'Bill Payment ABC123',counterparty:'ABC123',direction:'DEBIT',amount:1250}]}},
+      {payload:{bankId:'UNKNOWN',statementEndDate:'2026-03-31',transactions:[{date:'2026-03-10',description:'Bill Payment ABC123',counterparty:'ABC123',direction:'DEBIT',amount:1250}]}}
+    ];
+    const d=vfcDebtProfile_(rows);
+    close(d.confirmedMonthlyDebtService,0,.001,'confirmed debt');
+    if(!d.otherRecurringObligations.length)throw new Error('residual recurring obligation not surfaced');
+    close(d.otherRecurringObligations[0].monthlyEquivalent,1250,.05,'residual monthly equivalent');
+    return d.otherRecurringObligations[0].counterparty;
+  });
+  test('Unknown weekly counterparty is informational, not debt',function(){
+    const txs=[
+      {date:'2026-01-05',description:'EFT XYZ SERVICE',counterparty:'XYZ SERVICE',direction:'DEBIT',amount:681},
+      {date:'2026-01-12',description:'EFT XYZ SERVICE',counterparty:'XYZ SERVICE',direction:'DEBIT',amount:681},
+      {date:'2026-01-19',description:'EFT XYZ SERVICE',counterparty:'XYZ SERVICE',direction:'DEBIT',amount:681},
+      {date:'2026-01-26',description:'EFT XYZ SERVICE',counterparty:'XYZ SERVICE',direction:'DEBIT',amount:681},
+      {date:'2026-02-02',description:'EFT XYZ SERVICE',counterparty:'XYZ SERVICE',direction:'DEBIT',amount:681}
+    ];
+    const d=vfcDebtProfile_([{payload:{bankId:'UNKNOWN',statementEndDate:'2026-02-28',transactions:txs}}]);
+    close(d.confirmedMonthlyDebtService,0,.001,'confirmed debt');
+    if(!d.otherRecurringObligations.length)throw new Error('weekly residual not surfaced');
+    return d.otherRecurringObligations[0].frequency;
+  });
+  test('Bare cheque and fee rows do not become residual obligations',function(){
+    if(vfcResidualRecurringClassifyDebit_('UNKNOWN',{date:'2026-01-01',description:'Cheque - 123',counterparty:'',direction:'DEBIT',amount:900})!==null)throw new Error('bare cheque classified');
+    if(vfcResidualRecurringClassifyDebit_('UNKNOWN',{date:'2026-01-01',description:'Monthly fee',counterparty:'',direction:'DEBIT',amount:15})!==null)throw new Error('fee classified');
+    return'excluded';
+  });
   const failed=results.filter(function(x){return!x.pass;});
   return{ok:failed.length===0,coreVersion:VFC_BANK_ENGINE.VERSION,total:results.length,passed:results.length-failed.length,failed:failed.length,results:results};
 }
@@ -271,5 +343,5 @@ function vfcObligationSort_(a,b){return(b.monthlyEquivalent||0)-(a.monthlyEquiva
 function vfcDedupeTx_(a){const out=[],seen={};(a||[]).forEach(function(t){const k=[t.bankId||'',t.date,t.direction,t.amount,String(t.description||'').toUpperCase(),t.occurrence||1].join('|');if(!seen[k]){seen[k]=1;out.push(t);}});return out;}
 function vfcTokens_(s){const stop={BUSINESS:1,INVESTMENT:1,PAD:1,PAYMENT:1,LOAN:1,CREDIT:1,DEBIT:1,THE:1,INC:1,LTD:1,CORP:1,CORPORATION:1,COMPANY:1,'001':1};return String(s||'').toUpperCase().replace(/[^A-Z0-9 ]/g,' ').split(/\s+/).filter(function(x){return x.length>=3&&!stop[x]&&!/^\d+$/.test(x);});}
 function vfcCounterpartyKey_(s){const t=vfcTokens_(s);return t.slice(0,4).join('_')||String(s||'').toUpperCase().replace(/[^A-Z0-9]+/g,'_').slice(0,60);}
-function vfcIsStrongEntityKey_(key,family,bankId){const k=String(key||'').toUpperCase();return/^LOAN(_INTEREST)?_[0-9]/.test(k)||/^INSURANCE_/.test(k)||vfcBankStrongEntityKey_(bankId,k,family);}
+function vfcIsStrongEntityKey_(key,family,bankId){const k=String(key||'').toUpperCase();return/^LOAN(_INTEREST)?_[0-9]/.test(k)||/^INSURANCE_/.test(k)||/^RESIDUAL_RECURRING_/.test(k)||vfcBankStrongEntityKey_(bankId,k,family);}
 function vfcDigest_(s){const bytes=Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256,String(s||''),Utilities.Charset.UTF_8);return bytes.map(function(b){const v=(b<0?b+256:b).toString(16);return v.length===1?'0'+v:v;}).join('').substring(0,24);}
