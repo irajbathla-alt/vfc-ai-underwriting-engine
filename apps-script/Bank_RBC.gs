@@ -1,5 +1,5 @@
 /**
- * RBC BANK ENGINE v3.8 — CANDIDATE / FOCUSED ROW RECOVERY
+ * RBC BANK ENGINE v3.8.1 — CANDIDATE / FULL PROJECT SYNC
  * ONE PERMANENT RBC FILE.
  *
  * Architecture:
@@ -23,8 +23,8 @@ function vfcRbcBankProfile_(){
     id:'RBC',
     label:'RBC',
     status:'CANDIDATE',
-    rulesVersion:'RBC-3.8-CANDIDATE',
-    runtimeFingerprint:'RBC-3.8-FOCUSED-ROW-RECOVERY-20260922',
+    rulesVersion:'RBC-3.8.1-CANDIDATE',
+    runtimeFingerprint:'RBC-3.8.1-FULL-PROJECT-SYNC-20260923',
     intakeContract:'BANK_MATCHED_FROZEN_LEDGER_V2',
     aliases:['ROYAL BANK OF CANADA','RBC ROYAL BANK','RBC']
   };
@@ -697,7 +697,7 @@ function runRbcBankingSelfTests(){
     equal(after.debitCount,56,'corrected debits');close(after.totalDebits,63781.21,.001,'corrected debit total');
     equal(locked.rbc_direction_repairs.length,5,'recorded direction repairs');
     equal(locked.rbc_ledger_repair_passes,0,'AI repair passes');
-    equal(locked.rbc_runtime_fingerprint,'RBC-3.8-FOCUSED-ROW-RECOVERY-20260922','runtime fingerprint');
+    equal(locked.rbc_runtime_fingerprint,'RBC-3.8.1-FULL-PROJECT-SYNC-20260923','runtime fingerprint');
     return'18 credits/$56889.45; 56 debits/$63781.21';
   });
   test('AIM HIGH Jun-Jul printed credits are exactly 24 and $90,909.53',function(){
@@ -742,7 +742,7 @@ function runRbcBankingSelfTests(){
     equal(stats.creditCount,0,'credits');equal(stats.debitCount,9,'debits');close(stats.totalDebits,18700,.001,'debit total');
     equal(locked.rbc_missing_row_repairs.length,9,'restored rows');equal(locked.rbc_ledger_repair_passes,0,'AI repair passes');
     equal(locked.rbc_missing_row_repairs[0].reason,'UNIQUE_SOURCE_CHECKSUM','repair reason');
-    equal(locked.rbc_runtime_fingerprint,'RBC-3.8-FOCUSED-ROW-RECOVERY-20260922','runtime fingerprint');
+    equal(locked.rbc_runtime_fingerprint,'RBC-3.8.1-FULL-PROJECT-SYNC-20260923','runtime fingerprint');
     return'9 debit rows/$18700 restored without guessing direction';
   });
   test('Split-line provider transcript still exposes every online transfer row',function(){
