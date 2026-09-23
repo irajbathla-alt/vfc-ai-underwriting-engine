@@ -63,7 +63,7 @@ function uploadStatementBatchByBank(bankId,companyName,files){
 }
 
 function vfcBuildBankStatementPrompt_(profile,text,companyName,fileName){return[
-  'You are the VFC '+profile.label+' Bank Statement Fact Reader. Return JSON only.','Company: '+companyName,'File: '+fileName,'Selected bank profile: '+profile.id+' / '+profile.rulesVersion,
+  'You are the VFC '+profile.label+' Bank Statement Fact Reader. Return JSON only.','File: '+fileName,'Selected bank profile: '+profile.id+' / '+profile.rulesVersion,
   'FACT EXTRACTION ONLY. Do not underwrite, estimate debt service, or infer frequency.',
   'Return fields: document_type, bank_name, account_holder, account_number, statement_start_date, statement_end_date, opening_balance, closing_balance, total_deposits, total_withdrawals, nsf_count, negative_balance_detected, banking_transactions, summary, risks, missing_info.',
   'For a valid bank statement set document_type exactly to BANK_STATEMENT.',
