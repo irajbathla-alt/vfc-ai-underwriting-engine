@@ -1,5 +1,5 @@
 /**
- * RBC BANK ENGINE v2.1 — LOCKED
+ * RBC BANK ENGINE v2.1.1 — LOCKED
  * ONE PERMANENT RBC FILE.
  * Contains RBC extraction, deterministic printed-fact locking, debit/debt classification,
  * financing credits, returns, internal transfers, duplicate preservation and RBC self-tests.
@@ -10,7 +10,7 @@ return{
 id:'RBC',
 label:'RBC',
 status:'LOCKED',
-rulesVersion:'RBC-2.1-LOCKED',
+rulesVersion:'RBC-2.1.1-LOCKED',
 intakeContract:'BANK_MATCHED_FROZEN_LEDGER_V2',
 aliases:['ROYAL BANK OF CANADA','RBC ROYAL BANK','RBC']
 };
@@ -35,6 +35,7 @@ return[
 'AFFIRM CANADA is a financing counterparty. Preserve AFFIRM CANADA debits exactly; recurring AFFIRM debits are confirmed financing debt, while a single observation remains unconfirmed.',
 'Explicit PREMIUM FINANCE, PREMIUM FINANCING and IPFS payment wording is financing when recurring. Ordinary ICBC/life/insurance premium descriptions without financing wording remain informational.',
 'Extract LOAN CREDIT, generic LOAN PAYMENT, numbered Loan payment NO.x and Loan interest NO.x.',
+'Generic unnumbered LOAN PAYMENT with no lender, account number, loan number or identifiable counterparty is not a fixed debt obligation by itself. Preserve it as informational/revolving loan activity unless independent evidence links it to a specific financing obligation. Amount recurrence alone must never promote it to confirmed monthly debt.',
 'Extract CSBFL advance / CSBFL loan advance credits as financing proceeds when printed in Deposits & Credits.',
 'Preserve COMM EQUIP RENT/LSE SILVERCHEF debits exactly; treat SilverChef as recurring equipment lease financing when recurring.',
 'Preserve Business PAD BDC exactly and preserve Investment MERCH PAD / Investment MERCHANT GROWTH exactly.',
@@ -139,6 +140,8 @@ family='OTHER';entityKey='RBC_OTHER_AUTOPAY_'+vfcCounterpartyKey_(clean||cp||raw
 const clean=raw.replace(/^MISC\s+PAYMENT\s*/i,'').trim();
 family='FINANCING';entityKey='AUTO_PAYMENT_FINANCE_'+vfcCounterpartyKey_(clean||cp||raw);label=clean||cp||raw;
 debtJustification='Recurring or retry payment to the same finance-like counterparty, even though RBC printed MISC PAYMENT instead of AUTO PAYMENT.';
+}else if(/^LOAN\s+PAYMENT$/i.test(raw)){
+family='OTHER';entityKey='RBC_OTHER_GENERIC_LOAN_PAYMENT';label='Generic LOAN PAYMENT';
 }else if(hasFinancingSignal){
 family='FINANCING';
 debtJustification='Explicit loan/mortgage/LOC/financing/lease/MCA wording plus recurring observed cadence.';
@@ -287,6 +290,16 @@ row('2026-03-31',[tx('2026-03-05','Auto Payment LINCOLN AFS CA','DEBIT',1367.54,
 close(d.confirmedMonthlyDebtService,1367.54,.02,'Lincoln monthly debt');
 equal(d.returnedFinanceDebitsSuppressed,1,'returned financing debit suppression');
 return'monthly='+d.confirmedMonthlyDebtService+', suppressed='+d.returnedFinanceDebitsSuppressed;
+});
+test('Generic unnumbered LOAN PAYMENT remains informational even when recurring',function(){
+const d=vfcDebtProfile_([
+row('2026-01-31',[tx('2026-01-10','LOAN PAYMENT','DEBIT',4500,'LOAN PAYMENT')]),
+row('2026-02-28',[tx('2026-02-10','LOAN PAYMENT','DEBIT',5500,'LOAN PAYMENT')]),
+row('2026-03-31',[tx('2026-03-10','LOAN PAYMENT','DEBIT',8750,'LOAN PAYMENT')])
+]);
+close(d.confirmedMonthlyDebtService,0,.001,'generic loan payment debt');
+truthy(d.informationalMonthlyObligations>=0,'generic loan payment informational');
+return'confirmed debt=0';
 });
 test('Same-dollar e-Transfers never become debt',function(){
 const d=vfcDebtProfile_([
