@@ -1,10 +1,10 @@
 /**
- * VFC Banking Core 4.6
+ * VFC Banking Core 4.7
  * Shared bank-agnostic banking math over frozen statement facts.
  * No PDF or OpenAI call occurs during underwriting.
  */
 const VFC_BANK_ENGINE={
-  VERSION:'VFC-BANKING-CORE-4.6',
+  VERSION:'VFC-BANKING-CORE-4.7',
   FACTS_VERSION:'VFC-BANK-FACTS-1.2',
   INTAKE_CONTRACT:'BANK_MATCHED_FROZEN_LEDGER_V2',
   CACHE_PREFIX:'VFC_BANK_FACTS_V1:',
@@ -121,13 +121,14 @@ function vfcBuildBankingFeatures_(base,rows){
   result.resultFingerprint=vfcResultFingerprint_(result);result.inputQualityAudit.resultFingerprint=result.resultFingerprint;return result;
 }
 
-function vfcIsGenericReturnedPaymentCredit_(t){
-  if(!t||String(t.direction||'').toUpperCase()!=='CREDIT')return false;
+function vfcIsGenericReturnedPaymentRow_(t){
+  if(!t)return false;
   const s=String(t.description||'').toUpperCase().replace(/\s+/g,' ').trim();
   if(!s)return false;
   if(/\bFEE\b|\bCHARGE\b|\bPENALTY\b/.test(s))return false;
   return /CHEQUE\s+RETURNED(?:\s+NSF)?|CHECK\s+RETURNED(?:\s+NSF)?|ITEM\s+RETURNED(?:\s+NSF|\s+UNPAID)?|RETURNED\s+ITEM|RETURNED\s+PAYMENT|PAYMENT\s+RETURNED|RETURNED\s+UNPAID|NSF\s+(?:ITEM\s+)?RETURN|DEBIT\s+RETURNED|PAD\s+RETURNED|PRE[- ]?AUTH(?:ORIZED)?[^\n]{0,20}RETURN|ACH\s+RETURN|\bREVERSAL\b/.test(s);
 }
+function vfcIsGenericReturnedPaymentCredit_(t){return!!(t&&String(t.direction||'').toUpperCase()==='CREDIT'&&vfcIsGenericReturnedPaymentRow_(t));}
 function vfcIsReturnedObligationCredit_(bankId,t){return vfcIsGenericReturnedPaymentCredit_(t)||vfcBankIsReturnedFinancingCredit_(bankId||'UNKNOWN',t);}
 function vfcIsNonOperatingReversalCredit_(bankId,t){return vfcIsGenericReturnedPaymentCredit_(t)||vfcBankIsNonOperatingReversalCredit_(bankId||'UNKNOWN',t);}
 function vfcClassifyObligationDebit_(bankId,t){return vfcClassifyDebitForBank_(bankId||'UNKNOWN',t)||vfcResidualRecurringClassifyDebit_(bankId||'UNKNOWN',t);}
@@ -170,12 +171,14 @@ function vfcEntitySimilarity_(a,b){
   return Math.round(100*n/Math.max(1,Math.min(at.length,bt.length)));
 }
 function vfcResolveReturnedObligationDebits_(debits,credits){
-  const allDebits=(debits||[]).slice(),returned=(credits||[]).filter(function(c){return vfcIsReturnedObligationCredit_(c.bankId||'UNKNOWN',c);}).slice().sort(function(a,b){return vfcTime_(a.date)-vfcTime_(b.date);}),suppressed={},events=[];
+  const allDebits=(debits||[]).slice(),creditReturns=(credits||[]).filter(function(c){return vfcIsReturnedObligationCredit_(c.bankId||'UNKNOWN',c);}),returnDebitIndexes={},debitReturnRows=[];
+  allDebits.forEach(function(d,i){if(vfcIsGenericReturnedPaymentRow_(d)){returnDebitIndexes[i]=1;debitReturnRows.push(d);}});
+  const returned=creditReturns.concat(debitReturnRows).slice().sort(function(a,b){return vfcTime_(a.date)-vfcTime_(b.date);}),suppressed={},events=[];
   returned.forEach(function(c){
     const cd=vfcDate_(c.date);if(!cd)return;
     const candidates=[];
     allDebits.forEach(function(d,i){
-      if(suppressed[i]||String(d.bankId||'UNKNOWN')!==String(c.bankId||'UNKNOWN'))return;
+      if(returnDebitIndexes[i]||suppressed[i]||String(d.bankId||'UNKNOWN')!==String(c.bankId||'UNKNOWN'))return;
       const dd=vfcDate_(d.date);if(!dd)return;
       const days=(cd-dd)/86400000;if(days<0||days>5)return;
       const diff=Math.abs(vfcPos_(d.amount)-vfcPos_(c.amount)),tol=vfcReturnedAmountTolerance_(d.amount,c.amount);
@@ -198,13 +201,15 @@ function vfcResolveReturnedObligationDebits_(debits,credits){
       entityKey:String(best.classified.entityKey||best.classified.key||''),
       label:String(best.classified.label||best.debit.counterparty||best.debit.description||''),
       failedDebit:{date:best.debit.date,description:best.debit.description,counterparty:best.debit.counterparty||'',amount:vfcRound_(best.debit.amount,.01)},
-      returnCredit:{date:c.date,description:c.description,counterparty:c.counterparty||'',amount:vfcRound_(c.amount,.01)},
+      returnEvent:{date:c.date,description:c.description,counterparty:c.counterparty||'',direction:String(c.direction||''),amount:vfcRound_(c.amount,.01)},
+      returnCredit:{date:c.date,description:c.description,counterparty:c.counterparty||'',direction:String(c.direction||''),amount:vfcRound_(c.amount,.01)},
       retryDebit:null
     });
   });
-  const kept=allDebits.filter(function(d,i){return!suppressed[i];});
+  // Return-marker rows themselves are never payment observations, even if intake froze their direction as DEBIT.
+  const kept=allDebits.filter(function(d,i){return!returnDebitIndexes[i]&&!suppressed[i];});
   events.forEach(function(e){
-    const returnDate=vfcDate_(e.returnCredit&&e.returnCredit.date);if(!returnDate)return;
+    const returnDate=vfcDate_((e.returnEvent||e.returnCredit||{}).date);if(!returnDate)return;
     const failedAmount=vfcPos_(e.failedDebit&&e.failedDebit.amount),candidates=[];
     kept.forEach(function(d){
       if(String(d.bankId||'UNKNOWN')!==String(e.bankId||'UNKNOWN'))return;
@@ -223,8 +228,10 @@ function vfcResolveReturnedObligationDebits_(debits,credits){
   });
   return{
     debits:kept,
-    returnedCredits:vfcDedupeTx_(returned),
+    returnedCredits:vfcDedupeTx_(creditReturns),
+    returnedRows:vfcDedupeTx_(returned),
     suppressedCount:Object.keys(suppressed).length,
+    returnMarkerDebitsExcluded:Object.keys(returnDebitIndexes).length,
     retryLinkedCount:events.filter(function(e){return!!e.retryDebit;}).length,
     events:events
   };
@@ -381,6 +388,20 @@ function runBankingCoreRecurrenceSelfTests(){
     if(r.debits.length!==0)throw new Error('failed debit was not suppressed');
     if(r.suppressedCount!==1)throw new Error('suppressed count expected 1 got '+r.suppressedCount);
     return'suppressed';
+  });
+  test('Returned-payment row is honored before recurrence even when frozen as a debit',function(){
+    const rows=[
+      {payload:{bankId:'UNKNOWN',statementEndDate:'2026-01-31',transactions:[{date:'2026-01-10',description:'Loan payment ABC Finance',counterparty:'ABC Finance',direction:'DEBIT',amount:2500}]}},
+      {payload:{bankId:'UNKNOWN',statementEndDate:'2026-02-28',transactions:[
+        {date:'2026-02-10',description:'Loan payment ABC Finance',counterparty:'ABC Finance',direction:'DEBIT',amount:2600},
+        {date:'2026-02-10',description:'Cheque returned NSF',counterparty:'',direction:'DEBIT',amount:2600}
+      ]}},
+      {payload:{bankId:'UNKNOWN',statementEndDate:'2026-03-31',transactions:[{date:'2026-03-10',description:'Loan payment ABC Finance',counterparty:'ABC Finance',direction:'DEBIT',amount:2500}]}}
+    ];
+    const d=vfcDebtProfile_(rows);
+    close(d.confirmedMonthlyDebtService,2500,.05,'monthly obligation after debit-coded return marker');
+    if(d.returnedObligationDebitsSuppressed!==1)throw new Error('expected failed payment suppression');
+    return d.confirmedMonthlyDebtService;
   });
   test('Retry replaces failed payment without increasing monthly obligation',function(){
     const rows=[
