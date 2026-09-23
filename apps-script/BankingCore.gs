@@ -5,7 +5,7 @@
  */
 const VFC_BANK_ENGINE={
   VERSION:'VFC-BANKING-CORE-4.5',
-  FACTS_VERSION:'VFC-BANK-FACTS-1.1',
+  FACTS_VERSION:'VFC-BANK-FACTS-1.2',
   INTAKE_CONTRACT:'BANK_MATCHED_FROZEN_LEDGER_V2',
   CACHE_PREFIX:'VFC_BANK_FACTS_V1:',
   LEGACY_PREFIXES:['VFC_BANK_PURE_V46:','VFC_BANK_PURE_V45:','VFC_BANK_PURE_V44:','VFC_BANK_PURE_V43:','VFC_BANK_PURE_V42:','VFC_BANK_PURE_V41:','VFC_BANK_PURE_V40:','VFC_BANK_PURE_V35:','VFC_BANK_PURE_V34:','VFC_BANK_PURE_V1:'],
@@ -77,10 +77,10 @@ function vfcStatementFingerprint_(r){return[String(r.bank||'').toUpperCase(),vfc
 
 function vfcPayloadBankId_(p,rowBank){return String((p&&p.bankId)||vfcDetectBankId_((p&&p.bankName)||rowBank||'')||'UNKNOWN').toUpperCase();}
 function vfcCurrentBankRulesVersion_(bankId){if(typeof vfcGetBankProfile_!=='function')return'';const p=vfcGetBankProfile_(bankId);return p&&p.rulesVersion?String(p.rulesVersion):'';}
-/** First payload under the current bank-rules/intake contract is canonical. Older-rule ledgers remain fallback only. */
+/** First payload under the current facts version + bank-rules/intake contract is canonical. Older ledgers remain fallback only. */
 function vfcCanonicalSignalRawFromRows_(rows,expectedBankId){
-  const expected=String(expectedBankId||'').toUpperCase(),currentRules=vfcCurrentBankRulesVersion_(expected),currentContract=VFC_BANK_ENGINE.INTAKE_CONTRACT,candidates=[];
-  (rows||[]).forEach(function(row){const raw=String(row.signalRaw||''),p=vfcParseBankCache_(raw);if(!vfcPayloadUsable_(p))return;const actual=vfcPayloadBankId_(p,row.bank||'');if(expected&&actual!==expected)return;let rank=0;if(String(p.intakeContract||'')===currentContract)rank+=1;if(currentRules&&String(p.bankRulesVersion||'')===currentRules)rank+=2;candidates.push({raw:raw,payload:p,row:row,rank:rank});});
+  const expected=String(expectedBankId||'').toUpperCase(),currentRules=vfcCurrentBankRulesVersion_(expected),currentContract=VFC_BANK_ENGINE.INTAKE_CONTRACT,currentFacts=VFC_BANK_ENGINE.FACTS_VERSION,candidates=[];
+  (rows||[]).forEach(function(row){const raw=String(row.signalRaw||''),p=vfcParseBankCache_(raw);if(!vfcPayloadUsable_(p))return;const actual=vfcPayloadBankId_(p,row.bank||'');if(expected&&actual!==expected)return;let rank=0;if(String(p.intakeContract||'')===currentContract)rank+=1;if(currentRules&&String(p.bankRulesVersion||'')===currentRules)rank+=2;if(currentFacts&&String(p.extractionVersion||'')===currentFacts)rank+=4;candidates.push({raw:raw,payload:p,row:row,rank:rank});});
   candidates.sort(function(a,b){return b.rank-a.rank||vfcTime_(a.row&&a.row.createdAt)-vfcTime_(b.row&&b.row.createdAt);});
   return candidates.length?candidates[0].raw:'';
 }
@@ -180,6 +180,9 @@ function vfcResidualRecurringClassifyDebit_(bankId,t){
   // Never convert fees, returns, reversals, cash withdrawals, card purchases or bare cheque rows into residual obligations.
   if(/\bNSF\b|RETURNED|REVERSAL|REFUND|MONTHLY\s+FEE|TRANSACTION\s+FEE|SERVICE\s+CHARGE|OVERDRAFT\s+INTEREST|E-?TRANSFER\s+FEE/.test(s))return null;
   if(/^CHEQUE\b|^ATM\b|CASH\s+WITHDRAWAL|INTERAC\s+PURCHASE|CONTACTLESS\s+INTERAC\s+PURCHASE|\bPOS\s+PURCHASE\b/.test(s))return null;
+  const cp=String(t.counterparty||'').replace(/\s+/g,' ').trim(),cpUpper=cp.toUpperCase();
+  const genericTransferCp=!cp||/^(ONLINE\s+BANKING\s+TRANSFER|ONLINE\s+TRANSFER|BR\s+TO\s+BR|BANK\s+TRANSFER|TRANSFER)$/.test(cpUpper);
+  if((/^ONLINE\s+BANKING\s+TRANSFER\b|^BR\s+TO\s+BR\b|^BANK\s+TRANSFER\b/.test(s))&&genericTransferCp)return null;
   const label=vfcResidualRecurringLabel_(t);if(!label)return null;
   const key=vfcCounterpartyKey_(label);if(!key)return null;
   return Object.assign({},t,{
@@ -287,6 +290,11 @@ function runBankingCoreRecurrenceSelfTests(){
     close(d.confirmedMonthlyDebtService,0,.001,'confirmed debt');
     if(!d.otherRecurringObligations.length)throw new Error('weekly residual not surfaced');
     return d.otherRecurringObligations[0].frequency;
+  });
+  test('Generic transfer-only rows do not become recurring obligations',function(){
+    if(vfcResidualRecurringClassifyDebit_('UNKNOWN',{date:'2026-01-01',description:'Online Banking transfer - 4268',counterparty:'Online Banking transfer',direction:'DEBIT',amount:1000})!==null)throw new Error('generic online transfer classified');
+    if(vfcResidualRecurringClassifyDebit_('UNKNOWN',{date:'2026-01-01',description:'BR TO BR - 2920',counterparty:'BR TO BR',direction:'DEBIT',amount:5000})!==null)throw new Error('bank-to-bank transfer classified');
+    return'excluded';
   });
   test('Bare cheque and fee rows do not become residual obligations',function(){
     if(vfcResidualRecurringClassifyDebit_('UNKNOWN',{date:'2026-01-01',description:'Cheque - 123',counterparty:'',direction:'DEBIT',amount:900})!==null)throw new Error('bare cheque classified');
