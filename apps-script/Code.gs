@@ -492,7 +492,18 @@ function vfcLockPrintedStatementFacts_(summary,text){summary=summary||{};const f
 function vfcExtractPrintedStatementFacts_(text){const source=String(text||'').replace(/\u00a0/g,' '),out={startDate:'',endDate:'',opening:null,closing:null,deposits:null,withdrawals:null,totalsVerified:false};const monthRange=source.match(/([A-Za-z]{3,9}\s+\d{1,2},\s+\d{4})\s+(?:to|through|[-–—])\s+([A-Za-z]{3,9}\s+\d{1,2},\s+\d{4})/i),isoRange=source.match(/(\d{4}-\d{2}-\d{2})\s+(?:to|through|[-–—])\s+(\d{4}-\d{2}-\d{2})/i),range=monthRange||isoRange;if(range){out.startDate=vfcPrintedIsoDate_(range[1]);out.endDate=vfcPrintedIsoDate_(range[2]);}const printedDate='(?:[A-Za-z]{3,9}\\s+\\d{1,2},\\s+\\d{4}|\\d{4}-\\d{2}-\\d{2})';out.opening=vfcPrintedMoneyAfter_(source,[new RegExp('Opening\\s+balance(?:\\s+on\\s+'+printedDate+')?\\s+([+\\-]?\\s*\\$?\\s*\\(?\\-?\\$?[\\d,]+(?:\\.\\d{2})?\\)?)','i'),/Beginning\s+balance\s+([+\-]?\s*\$?\s*\(?\-?\$?[\d,]+(?:\.\d{2})?\)?)/i]);out.closing=vfcPrintedMoneyAfter_(source,[new RegExp('Closing\\s+balance(?:\\s+on\\s+'+printedDate+')?\\s*(?:=)?\\s*([+\\-]?\\s*\\$?\\s*\\(?\\-?\\$?[\\d,]+(?:\\.\\d{2})?\\)?)','i'),/Ending\s+balance\s+([+\-]?\s*\$?\s*\(?\-?\$?[\d,]+(?:\.\d{2})?\)?)/i]);out.deposits=vfcPrintedMoneyAfter_(source,[/Total\s+deposits\s*(?:&|and)\s+credits(?:\s*\(\d+\))?\s*([+\-]?\s*\$?\s*[\d,]+(?:\.\d{2})?)/i,/Total\s+credits(?:\s*\(\d+\))?\s*([+\-]?\s*\$?\s*[\d,]+(?:\.\d{2})?)/i,/Total\s+deposits(?:\s*\(\d+\))?\s*([+\-]?\s*\$?\s*[\d,]+(?:\.\d{2})?)/i]);out.withdrawals=vfcPrintedMoneyAfter_(source,[/Total\s+cheques?\s*(?:&|and)\s+debits(?:\s*\(\d+\))?\s*([+\-]?\s*\$?\s*[\d,]+(?:\.\d{2})?)/i,/Total\s+withdrawals(?:\s*\(\d+\))?\s*([+\-]?\s*\$?\s*[\d,]+(?:\.\d{2})?)/i,/Total\s+debits(?:\s*\(\d+\))?\s*([+\-]?\s*\$?\s*[\d,]+(?:\.\d{2})?)/i]);if(out.deposits!==null)out.deposits=Math.abs(out.deposits);if(out.withdrawals!==null)out.withdrawals=Math.abs(out.withdrawals);if(out.opening!==null&&out.closing!==null&&out.deposits!==null&&out.withdrawals!==null){const diff=(out.opening+out.deposits-out.withdrawals)-out.closing;out.totalsVerified=Math.abs(diff)<=.05;}return out;}
 function vfcPrintedMoneyAfter_(source,patterns){for(let i=0;i<patterns.length;i++){const match=source.match(patterns[i]);if(!match||!match[1])continue;const value=vfcPrintedMoney_(match[1]);if(value!==null)return value;}return null;}
 function vfcPrintedMoney_(value){const raw=String(value||'').trim();if(!raw)return null;const negative=/^\s*-/.test(raw)||/-\s*\$/.test(raw)||/^\s*\(/.test(raw),cleaned=raw.replace(/[^0-9.]/g,'');if(!cleaned)return null;const number=parseFloat(cleaned);return isFinite(number)?(negative?-number:number):null;}
-function vfcPrintedIsoDate_(value){if(!value)return'';const direct=String(value).match(/^\d{4}-\d{2}-\d{2}$/);if(direct)return direct[0];const date=new Date(value);return isNaN(date.getTime())?'':Utilities.formatDate(date,Session.getScriptTimeZone(),'yyyy-MM-dd');}
+function vfcPrintedIsoDate_(value){
+  if(!value)return'';
+  const text=String(value).trim(),direct=text.match(/^\d{4}-\d{2}-\d{2}$/);if(direct)return direct[0];
+  const named=text.match(/^([A-Za-z]{3,9})\s+(\d{1,2}),\s*(\d{4})$/);
+  if(named){
+    const months={JAN:1,FEB:2,MAR:3,APR:4,MAY:5,JUN:6,JUL:7,AUG:8,SEP:9,OCT:10,NOV:11,DEC:12},month=months[named[1].slice(0,3).toUpperCase()],day=Number(named[2]),year=Number(named[3]);
+    if(!month)return'';
+    const date=new Date(Date.UTC(year,month-1,day));
+    return date.getUTCFullYear()===year&&date.getUTCMonth()===month-1&&date.getUTCDate()===day?date.toISOString().slice(0,10):'';
+  }
+  const date=new Date(text);return isNaN(date.getTime())?'':Utilities.formatDate(date,Session.getScriptTimeZone(),'yyyy-MM-dd');
+}
 
 function summarizeBatch_(items, companyName, detectedPeriod) {
   const combined = items.map(function(item){

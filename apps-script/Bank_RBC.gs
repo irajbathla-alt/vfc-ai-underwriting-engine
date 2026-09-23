@@ -1,14 +1,15 @@
 /**
- * RBC BANK ENGINE v4.1 — CANDIDATE / GENERIC PRINTED-COLUMN LEDGER
+ * RBC BANK ENGINE v4.2 — CANDIDATE / GENERIC RECONCILED LEDGER
  * ONE PERMANENT RBC FILE.
  *
  * Architecture:
  * 1) Printed RBC Account Summary is the source of truth for statement totals/counts.
  * 2) A deterministic parser reads every visible Account Activity amount from its
- *    printed column. It has no company, account, known-total or lender dependency.
+ *    printed column or recovers direction from running balances when PDF text
+ *    loses column spacing. It has no company or account dependency.
  * 3) The parsed ledger must match printed CREDIT/DEBIT counts AND dollar totals exactly.
- * 4) AI ledger extraction is used only when the printed-column transcript cannot
- *    be deterministically reconciled; the same exact audit still gates acceptance.
+ * 4) AI ledger extraction is used only when the transcript cannot be
+ *    deterministically reconciled; the same exact audit still gates acceptance.
  * 5) A repaired ledger is accepted only after the exact same deterministic audit passes.
  * 6) Printed column controls direction. Verified narrow signatures correct known drift.
  * 7) If row count and grand total are already exact, a unique minimum-flip checksum
@@ -21,8 +22,8 @@ function vfcRbcBankProfile_(){
     id:'RBC',
     label:'RBC',
     status:'CANDIDATE',
-    rulesVersion:'RBC-4.1-CANDIDATE',
-    runtimeFingerprint:'RBC-4.1-GENERIC-RECURRING-20260923',
+    rulesVersion:'RBC-4.2-CANDIDATE',
+    runtimeFingerprint:'RBC-4.2-BALANCE-LEDGER-20260923',
     intakeContract:'BANK_MATCHED_FROZEN_LEDGER_V2',
     aliases:['ROYAL BANK OF CANADA','RBC ROYAL BANK','RBC']
   };
@@ -92,6 +93,21 @@ function vfcRbcLockFacts_(summary,text,fileName,sourceFileId){
     }catch(e){lastError=String(e&&e.message||e);audit=null;}
   }
 
+  // A text extractor may retain row boundaries and running balances while
+  // discarding all column spacing. Reconstruct only if every balance segment
+  // and all four printed statement controls yield a unique complete ledger.
+  let balanceCandidate=null;
+  if(!audit){
+    balanceCandidate=vfcRbcBalanceTranscriptLedger_(text,facts);
+    if(balanceCandidate.rows.length){
+      ledger=vfcRbcPrepareLedger_(balanceCandidate.rows,directionRepairs,true);
+      try{
+        audit=vfcRbcAuditFullLedger_(ledger,facts,text,name);
+        ledgerSource='RUNNING_BALANCE_TRANSCRIPT';
+      }catch(e){lastError=String(e&&e.message||e);audit=null;}
+    }
+  }
+
   if(!audit){
     ledger=vfcRbcPrepareLedger_(locked.banking_transactions||[],directionRepairs);
     let checksumRepair=vfcRbcReconcileDirectionOnly_(ledger,facts,text);
@@ -124,6 +140,7 @@ function vfcRbcLockFacts_(summary,text,fileName,sourceFileId){
   locked.rbc_column_parser_candidate_count=columnCandidate.rows.length;
   locked.rbc_column_parser_fixed_rows=columnCandidate.fixedRows;
   locked.rbc_column_parser_explicit_rows=columnCandidate.explicitRows;
+  locked.rbc_balance_parser_candidate_count=balanceCandidate?balanceCandidate.rows.length:0;
   locked.rbc_runtime_fingerprint=vfcRbcBankProfile_().runtimeFingerprint;
   locked.rbc_credit_transaction_count=audit.creditCount;
   locked.rbc_debit_transaction_count=audit.debitCount;
@@ -207,12 +224,12 @@ function vfcRbcExplicitTranscriptRow_(line,facts,currentDate,pendingDescription)
   const datePrefix=vfcRbcActivityDatePrefix_(source,facts),date=datePrefix?datePrefix.iso:currentDate,segments=source.split('|'),descriptionParts=[],amounts={DEBIT:null,CREDIT:null,BALANCE:null};
   segments.forEach(function(segment,index){
     const marker=String(segment||'').match(/^\s*(DEBIT|CREDIT|BALANCE)\b\s*:?[ ]*(.*)$/i);
-    if(marker){const money=vfcRbcMoneyTokens_(marker[2]);if(money.length)amounts[String(marker[1]).toUpperCase()]=Math.abs(money[0].value);return;}
+    if(marker){const money=vfcRbcMoneyTokens_(marker[2]),column=String(marker[1]).toUpperCase();if(money.length)amounts[column]=column==='BALANCE'?money[0].value:Math.abs(money[0].value);return;}
     if(index===0&&datePrefix)descriptionParts.push(source.substring(datePrefix.endIndex).split('|')[0]);
     else descriptionParts.push(segment);
   });
   const direction=amounts.DEBIT!==null?'DEBIT':amounts.CREDIT!==null?'CREDIT':'',amount=direction?amounts[direction]:null,description=vfcRbcCleanTranscriptDescription_([pendingDescription,descriptionParts.join(' ')].filter(Boolean).join(' '));
-  return{date:date,direction:direction,amount:amount,description:description,hasBalance:amounts.BALANCE!==null};
+  return{date:date,direction:direction,amount:amount,description:description,balanceAfter:amounts.BALANCE};
 }
 
 /**
@@ -226,7 +243,7 @@ function vfcRbcColumnTranscriptLedger_(text,facts){
   let columns=null,inTable=false,sawActivity=false,currentDate='',pendingDescription='',fixedRows=0,explicitRows=0,headerCount=0;
   function clearPending(){pendingDescription='';}
   function appendDescription(value){const clean=vfcRbcCleanTranscriptDescription_(value);if(clean)pendingDescription=vfcRbcCleanTranscriptDescription_([pendingDescription,clean].filter(Boolean).join(' '));}
-  function emit(date,description,direction,amount){const clean=vfcRbcCleanTranscriptDescription_(description);if(!date||!clean||!(amount>0)||(direction!=='DEBIT'&&direction!=='CREDIT'))return false;rows.push({date:date,description:clean,counterparty:clean,direction:direction,amount:vfcRound_(amount,.01)});clearPending();return true;}
+  function emit(date,description,direction,amount,balanceAfter){const clean=vfcRbcCleanTranscriptDescription_(description);if(!date||!clean||!(amount>0)||(direction!=='DEBIT'&&direction!=='CREDIT'))return false;const row={date:date,description:clean,counterparty:clean,direction:direction,amount:vfcRound_(amount,.01)};if(balanceAfter!==null&&balanceAfter!==undefined)row.printedBalanceAfter=balanceAfter;rows.push(row);clearPending();return true;}
 
   lines.forEach(function(rawLine){
     const line=String(rawLine||''),header=vfcRbcColumnHeader_(line);
@@ -245,7 +262,7 @@ function vfcRbcColumnTranscriptLedger_(text,facts){
     const explicit=vfcRbcExplicitTranscriptRow_(line,facts,currentDate,pendingDescription);
     if(explicit){
       if(datePrefix)currentDate=datePrefix.iso;
-      if(explicit.direction&&emit(explicit.date,explicit.description,explicit.direction,explicit.amount)){explicitRows++;return;}
+      if(explicit.direction&&emit(explicit.date,explicit.description,explicit.direction,explicit.amount,explicit.balanceAfter)){explicitRows++;return;}
       const beforeMarker=line.split(/\|\s*(?:DEBIT|CREDIT|BALANCE)\b/i)[0];appendDescription(datePrefix?beforeMarker.substring(Math.min(datePrefix.endIndex,beforeMarker.length)):beforeMarker);return;
     }
 
@@ -259,10 +276,92 @@ function vfcRbcColumnTranscriptLedger_(text,facts){
     const transaction=classified.filter(function(x){return x.direction==='DEBIT'||x.direction==='CREDIT';})[0],firstColumnToken=classified.length?classified.map(function(x){return x.token.start;}).sort(function(a,b){return a-b;})[0]:line.length;
     const descriptionStart=Math.min(columns.descriptionStart,line.length),descriptionEnd=Math.max(descriptionStart,firstColumnToken),description=line.substring(descriptionStart,descriptionEnd);
     appendDescription(description);
-    if(transaction&&emit(currentDate,pendingDescription,transaction.direction,Math.abs(transaction.token.value)))fixedRows++;
+    const balanceToken=classified.filter(function(x){return x.direction==='BALANCE';})[0];
+    if(transaction&&emit(currentDate,pendingDescription,transaction.direction,Math.abs(transaction.token.value),balanceToken?balanceToken.token.value:null))fixedRows++;
     else if(classified.some(function(x){return x.direction==='BALANCE';})&&/^\s*(?:OPENING|CLOSING)\s+BALANCE\b/i.test(pendingDescription))clearPending();
   });
   return{version:'RBC-COLUMN-LEDGER-1',rows:rows,fixedRows:fixedRows,explicitRows:explicitRows,headerCount:headerCount};
+}
+
+/** Only unambiguous RBC row wording may break a running-balance tie. */
+function vfcRbcBalanceDirectionHint_(description){
+  const s=String(description||'').toUpperCase();
+  if(/^BR\s+TO\s+BR\s*-\s*CREDIT\s+(?:MEMO|ADJUSTMENT)\b/.test(s))return'CREDIT';
+  if(/^CONTACTLESS\s+INTERAC\s+REFUND\b|\bINTERAC\s+PURCHASE\s+REFUND\b/.test(s))return'CREDIT';
+  return'';
+}
+
+/** Enumerate only signed amounts that reproduce the next printed running balance. */
+function vfcRbcBalanceSegmentSolutions_(items,openingCents,closingCents){
+  if(!items.length||items.length>28)return[];
+  const amounts=items.map(function(t){return Math.round(t.amount*100);}),total=amounts.reduce(function(s,n){return s+n;},0),twiceCredits=total+closingCents-openingCents;
+  if(twiceCredits%2||twiceCredits<0||twiceCredits>total*2)return[];
+  const target=twiceCredits/2,mid=Math.floor(items.length/2),left=new Map(),solutions=[],maxSolutions=1000;
+  for(let mask=0;mask<(1<<mid);mask++){
+    let sum=0;for(let i=0;i<mid;i++)if(mask&(1<<i))sum+=amounts[i];
+    const group=left.get(sum)||[];group.push(mask);left.set(sum,group);
+  }
+  for(let mask=0;mask<(1<<(items.length-mid));mask++){
+    let sum=0;for(let i=mid;i<items.length;i++)if(mask&(1<<(i-mid)))sum+=amounts[i];
+    const matches=left.get(target-sum)||[];
+    for(let j=0;j<matches.length;j++){
+      const flags=items.map(function(t,i){return i<mid?!!(matches[j]&(1<<i)):!!(mask&(1<<(i-mid)));});
+      solutions.push(flags);if(solutions.length>maxSolutions)return[];
+    }
+  }
+  if(solutions.length<=1)return solutions;
+  const hinted=solutions.filter(function(flags){return flags.every(function(isCredit,i){const hint=vfcRbcBalanceDirectionHint_(items[i].description);return!hint||(isCredit?'CREDIT':'DEBIT')===hint;});});
+  return hinted.length?hinted:[];
+}
+
+/** Recover a complete ledger from row text whose printed column spacing was lost. */
+function vfcRbcBalanceTranscriptLedger_(text,facts){
+  const printed=vfcRbcPrintedActivityCounts_(text),rows=[],lines=String(text||'').replace(/\u00a0/g,' ').replace(/\f/g,'\n').split(/\r?\n/);
+  let inTable=false,currentDate='',pending='';
+  lines.forEach(function(raw){
+    const line=String(raw||'').trim();
+    if(/ACCOUNT\s+ACTIVITY\s+DETAILS/i.test(line)){inTable=true;pending='';return;}
+    if(/^CLOSING\s+BALANCE\b|^ACCOUNT\s+FEES?\s*:|^BUSINESS\s+ACCOUNT\s+STATEMENT\b|^ACCOUNT\s+NUMBER\s*:/i.test(line)){inTable=false;pending='';return;}
+    if(!inTable||!line||/^DATE\b.*DESCRIPTION\b|^OPENING\s+BALANCE\b/i.test(line))return;
+    const prefix=vfcRbcActivityDatePrefix_(line,facts);
+    if(prefix){if(currentDate&&currentDate!==prefix.iso)pending='';currentDate=prefix.iso;}
+    const body=prefix?line.substring(prefix.endIndex).trim():line;
+    if(!body)return;
+    const tokens=vfcRbcMoneyTokens_(body),rates=(body.match(/@\s*\$?\d[\d,]*\.\d{2}/g)||[]).length;
+    if(!tokens.length||rates&&tokens.length===rates){pending=vfcRbcCleanTranscriptDescription_((pending+' '+body).trim());return;}
+    const index=tokens.length>=rates+2?tokens.length-2:tokens.length-1,token=tokens[index];
+    const description=vfcRbcCleanTranscriptDescription_((pending+' '+body.substring(0,token.start)).trim());
+    if(currentDate&&description&&Math.abs(token.value)>0)rows.push({date:currentDate,description:description,counterparty:description,amount:vfcRound_(Math.abs(token.value),.01),balance:index<tokens.length-1?tokens[tokens.length-1].value:null});
+    pending='';
+  });
+  const expectedCount=printed.creditCount+printed.debitCount,totalCents=rows.reduce(function(s,r){return s+Math.round(r.amount*100);},0),expectedCents=Math.round((facts.deposits+facts.withdrawals)*100);
+  if(!rows.length||rows.length!==expectedCount||totalCents!==expectedCents)return{rows:[],reason:'row-count-or-amount-mismatch'};
+  const segments=[],openingCents=Math.round(facts.opening*100);let start=0,balance=openingCents;
+  rows.forEach(function(row,i){
+    if(row.balance===null)return;
+    const next=Math.round(row.balance*100),choices=vfcRbcBalanceSegmentSolutions_(rows.slice(start,i+1),balance,next);
+    segments.push({start:start,end:i,choices:choices});start=i+1;balance=next;
+  });
+  if(start<rows.length)segments.push({start:start,end:rows.length-1,choices:vfcRbcBalanceSegmentSolutions_(rows.slice(start),balance,Math.round(facts.closing*100))});
+  else if(balance!==Math.round(facts.closing*100))return{rows:[],reason:'closing-balance-mismatch'};
+  if(segments.some(function(x){return!x.choices.length;}))return{rows:[],reason:'unresolved-balance-segment'};
+
+  let selected=null,solutions=0;
+  function choose(index,flags,credits){
+    if(solutions>1||credits>printed.creditCount)return;
+    if(index===segments.length){if(credits===printed.creditCount){selected=flags.slice();solutions++;}return;}
+    const segment=segments[index];segment.choices.forEach(function(choice){
+      if(solutions>1)return;
+      const next=flags.slice();choice.forEach(function(isCredit,i){next[segment.start+i]=isCredit;});
+      choose(index+1,next,credits+choice.filter(Boolean).length);
+    });
+  }
+  choose(0,[],0);
+  if(solutions!==1)return{rows:[],reason:solutions?'ambiguous-direction':'credit-count-mismatch'};
+  const ledger=rows.map(function(row,i){const t={date:row.date,description:row.description,counterparty:row.counterparty,direction:selected[i]?'CREDIT':'DEBIT',amount:row.amount};if(row.balance!==null)t.printedBalanceAfter=row.balance;return t;});
+  const stats=vfcRbcLedgerStats_(ledger);
+  if(stats.creditCount!==printed.creditCount||stats.debitCount!==printed.debitCount||Math.round(stats.totalCredits*100)!==Math.round(facts.deposits*100)||Math.round(stats.totalDebits*100)!==Math.round(facts.withdrawals*100))return{rows:[],reason:'four-control-mismatch'};
+  return{rows:ledger,reason:'unique-running-balance-solution'};
 }
 
 function vfcRbcIsNonActivityArtifact_(t){
@@ -300,7 +399,9 @@ function vfcRbcCertainDirection_(t){
   if(/^ITEM\s+RETURNED\s+UNPAID\b/.test(s))return'DEBIT';
 
   if(vfcRbcReturnEventText_(s))return'';
-  if(/^LOAN\s+CREDIT\b/.test(s)||/\bPAYROLL\s+DEPOSIT\b|\bTAX\s+REFUND\b|E-TRANSFER\s+RECEIVED|INTERAC\s+PURCHASE\s+REFUND|E-TRANSFER\s+CANCEL|MOBILE\s+CHEQUE\s+DEPOSIT/.test(s))return'CREDIT';
+  // Payroll Deposit labels can be payroll-provider debits. Printed columns or
+  // running balances, rather than that wording, determine their direction.
+  if(/^LOAN\s+CREDIT\b/.test(s)||/\bTAX\s+REFUND\b|E-TRANSFER\s+RECEIVED|INTERAC\s+PURCHASE\s+REFUND|E-TRANSFER\s+CANCEL|MOBILE\s+CHEQUE\s+DEPOSIT/.test(s))return'CREDIT';
   if(vfcRbcIsPadLikeText_(s)||/^LOAN\s+PAYMENT\b|^LOAN\s+INTEREST\b|^BLIP\s+PAYMENT\s*-?\s*LOAN\b|^BILL\s+PAYMENT\b|^FUEL\s+BILL\s+PAYMENT\b|^COMM\s+GAS\s+BILL\s+PMT\b|^COMMERCIAL\s+TAXES\b|^AUTO\s+INSURANCE\b|^INSURANCE\b|^RENT\/LEASE\b|^CHEQUE\s*-\s*\d+\b|^CONTACTLESS\s+INTERAC\s+PURCHASE\b|^ACTIVITY\s+FEE\b|^MONTHLY\s+FEE\b|^REGULAR\s+TRANSACTION\s+FEE\b|E-TRANSFER\s+SENT|E-TRANSFER\s+REQUEST\s+FULFILLED/.test(s))return'DEBIT';
   return'';
 }
@@ -417,6 +518,13 @@ function vfcRbcAuditFullLedger_(items,facts,text,fileName){
   const startDay=vfcRbcIsoDayNumber_(facts&&facts.startDate),endDay=vfcRbcIsoDayNumber_(facts&&facts.endDate),outside=[];
   if(startDay!==null&&endDay!==null)rows.forEach(function(t,i){const day=vfcRbcIsoDayNumber_(t&&t.date);if(day===null||day<startDay||day>endDay)outside.push((i+1)+':'+String(t&&t.date||''));});
   if(outside.length)throw new Error('RBC ledger contains transaction date(s) outside the printed statement period for '+fileName+': '+outside.slice(0,12).join(', ')+'.');
+  if(facts&&facts.opening!==null){
+    let balance=Math.round(facts.opening*100);
+    rows.forEach(function(t,i){
+      balance+=(String(t.direction||'').toUpperCase()==='CREDIT'?1:-1)*Math.round(vfcNum_(t.amount)*100);
+      if(t.printedBalanceAfter!==undefined&&t.printedBalanceAfter!==null&&Math.abs(balance-Math.round(vfcNum_(t.printedBalanceAfter)*100))>1)throw new Error('RBC printed running balance disagrees with activity row '+(i+1)+' for '+fileName+'.');
+    });
+  }
 
   const creditCountOk=s.creditCount===printed.creditCount,
         debitCountOk=s.debitCount===printed.debitCount,
@@ -615,9 +723,101 @@ function runRbcBankingSelfTests(){
     equal(parsed.explicitRows,2,'explicit rows');equal(audit.creditCount,1,'credits');equal(audit.debitCount,1,'debits');return'2 explicit rows';
   });
 
+  test('An explicit negative running balance keeps its sign',function(){
+    const text=['Total deposits & credits (0) + 0.00','Total cheques & debits (1) - 130.00','Account Activity Details','Date | Description | Debit | Credit | Balance','03 Jan | Vendor payment | DEBIT 130.00 | CREDIT | BALANCE -30.00'].join('\n'),facts={startDate:'2026-01-01',endDate:'2026-01-31',opening:100,closing:-30,deposits:0,withdrawals:130},parsed=vfcRbcColumnTranscriptLedger_(text,facts),audit=vfcRbcAuditFullLedger_(parsed.rows,facts,text,'anonymous-pipe.txt');
+    equal(parsed.rows[0].printedBalanceAfter,-30,'negative balance');equal(audit.debitCount,1,'debit rows');return'negative balance checked';
+  });
+
   test('Generic activity dates resolve across a calendar-year boundary',function(){
     const facts={startDate:'2025-12-20',endDate:'2026-01-20'};
     equal(vfcRbcActivityIsoDate_('31 Dec',facts),'2025-12-31','December');equal(vfcRbcActivityIsoDate_('Jan 02',facts),'2026-01-02','January');return'year-safe';
+  });
+
+  test('Layout-free activity reconciles against printed balances even when a Payroll Deposit is a debit',function(){
+    const text=[
+      'January 1, 2026 to January 31, 2026',
+      'Opening balance on January 1, 2026 $100.00',
+      'Total deposits & credits (1) + 200.00',
+      'Total cheques & debits (2) - 70.00',
+      'Closing balance on January 31, 2026 = $230.00',
+      'Account Activity Details',
+      'Date Description Cheques & Debits ($) Deposits & Credits ($) Balance ($)',
+      '03 Jan Customer invoice 200.00 300.00',
+      '04 Jan Payroll Deposit PROCESSOR 50.00 250.00',
+      'Vendor payment 20.00 230.00'
+    ].join('\n'),locked=vfcRbcLockFacts_({banking_transactions:[]},text,'any-company-rbc.pdf');
+    equal(locked.rbc_ledger_source,'RUNNING_BALANCE_TRANSCRIPT','balance recovery');
+    equal(locked.banking_transactions.length,3,'activity rows');
+    equal(locked.banking_transactions[1].direction,'DEBIT','payroll-provider debit');
+    equal(vfcRbcCertainDirection_(locked.banking_transactions[1]),'','payroll wording does not force a direction');
+    equal(locked.rbc_ledger_repair_passes,0,'AI repair passes');
+    return'3 rows / unique balance solution';
+  });
+
+  test('Credit memo wording resolves an otherwise tied balance segment',function(){
+    const text=[
+      'January 1, 2026 to January 31, 2026',
+      'Opening balance on January 1, 2026 $100.00',
+      'Total deposits & credits (1) + 10.00',
+      'Total cheques & debits (1) - 10.00',
+      'Closing balance on January 31, 2026 = $100.00',
+      'Account Activity Details',
+      'Date Description Cheques & Debits ($) Deposits & Credits ($) Balance ($)',
+      '03 Jan BR TO BR - Credit Memo adjustment 10.00',
+      'Vendor charge 10.00 100.00'
+    ].join('\n'),locked=vfcRbcLockFacts_({},text,'anonymous-rbc.pdf');
+    equal(locked.rbc_ledger_source,'RUNNING_BALANCE_TRANSCRIPT','balance recovery');
+    equal(locked.banking_transactions[0].direction,'CREDIT','explicit credit memo');
+    equal(locked.banking_transactions[1].direction,'DEBIT','matching debit');
+    return'tied amounts resolved by explicit memo';
+  });
+
+  test('Unlabeled equal-value rows stay unresolved when both directions fit',function(){
+    const text=[
+      'Total deposits & credits (1) + 10.00','Total cheques & debits (1) - 10.00',
+      'Account Activity Details','Date Description Cheques & Debits ($) Deposits & Credits ($) Balance ($)',
+      '03 Jan Adjustment A 10.00','Adjustment B 10.00 100.00'
+    ].join('\n'),facts={startDate:'2026-01-01',endDate:'2026-01-31',opening:100,closing:100,deposits:10,withdrawals:10},candidate=vfcRbcBalanceTranscriptLedger_(text,facts);
+    equal(candidate.reason,'ambiguous-direction','ambiguity');equal(candidate.rows.length,0,'no invented directions');return'rejected';
+  });
+
+  test('Layout-free recovery rejects a missing printed transaction',function(){
+    const text=[
+      'Total deposits & credits (2) + 150.00','Total cheques & debits (1) - 30.00',
+      'Account Activity Details','Date Description Cheques & Debits ($) Deposits & Credits ($) Balance ($)',
+      '03 Jan Customer payment 100.00 200.00','Vendor payment 30.00 170.00'
+    ].join('\n'),facts={startDate:'2026-01-01',endDate:'2026-01-31',opening:100,closing:220,deposits:150,withdrawals:30},candidate=vfcRbcBalanceTranscriptLedger_(text,facts);
+    equal(candidate.reason,'row-count-or-amount-mismatch','missing row');equal(candidate.rows.length,0,'no fabricated row');return'rejected';
+  });
+
+  test('Transaction fee rate on a wrapped line is not mistaken for a debit',function(){
+    const text=[
+      'January 1, 2026 to January 31, 2026',
+      'Opening balance on January 1, 2026 $100.00',
+      'Total deposits & credits (1) + 20.00',
+      'Total cheques & debits (1) - 7.50',
+      'Closing balance on January 31, 2026 = $112.50',
+      'Account Activity Details',
+      'Date Description Cheques & Debits ($) Deposits & Credits ($) Balance ($)',
+      '03 Jan Customer receipt 20.00 120.00',
+      '04 Jan Regular transaction fee 6 Drs @ 1.25',
+      '7.50 112.50'
+    ].join('\n'),locked=vfcRbcLockFacts_({},text,'another-account.pdf');
+    equal(locked.rbc_ledger_source,'RUNNING_BALANCE_TRANSCRIPT','balance recovery');
+    equal(locked.banking_transactions[1].amount,7.5,'actual fee, not rate');
+    equal(locked.banking_transactions[1].direction,'DEBIT','fee debit');return'wrapped fee / exact amount';
+  });
+
+  test('English printed dates retain their literal calendar day across time zones',function(){
+    equal(vfcPrintedIsoDate_('January 1, 2026'),'2026-01-01','new-year date');
+    equal(vfcPrintedIsoDate_('September 2, 2026'),'2026-09-02','period end');
+    equal(vfcPrintedIsoDate_('February 30, 2026'),'','invalid printed date');return'calendar day preserved';
+  });
+
+  test('Four matching controls cannot override a contradictory printed running balance',function(){
+    const text='Total deposits & credits (1) + 100.00\nTotal cheques & debits (0) - 0.00',facts={startDate:'2026-01-01',endDate:'2026-01-31',opening:100,closing:200,deposits:100,withdrawals:0},row=Object.assign(tx('2026-01-03','Receipt','CREDIT',100),{printedBalanceAfter:190});
+    let failed=false;try{vfcRbcAuditFullLedger_([row],facts,text,'another-account.pdf');}catch(e){failed=/running balance disagrees/i.test(String(e&&e.message||e));}
+    truthy(failed,'false running balance rejected');return'rejected';
   });
 
   test('Legacy layout printed credits are exactly 15 and $45,725.36',function(){const c=[2000,250,1000,6585.81,1046.83,250,7474.96,3000,750,2750,3250,2750,6673.93,7693.83,250];equal(c.length,15,'count');close(vfcSum_(c),45725.36,.02,'sum');return'15/$45725.36';});
@@ -676,7 +876,7 @@ function runRbcBankingSelfTests(){
     equal(after.debitCount,56,'corrected debits');close(after.totalDebits,63781.21,.001,'corrected debit total');
     equal(locked.rbc_direction_repairs.length,5,'recorded direction repairs');
     equal(locked.rbc_ledger_repair_passes,0,'AI repair passes');
-    equal(locked.rbc_runtime_fingerprint,'RBC-4.1-GENERIC-RECURRING-20260923','runtime fingerprint');
+    equal(locked.rbc_runtime_fingerprint,'RBC-4.2-BALANCE-LEDGER-20260923','runtime fingerprint');
     return'18 credits/$56889.45; 56 debits/$63781.21';
   });
   test('Legacy dense layout printed credits are exactly 24 and $90,909.53',function(){
