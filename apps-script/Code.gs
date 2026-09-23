@@ -6,7 +6,7 @@ const VFC_CONFIG = {
 
   // PDF intake: OpenAI file input is primary. Google Drive OCR is fallback only.
   PDF_TEXT_PROVIDER: 'OPENAI_FILE_INPUT',
-  PDF_TEXT_CACHE_VERSION: 'VFC-PDF-TEXT-3.0-COLUMN-STRICT',
+  PDF_TEXT_CACHE_VERSION: 'VFC-PDF-TEXT-4.0-RBC-GENERIC-COLUMNS',
   PDF_TEXT_MAX_OUTPUT_TOKENS: 20000,
   PDF_TEXT_CACHE_FOLDER_NAME: '_PDF_TEXT_CACHE',
   DRIVE_OCR_FALLBACK_ENABLED: true,
@@ -68,7 +68,7 @@ function saveLenderDecision(payload) {
 
 function rebuildStructuredFeatures() {
   setupVFC(); const pairs = {};
-  getSheetObjects_('PDF Summaries').forEach(function(row){ const company=row.companyName||'', period=row.detectedPeriod||''; if(company)pairs[normalizeKey_(company,period)]={companyName:company,period:period}; });
+  // Rebuild only explicitly labelled lender outcomes; assessment/test uploads are not training cases.
   collectHistoricalOutcomes_().forEach(function(row){ if(row.companyName)pairs[normalizeKey_(row.companyName,row.period)]={companyName:row.companyName,period:row.period||''}; });
   let updated=0; Object.keys(pairs).forEach(function(key){upsertStructuredFeature_(pairs[key].companyName,pairs[key].period);updated++;});
   return {ok:true,recordsUpdated:updated,message:'Structured historical features rebuilt.'};
@@ -283,12 +283,13 @@ function vfcExtractPdfTextWithOpenAI_(pdfBlob,fileName){
       'Return plain text only: no Markdown, no bullets, no code fences.',
       'Preserve every printed statement date, account number, account-summary line, transaction date, description, amount, debit/credit column and running balance that is visibly readable.',
       'Keep Account Summary wording as close to the PDF as possible, including transaction counts in parentheses and signs on totals.',
+      'Prioritize the complete Account Summary and every Account Activity Details page through the Closing balance. These sections must be transcribed in full before anything else.',
       'For tables, preserve row boundaries. If column spacing cannot be preserved, linearize the row and explicitly retain the printed column meaning, for example: DESCRIPTION ... | DEBIT 123.45 | CREDIT | BALANCE -45.67.',
       'Never decide debit/credit direction from the description. Use only the column in which the amount is printed.',
       'Words such as CREDIT, DEBIT, PAYMENT, REFUND or CARD can be part of a transaction description and do not determine direction. For example, RBC CREDIT CARD printed under Cheques & Debits must remain a DEBIT.',
       'Preserve NSF, returned/unpaid/reversal wording exactly when readable.',
       'Do not add Opening balance, Closing balance, summary totals or cheque-image/support-page values as transaction rows when they are not Account Activity.',
-      'Do not duplicate a cheque-image/support-page item that already appears in Account Activity.',
+      'After the Account Activity Closing balance, omit cheque-image/support pages, marketing pages and boilerplate. They are not inputs to the ledger and must not consume transcription space.',
       'If a character or value is genuinely unreadable, preserve the surrounding visible text and mark only that unreadable fragment as [UNCLEAR]. Never invent a value.'
     ].join('\n');
 
@@ -446,7 +447,7 @@ function runPdfIntakeSelfTests(){
   });
 
   test('PDF extraction and recovery use fresh high-accuracy configuration',function(){
-    if(String(VFC_CONFIG.PDF_TEXT_CACHE_VERSION).indexOf('VFC-PDF-TEXT-3.0')!==0)throw new Error('stale PDF cache generation');
+    if(String(VFC_CONFIG.PDF_TEXT_CACHE_VERSION).indexOf('VFC-PDF-TEXT-4.0')!==0)throw new Error('stale PDF cache generation');
     equal(VFC_CONFIG.PDF_EXTRACTION_MODEL,'gpt-4.1','extraction model');
     equal(VFC_CONFIG.PDF_REPAIR_MODEL,'gpt-4.1','repair model');
     equal(vfcBankLedgerJsonSchema_().required[0],'banking_transactions','ledger schema');

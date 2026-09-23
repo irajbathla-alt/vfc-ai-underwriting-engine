@@ -9,10 +9,10 @@ Core files:
 - `Code.gs` — upload, OCR, common statement intake and Sheets/Drive plumbing
 - `BankingCore.gs` — frozen banking facts and deterministic recurring-obligation math
 - `BankRouter.gs` — bank selection and isolation
-- `Bank_RBC.gs` — RBC v1.0 trained / locked
-- `Bank_TD.gs` — pending training
+- `Bank_RBC.gs` — RBC v4.0 generic printed-column candidate
+- `Bank_TD.gs` — TD v2.2 candidate
 - `Bank_Scotia.gs` — pending training
-- `Bank_BMO.gs` — pending training
+- `Bank_BMO.gs` — BMO v1.4 candidate
 - `Bank_CIBC.gs` — pending training
 - `Bank_CoastCapital.gs` — pending training
 - `InstitutionalUnderwritingLayer.gs` — production Our Max
@@ -47,11 +47,13 @@ This preserves the core underwriting sheets and creates the isolated bank-traini
 - `BANK_CIBC`
 - `BANK_COAST_CAPITAL`
 
-RBC is marked **LOCKED**. The remaining banks are marked **PENDING_TRAINING**.
+RBC, TD and BMO are marked **CANDIDATE** until their deployed live validations are approved. The remaining banks are marked **PENDING_TRAINING**.
 
 ## RBC repeatability lock
 
-After validating the approved RBC reference case, run:
+RBC v4.0 first parses the standard printed Account Activity columns and accepts a statement only when printed credit count, credit total, debit count and debit total all reconcile exactly. If the transcript does not preserve enough table structure, the original-PDF AI recovery remains available behind the same deterministic audit.
+
+After validating an approved live RBC reference case, run:
 
 `lockBankRegressionBaseline(companyName, period, 'RBC')`
 
@@ -59,7 +61,11 @@ After any future engine change, verify it with:
 
 `verifyBankRegressionBaseline(companyName, period, 'RBC')`
 
-The same statement fingerprint reuses its first verified transaction ledger so repeat uploads do not silently change an already-trained banking result.
+The same logical statement reuses its first verified current-rules transaction ledger so repeat uploads do not silently change an approved banking result.
+
+## Training-data boundary
+
+Uploading an assessment or parser-test statement does not create a historical training feature. Training records and structured historical features are created only after an explicit lender decision is saved. Rebuilding structured features also uses outcome-backed cases only.
 
 ## Deployment
 
