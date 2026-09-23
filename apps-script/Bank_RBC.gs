@@ -1,5 +1,5 @@
 /**
- * RBC BANK ENGINE v4.2 — CANDIDATE / GENERIC RECONCILED LEDGER
+ * RBC BANK ENGINE v4.3 — CANDIDATE / GENERIC RECONCILED LEDGER
  * ONE PERMANENT RBC FILE.
  *
  * Architecture:
@@ -22,8 +22,8 @@ function vfcRbcBankProfile_(){
     id:'RBC',
     label:'RBC',
     status:'CANDIDATE',
-    rulesVersion:'RBC-4.2-CANDIDATE',
-    runtimeFingerprint:'RBC-4.2-BALANCE-LEDGER-20260923',
+    rulesVersion:'RBC-4.3-CANDIDATE',
+    runtimeFingerprint:'RBC-4.3-SET-LEDGER-20260923',
     intakeContract:'BANK_MATCHED_FROZEN_LEDGER_V2',
     aliases:['ROYAL BANK OF CANADA','RBC ROYAL BANK','RBC']
   };
@@ -56,6 +56,12 @@ function vfcRbcExtractionRules_(){return[
   'Do not duplicate cheque-image/support pages.'
 ].join('\n');}
 
+/** Use the printed account identifier to keep independent RBC sets separate. */
+function vfcRbcPrintedAccountNumber_(text){
+  const match=String(text||'').match(/^\s*Account\s+(?:no\.?|number|#)\s*:\s*([0-9][0-9\- ]{7,}[0-9])\s*$/im);
+  return match?match[1].replace(/\s+/g,' ').trim():'';
+}
+
 function vfcRbcLockFacts_(summary,text,fileName,sourceFileId){
   const facts=vfcExtractPrintedStatementFacts_(text),name=String(fileName||'statement'),printed=vfcRbcPrintedActivityCounts_(text);
   if(!facts.startDate||!facts.endDate||facts.opening===null||facts.closing===null||facts.deposits===null||facts.withdrawals===null){
@@ -69,6 +75,8 @@ function vfcRbcLockFacts_(summary,text,fileName,sourceFileId){
   if(statementDiff>.01)throw new Error('RBC printed Account Summary does not reconcile for '+name+'. Difference: $'+vfcRound_(statementDiff,.01)+'.');
 
   const locked=Object.assign({},summary||{});
+  const printedAccount=vfcRbcPrintedAccountNumber_(text);
+  if(printedAccount)locked.account_number=printedAccount;
   locked.statement_start_date=facts.startDate;
   locked.statement_end_date=facts.endDate;
   locked.opening_balance=facts.opening;
@@ -493,6 +501,21 @@ function vfcRbcLedgerStats_(items){
   out.totalCredits=vfcRound_(out.totalCredits,.01);out.totalDebits=vfcRound_(out.totalDebits,.01);return out;
 }
 
+/** Re-check one saved RBC statement before it contributes to a statement set. */
+function vfcRbcFrozenLedgerUsable_(payload){
+  if(!payload||!payload.transactionsVerified||!Array.isArray(payload.transactions))return false;
+  const opening=vfcNumNull_(payload.openingBalance),closing=vfcNumNull_(payload.closingBalance),credits=vfcNumNull_(payload.totalDeposits),debits=vfcNumNull_(payload.totalWithdrawals),start=vfcRbcIsoDayNumber_(payload.statementStartDate),end=vfcRbcIsoDayNumber_(payload.statementEndDate);
+  if(opening===null||closing===null||credits===null||debits===null||start===null||end===null||start>end||credits<0||debits<0)return false;
+  if(Math.abs(opening+credits-debits-closing)>.01)return false;
+  const stats=vfcRbcLedgerStats_(payload.transactions);
+  if(stats.bad.length||Math.round(stats.totalCredits*100)!==Math.round(credits*100)||Math.round(stats.totalDebits*100)!==Math.round(debits*100))return false;
+  if(payload.transactions.some(function(t){const day=vfcRbcIsoDayNumber_(t.date);return day===null||day<start||day>end;}))return false;
+  const audit=payload.statementLedgerAudit,underCurrentRules=String(payload.bankRulesVersion||'')===vfcRbcBankProfile_().rulesVersion;
+  if(underCurrentRules&&(!audit||audit.verified!==true||audit.runtimeFingerprint!==vfcRbcBankProfile_().runtimeFingerprint||!audit.source))return false;
+  if(audit&&(audit.creditCount!==stats.creditCount||audit.debitCount!==stats.debitCount))return false;
+  return true;
+}
+
 function vfcRbcLedgerPreview_(rows,direction){
   return(rows||[]).filter(function(t){return String(t&&t.direction||'').toUpperCase()===direction;}).slice(0,40).map(function(t){return String(t.date||'')+' '+String(t.description||'')+' $'+vfcNum_(t.amount);}).join(' | ');
 }
@@ -736,6 +759,7 @@ function runRbcBankingSelfTests(){
   test('Layout-free activity reconciles against printed balances even when a Payroll Deposit is a debit',function(){
     const text=[
       'January 1, 2026 to January 31, 2026',
+      'Account number: 12345 123-456-7',
       'Opening balance on January 1, 2026 $100.00',
       'Total deposits & credits (1) + 200.00',
       'Total cheques & debits (2) - 70.00',
@@ -745,12 +769,16 @@ function runRbcBankingSelfTests(){
       '03 Jan Customer invoice 200.00 300.00',
       '04 Jan Payroll Deposit PROCESSOR 50.00 250.00',
       'Vendor payment 20.00 230.00'
-    ].join('\n'),locked=vfcRbcLockFacts_({banking_transactions:[]},text,'any-company-rbc.pdf');
+    ].join('\n'),locked=vfcRbcLockFacts_({account_number:'WRONG',banking_transactions:[]},text,'any-company-rbc.pdf');
     equal(locked.rbc_ledger_source,'RUNNING_BALANCE_TRANSCRIPT','balance recovery');
+    equal(locked.account_number,'12345 123-456-7','printed account controls set identity');
     equal(locked.banking_transactions.length,3,'activity rows');
     equal(locked.banking_transactions[1].direction,'DEBIT','payroll-provider debit');
     equal(vfcRbcCertainDirection_(locked.banking_transactions[1]),'','payroll wording does not force a direction');
     equal(locked.rbc_ledger_repair_passes,0,'AI repair passes');
+    const raw=vfcBankCreateIntakePayload_(Object.assign({bank_name:'RBC'},locked),'any-company-rbc.pdf'),frozen=vfcValidateFrozenPayload_(raw,'RBC','any-company-rbc.pdf');
+    truthy(vfcRbcFrozenLedgerUsable_(frozen),'set-level ledger recheck');
+    equal(frozen.statementLedgerAudit.creditCount,1,'printed credit count retained');
     return'3 rows / unique balance solution';
   });
 
@@ -876,7 +904,7 @@ function runRbcBankingSelfTests(){
     equal(after.debitCount,56,'corrected debits');close(after.totalDebits,63781.21,.001,'corrected debit total');
     equal(locked.rbc_direction_repairs.length,5,'recorded direction repairs');
     equal(locked.rbc_ledger_repair_passes,0,'AI repair passes');
-    equal(locked.rbc_runtime_fingerprint,'RBC-4.2-BALANCE-LEDGER-20260923','runtime fingerprint');
+    equal(locked.rbc_runtime_fingerprint,'RBC-4.3-SET-LEDGER-20260923','runtime fingerprint');
     return'18 credits/$56889.45; 56 debits/$63781.21';
   });
   test('Legacy dense layout printed credits are exactly 24 and $90,909.53',function(){
