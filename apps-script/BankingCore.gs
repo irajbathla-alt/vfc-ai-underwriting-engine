@@ -181,7 +181,7 @@ function vfcResidualRecurringClassifyDebit_(bankId,t){
   if(/\bNSF\b|RETURNED|REVERSAL|REFUND|MONTHLY\s+FEE|TRANSACTION\s+FEE|SERVICE\s+CHARGE|OVERDRAFT\s+INTEREST|E-?TRANSFER\s+FEE/.test(s))return null;
   if(/^CHEQUE\b|^ATM\b|CASH\s+WITHDRAWAL|INTERAC\s+PURCHASE|CONTACTLESS\s+INTERAC\s+PURCHASE|\bPOS\s+PURCHASE\b/.test(s))return null;
   const cp=String(t.counterparty||'').replace(/\s+/g,' ').trim(),cpUpper=cp.toUpperCase();
-  const genericTransferCp=!cp||/^(ONLINE\s+BANKING\s+TRANSFER|ONLINE\s+TRANSFER|BR\s+TO\s+BR|BANK\s+TRANSFER|TRANSFER)$/.test(cpUpper);
+  const genericTransferCp=!cp||/^(ONLINE\s+BANKING\s+TRANSFER|ONLINE\s+TRANSFER|BR\s+TO\s+BR|BANK\s+TRANSFER|TRANSFER)(?:\s*-\s*\d+)?$/.test(cpUpper);
   if((/^ONLINE\s+BANKING\s+TRANSFER\b|^BR\s+TO\s+BR\b|^BANK\s+TRANSFER\b/.test(s))&&genericTransferCp)return null;
   const label=vfcResidualRecurringLabel_(t);if(!label)return null;
   const key=vfcCounterpartyKey_(label);if(!key)return null;
