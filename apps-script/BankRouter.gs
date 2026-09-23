@@ -3,6 +3,7 @@
  * Bank selection + one common upload pipeline only.
  * Bank-specific extraction/classification lives in Bank_<BANK>.gs.
  * RBC 3.8.1 passes the staged source PDF ID into the focused recovery engine.
+ * Deployment integrity: getBankParserTabs belongs in this router file.
  */
 function vfcBankRegistry_(){return[vfcRbcBankProfile_(),vfcTdBankProfile_(),vfcScotiaBankProfile_(),vfcBmoBankProfile_(),vfcCibcBankProfile_(),vfcCoastCapitalBankProfile_()];}
 function getBankParserTabs(){return vfcBankRegistry_().map(function(p){return{id:p.id,label:p.label,status:p.status,active:p.status==='LOCKED',rulesVersion:p.rulesVersion,intakeContract:VFC_BANK_ENGINE.INTAKE_CONTRACT};});}

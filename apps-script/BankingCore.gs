@@ -2,6 +2,7 @@
  * VFC Banking Core 4.5
  * Shared bank-agnostic banking math over frozen statement facts.
  * No PDF or OpenAI call occurs during underwriting.
+ * Deployment integrity: this file owns the global VFC_BANK_ENGINE definition.
  */
 const VFC_BANK_ENGINE={
   VERSION:'VFC-BANKING-CORE-4.5',
