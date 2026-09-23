@@ -78,6 +78,7 @@ function vfcBuildBankStatementPrompt_(profile,text,companyName,fileName){return[
   '7. Extract incoming credits of $5,000 or more when they could plausibly be financing. Classification happens later.',
   '8. If a transaction row is visibly present but the counterparty is unclear, still extract the exact visible description when date, amount and debit/credit direction can be tied to that row. Omit only when the row cannot be reliably associated with its date, amount or direction.',
   '9. Never invent a missing transaction, amount, date, counterparty, account number or direction.',
+  '10. Preserve unfamiliar named electronic debits even when the counterparty is not in any known lender/vendor rule. This includes PAD/pre-authorized/automatic payments, EFT/ACH, bill payments, misc payments, online banking payments and account-payable debits with a visible counterparty or reference. BankingCore may later identify recurrence across statements and surface the item as an informational obligation. Do not classify it as financing unless financing evidence is actually printed.',
   'BANK-SPECIFIC RULES:',vfcBankExtractionRules_(profile.id),'Document text:',String(text||'').substring(0,VFC_CONFIG.STATEMENT_TEXT_LIMIT)
 ].join('\n');}
 
