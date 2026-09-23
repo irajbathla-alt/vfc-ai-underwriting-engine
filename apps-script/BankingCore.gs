@@ -1,10 +1,10 @@
 /**
- * VFC Banking Core 4.3
+ * VFC Banking Core 4.4
  * Shared bank-agnostic banking math over frozen statement facts.
  * No PDF or OpenAI call occurs during underwriting.
  */
 const VFC_BANK_ENGINE={
-  VERSION:'VFC-BANKING-CORE-4.3',
+  VERSION:'VFC-BANKING-CORE-4.4',
   FACTS_VERSION:'VFC-BANK-FACTS-1.1',
   INTAKE_CONTRACT:'BANK_MATCHED_FROZEN_LEDGER_V2',
   CACHE_PREFIX:'VFC_BANK_FACTS_V1:',
@@ -149,12 +149,80 @@ function vfcSuppressReturnedFinanceDebits_(debits,credits){
   return(debits||[]).filter(function(d,i){return!suppressed[i];});
 }
 
+function vfcStableInstallmentComponents_(items,totalDistinctMonths){
+  items=(items||[]).slice().sort(function(a,b){return vfcNum_(a.amount)-vfcNum_(b.amount);});
+  totalDistinctMonths=Math.max(0,Number(totalDistinctMonths||0));
+  if(items.length<2||totalDistinctMonths<2)return null;
+  const avgOccurrencesPerMonth=items.length/Math.max(1,totalDistinctMonths);
+  // High-frequency obligations (daily/weekly-style MCA or similar) must keep cadence math.
+  if(avgOccurrencesPerMonth>3)return null;
+  const clusters=[];
+  items.forEach(function(item){
+    const amount=vfcPos_(item.amount);if(!(amount>0))return;
+    let best=null,bestDiff=Infinity;
+    clusters.forEach(function(c){
+      const center=vfcMedian_(c.items.map(function(x){return vfcPos_(x.amount);}));
+      const tolerance=Math.max(15,center*.18),diff=Math.abs(amount-center);
+      if(diff<=tolerance&&diff<bestDiff){best=c;bestDiff=diff;}
+    });
+    if(!best){best={items:[]};clusters.push(best);}best.items.push(item);
+  });
+  const requiredMonths=totalDistinctMonths<=2?totalDistinctMonths:Math.max(2,Math.ceil(totalDistinctMonths*.5));
+  const eligible=clusters.map(function(c){
+    const months={};c.items.forEach(function(x){months[String(x.date||'').slice(0,7)]=1;});
+    const amounts=c.items.map(function(x){return vfcPos_(x.amount);});
+    return{items:c.items,distinctMonths:Object.keys(months).length,averageAmount:vfcMean_(amounts),medianAmount:vfcMedian_(amounts)};
+  }).filter(function(c){return c.distinctMonths>=requiredMonths;});
+  if(!eligible.length)return null;
+  const monthly=eligible.reduce(function(sum,c){return sum+c.averageAmount;},0);
+  if(!(monthly>0))return null;
+  return{
+    monthlyEquivalent:vfcRound_(monthly,.01),
+    componentCount:eligible.length,
+    requiredMonths:requiredMonths,
+    components:eligible.map(function(c){return{averageAmount:vfcRound_(c.averageAmount,.01),medianAmount:vfcRound_(c.medianAmount,.01),distinctMonths:c.distinctMonths,occurrences:c.items.length};})
+  };
+}
+
 function vfcSummarizeGroup_(g,latestEnd){
   const items=(g.items||[]).slice().sort(function(a,b){return vfcTime_(a.date)-vfcTime_(b.date);});if(!items.length)return null;const amounts=items.map(function(x){return x.amount;}),months={};items.forEach(function(x){const m=x.date.slice(0,7);months[m]=(months[m]||0)+x.amount;});const distinct=Object.keys(months).length,occ=items.length,gaps=[];for(let i=1;i<items.length;i++)gaps.push((vfcDate_(items[i].date)-vfcDate_(items[i-1].date))/86400000);const medianGap=gaps.length?vfcMedian_(gaps):0,median=vfcMedian_(amounts),cv=vfcCv_(amounts),weeklyRatio=gaps.length?gaps.filter(function(x){return x>=5&&x<=10;}).length/gaps.length:0,biweeklyRatio=gaps.length?gaps.filter(function(x){return x>10&&x<=18;}).length/gaps.length:0,recurring=distinct>=2||occ>=3,daysSince=vfcDays_(items[items.length-1].date,latestEnd),active=daysSince===null?true:daysSince<=VFC_BANK_ENGINE.ACTIVE_DAYS;let frequency='Observed statement-period cash flow',monthly=0,method='OBSERVED_ONLY';
-  if(recurring&&medianGap>=5&&medianGap<=10&&occ>=4&&weeklyRatio>=.65){frequency='Weekly observed cadence';monthly=median*52/12;method='WEEKLY_MEDIAN';}else if(recurring&&medianGap>10&&medianGap<=18&&occ>=3&&biweeklyRatio>=.55){frequency='Biweekly observed cadence';monthly=median*26/12;method='BIWEEKLY_MEDIAN';}else if(recurring&&distinct>=2&&occ===distinct){frequency='Monthly observed cadence';monthly=cv<=.03?median:vfcMeanObject_(months);method=cv<=.03?'MONTHLY_MEDIAN':'MONTHLY_VARIABLE_MEAN';}else if(recurring){frequency='Multiple payments per month';monthly=vfcRecentMonthAverage_(months,3);method='RECENT_3_MONTH_AVERAGE';}
+  if(recurring&&medianGap>=5&&medianGap<=10&&occ>=4&&weeklyRatio>=.65){frequency='Weekly observed cadence';monthly=median*52/12;method='WEEKLY_MEDIAN';}else if(recurring&&medianGap>10&&medianGap<=18&&occ>=3&&biweeklyRatio>=.55){frequency='Biweekly observed cadence';monthly=median*26/12;method='BIWEEKLY_MEDIAN';}else if(recurring&&distinct>=2&&occ===distinct){frequency='Monthly observed cadence';monthly=cv<=.03?median:vfcMeanObject_(months);method=cv<=.03?'MONTHLY_MEDIAN':'MONTHLY_VARIABLE_MEAN';}else if(recurring){const stable=(g.family==='FINANCING'||g.family==='MCA'||g.family==='PAD')?vfcStableInstallmentComponents_(items,distinct):null;if(stable){frequency='Stable recurring installment component';monthly=stable.monthlyEquivalent;method='STABLE_INSTALLMENT_COMPONENTS';}else{frequency='Multiple payments per month';monthly=vfcRecentMonthAverage_(months,3);method='RECENT_3_MONTH_AVERAGE';}}
   if(!active&&g.family!=='FINANCING'&&g.family!=='MCA'&&g.family!=='PAD'){monthly=0;method='STALE_INFORMATIONAL';}
   let why=String(g.debtJustification||'').trim();if(why&&recurring)why+=' Recurrence evidence: '+occ+' observed payment'+(occ===1?'':'s')+' across '+distinct+' month'+(distinct===1?'':'s')+'; '+frequency+'.';
   return{bankId:g.bankId||'',family:g.family,key:g.entityKey,entityKey:g.entityKey,counterparty:g.label,description:g.label,category:g.family==='FINANCING'?'LOAN':g.family,paymentAmount:vfcRound_(median,.01),averagePayment:vfcRound_(vfcMean_(amounts),.01),frequency:frequency,monthlyEquivalent:vfcRound_(monthly,.01),monthlyEquivalentMethod:method,occurrences:occ,distinctMonths:distinct,firstSeen:items[0].date,lastSeen:items[items.length-1].date,daysSinceLastObserved:daysSince,active:active,recurring:recurring,confidence:!recurring?'Low':(distinct>=3?'High':'Moderate'),observedTotal:vfcRound_(vfcSum_(amounts),.01),observedMonthlyTotals:vfcSortedMoneyObject_(months),components:vfcAmountComponents_(items),debtJustification:why};
+}
+
+function runBankingCoreRecurrenceSelfTests(){
+  const results=[];
+  function test(name,fn){try{results.push({name:name,pass:true,detail:String(fn()||'')});}catch(e){results.push({name:name,pass:false,detail:String(e&&e.message||e)});}}
+  function close(a,b,tol,label){tol=tol==null?.05:tol;if(Math.abs(Number(a||0)-Number(b||0))>tol)throw new Error((label||'value')+' expected '+b+' got '+a);}
+  function item(date,amount){return{date:date,amount:amount};}
+  test('Stable installment ignores isolated large catch-up payment',function(){
+    const r=vfcStableInstallmentComponents_([item('2026-03-27',2578.34),item('2026-04-27',2656.97),item('2026-07-27',7952.39),item('2026-08-17',2285.91)],4);
+    if(!r)throw new Error('stable component not detected');
+    close(r.monthlyEquivalent,(2578.34+2656.97+2285.91)/3,.05,'stable installment');
+    return r.monthlyEquivalent;
+  });
+  test('Stable smaller installment ignores one irregular first payment',function(){
+    const r=vfcStableInstallmentComponents_([item('2026-06-20',502.45),item('2026-07-02',234.96),item('2026-08-04',234.96),item('2026-09-01',234.96)],4);
+    if(!r)throw new Error('stable component not detected');
+    close(r.monthlyEquivalent,234.96,.05,'stable smaller installment');
+    return r.monthlyEquivalent;
+  });
+  test('High-frequency financing keeps cadence math instead of installment clustering',function(){
+    const items=[];for(let m=1;m<=2;m++){for(let i=1;i<=8;i++)items.push(item('2026-0'+m+'-'+String(i*3).padStart(2,'0'),681.35));}
+    const r=vfcStableInstallmentComponents_(items,2);
+    if(r!==null)throw new Error('high-frequency payments must not use installment clustering');
+    return'high-frequency preserved';
+  });
+  test('Two stable financing components under one entity are both retained',function(){
+    const r=vfcStableInstallmentComponents_([item('2026-01-05',1000),item('2026-01-20',2000),item('2026-02-05',1000),item('2026-02-20',2000),item('2026-03-05',1000),item('2026-03-20',2000)],3);
+    if(!r)throw new Error('stable components not detected');
+    close(r.monthlyEquivalent,3000,.05,'two-component total');
+    return r.monthlyEquivalent;
+  });
+  const failed=results.filter(function(x){return!x.pass;});
+  return{ok:failed.length===0,coreVersion:VFC_BANK_ENGINE.VERSION,total:results.length,passed:results.length-failed.length,failed:failed.length,results:results};
 }
 
 function vfcAmountComponents_(items){
