@@ -1,12 +1,10 @@
 const VFC_CONFIG = {
   ROOT_FOLDER_NAME: 'VFC AI Engine',
   OPENAI_MODEL: 'gpt-4.1-mini',
-  PDF_EXTRACTION_MODEL: 'gpt-4.1',
-  PDF_REPAIR_MODEL: 'gpt-4.1',
 
   // PDF intake: OpenAI file input is primary. Google Drive OCR is fallback only.
   PDF_TEXT_PROVIDER: 'OPENAI_FILE_INPUT',
-  PDF_TEXT_CACHE_VERSION: 'VFC-PDF-TEXT-4.0-RBC-GENERIC-COLUMNS',
+  PDF_TEXT_CACHE_VERSION: 'VFC-PDF-TEXT-2.0',
   PDF_TEXT_MAX_OUTPUT_TOKENS: 20000,
   PDF_TEXT_CACHE_FOLDER_NAME: '_PDF_TEXT_CACHE',
   DRIVE_OCR_FALLBACK_ENABLED: true,
@@ -68,7 +66,7 @@ function saveLenderDecision(payload) {
 
 function rebuildStructuredFeatures() {
   setupVFC(); const pairs = {};
-  // Rebuild only explicitly labelled lender outcomes; assessment/test uploads are not training cases.
+  getSheetObjects_('PDF Summaries').forEach(function(row){ const company=row.companyName||'', period=row.detectedPeriod||''; if(company)pairs[normalizeKey_(company,period)]={companyName:company,period:period}; });
   collectHistoricalOutcomes_().forEach(function(row){ if(row.companyName)pairs[normalizeKey_(row.companyName,row.period)]={companyName:row.companyName,period:row.period||''}; });
   let updated=0; Object.keys(pairs).forEach(function(key){upsertStructuredFeature_(pairs[key].companyName,pairs[key].period);updated++;});
   return {ok:true,recordsUpdated:updated,message:'Structured historical features rebuilt.'};
@@ -143,112 +141,6 @@ function vfcOpenAiResponseText_(body){
   return parts.join('\n');
 }
 
-function vfcBankLedgerJsonSchema_(){
-  return{
-    type:'object',
-    additionalProperties:false,
-    properties:{
-      banking_transactions:{
-        type:'array',
-        items:{
-          type:'object',
-          additionalProperties:false,
-          properties:{
-            date:{type:'string'},
-            description:{type:'string'},
-            counterparty:{type:'string'},
-            direction:{type:'string',enum:['DEBIT','CREDIT']},
-            amount:{type:'number'}
-          },
-          required:['date','description','counterparty','direction','amount']
-        }
-      }
-    },
-    required:['banking_transactions']
-  };
-}
-
-/**
- * Read a complete ledger directly from the original staged PDF. This deliberately
- * bypasses the cached transcript when deterministic statement checks prove that
- * the transcript-derived ledger has a missing row, wrong amount or wrong column.
- */
-function vfcReadBankLedgerFromPdfWithOpenAI_(sourceFileId,prompt,label){
-  if(!sourceFileId)throw new Error('Original PDF file ID is required for ledger recovery.');
-  const apiKey=PropertiesService.getScriptProperties().getProperty('OPENAI_API_KEY');
-  if(!apiKey)throw new Error('Missing OPENAI_API_KEY in Script Properties.');
-
-  const sourceFile=DriveApp.getFileById(sourceFileId),
-        pdfBlob=sourceFile.getBlob().setContentType('application/pdf').setName(sourceFile.getName()),
-        requestLabel=String(label||'original PDF ledger recovery');
-  let openAiFileId='';
-  try{
-    const upload=UrlFetchApp.fetch('https://api.openai.com/v1/files',{
-      method:'post',
-      headers:{Authorization:'Bearer '+apiKey},
-      payload:{purpose:'user_data',file:pdfBlob},
-      muteHttpExceptions:true
-    });
-    const uploadCode=upload.getResponseCode(),uploadText=upload.getContentText();
-    let uploadBody={};
-    try{uploadBody=JSON.parse(uploadText);}catch(e){}
-    if(uploadCode<200||uploadCode>=300||!uploadBody.id){
-      const uploadMessage=uploadBody&&uploadBody.error&&uploadBody.error.message?uploadBody.error.message:uploadText;
-      throw new Error(requestLabel+' PDF upload failed (HTTP '+uploadCode+'): '+String(uploadMessage||'unknown error'));
-    }
-    openAiFileId=String(uploadBody.id);
-
-    const response=UrlFetchApp.fetch('https://api.openai.com/v1/responses',{
-      method:'post',
-      contentType:'application/json',
-      headers:{Authorization:'Bearer '+apiKey},
-      payload:JSON.stringify({
-        model:VFC_CONFIG.PDF_REPAIR_MODEL||VFC_CONFIG.PDF_EXTRACTION_MODEL||VFC_CONFIG.OPENAI_MODEL,
-        temperature:0,
-        max_output_tokens:Number(VFC_CONFIG.PDF_TEXT_MAX_OUTPUT_TOKENS||20000),
-        input:[{
-          role:'user',
-          content:[
-            {type:'input_file',file_id:openAiFileId},
-            {type:'input_text',text:String(prompt||'')}
-          ]
-        }],
-        text:{format:{
-          type:'json_schema',
-          name:'vfc_bank_statement_ledger',
-          strict:true,
-          schema:vfcBankLedgerJsonSchema_()
-        }}
-      }),
-      muteHttpExceptions:true
-    });
-
-    const code=response.getResponseCode(),raw=response.getContentText();
-    let body={};
-    try{body=JSON.parse(raw);}catch(e){}
-    if(code<200||code>=300||body.error){
-      const responseMessage=body&&body.error&&body.error.message?body.error.message:raw;
-      throw new Error(requestLabel+' failed (HTTP '+code+'): '+String(responseMessage||'unknown error'));
-    }
-    const outputText=vfcOpenAiResponseText_(body);
-    if(!String(outputText||'').trim())throw new Error(requestLabel+' returned no structured ledger.');
-    let parsed;
-    try{parsed=JSON.parse(outputText);}catch(e){throw new Error(requestLabel+' returned invalid ledger JSON.');}
-    if(!parsed||!Array.isArray(parsed.banking_transactions))throw new Error(requestLabel+' returned no banking_transactions array.');
-    return parsed;
-  }finally{
-    if(openAiFileId){
-      try{
-        UrlFetchApp.fetch('https://api.openai.com/v1/files/'+encodeURIComponent(openAiFileId),{
-          method:'delete',
-          headers:{Authorization:'Bearer '+apiKey},
-          muteHttpExceptions:true
-        });
-      }catch(e){}
-    }
-  }
-}
-
 /**
  * Primary PDF text provider.
  * The output is a provider-neutral transcript. It is cached by PDF SHA-256 + extractor version,
@@ -283,13 +175,11 @@ function vfcExtractPdfTextWithOpenAI_(pdfBlob,fileName){
       'Return plain text only: no Markdown, no bullets, no code fences.',
       'Preserve every printed statement date, account number, account-summary line, transaction date, description, amount, debit/credit column and running balance that is visibly readable.',
       'Keep Account Summary wording as close to the PDF as possible, including transaction counts in parentheses and signs on totals.',
-      'Prioritize the complete Account Summary and every Account Activity Details page through the Closing balance. These sections must be transcribed in full before anything else.',
       'For tables, preserve row boundaries. If column spacing cannot be preserved, linearize the row and explicitly retain the printed column meaning, for example: DESCRIPTION ... | DEBIT 123.45 | CREDIT | BALANCE -45.67.',
       'Never decide debit/credit direction from the description. Use only the column in which the amount is printed.',
-      'Words such as CREDIT, DEBIT, PAYMENT, REFUND or CARD can be part of a transaction description and do not determine direction. For example, RBC CREDIT CARD printed under Cheques & Debits must remain a DEBIT.',
       'Preserve NSF, returned/unpaid/reversal wording exactly when readable.',
       'Do not add Opening balance, Closing balance, summary totals or cheque-image/support-page values as transaction rows when they are not Account Activity.',
-      'After the Account Activity Closing balance, omit cheque-image/support pages, marketing pages and boilerplate. They are not inputs to the ledger and must not consume transcription space.',
+      'Do not duplicate a cheque-image/support-page item that already appears in Account Activity.',
       'If a character or value is genuinely unreadable, preserve the surrounding visible text and mark only that unreadable fragment as [UNCLEAR]. Never invent a value.'
     ].join('\n');
 
@@ -298,7 +188,7 @@ function vfcExtractPdfTextWithOpenAI_(pdfBlob,fileName){
       contentType:'application/json',
       headers:{Authorization:'Bearer '+apiKey},
       payload:JSON.stringify({
-        model:VFC_CONFIG.PDF_EXTRACTION_MODEL||VFC_CONFIG.OPENAI_MODEL,
+        model:VFC_CONFIG.OPENAI_MODEL,
         temperature:0,
         max_output_tokens:Number(VFC_CONFIG.PDF_TEXT_MAX_OUTPUT_TOKENS||20000),
         input:[{
@@ -446,14 +336,6 @@ function runPdfIntakeSelfTests(){
     return String(VFC_CONFIG.DRIVE_OCR_FALLBACK_ENABLED);
   });
 
-  test('PDF extraction and recovery use fresh high-accuracy configuration',function(){
-    if(String(VFC_CONFIG.PDF_TEXT_CACHE_VERSION).indexOf('VFC-PDF-TEXT-4.0')!==0)throw new Error('stale PDF cache generation');
-    equal(VFC_CONFIG.PDF_EXTRACTION_MODEL,'gpt-4.1','extraction model');
-    equal(VFC_CONFIG.PDF_REPAIR_MODEL,'gpt-4.1','repair model');
-    equal(vfcBankLedgerJsonSchema_().required[0],'banking_transactions','ledger schema');
-    return VFC_CONFIG.PDF_TEXT_CACHE_VERSION;
-  });
-
   const failed=results.filter(function(x){return!x.pass;});
   return{
     ok:failed.length===0,
@@ -475,7 +357,6 @@ function buildSingleBankStatementPrompt_(text, companyName, fileName) {
     'banking_transactions is an array: {date:"YYYY-MM-DD",description:"exact visible description",counterparty:"short counterparty",direction:"DEBIT" or "CREDIT",amount:number}.',
     'FACT EXTRACTION ONLY. Do not underwrite.',
     'Printed bank column controls direction. Deposits/Credits=CREDIT. Cheques/Debits=DEBIT. Wording never overrides the column.',
-    'Words such as CREDIT, DEBIT, PAYMENT, REFUND or CARD inside a description do not determine direction. For example, RBC CREDIT CARD printed under Cheques/Debits is a DEBIT.',
     'Extract financing/loan/PAD/MCA/advance/funding/capital transactions, loan interest, recurring PADs, explicit equipment lease or equipment finance payments, recurring equipment-rent payments, tax/government payments, insurance/premium finance and credit-card payments.',
     'Equipment examples to extract include EQUIP RENT/LSE, EQUIPMENT LEASE, LEASE PAYMENT, EQUIPMENT FINANCE, COMM EQUIP RENT/LSE, or plain EQUIPMENT RENT. Deterministic banking code will decide whether each is debt or informational.',
     'Also extract incoming credits of $5,000 or more when they could plausibly be financing. Deterministic code will classify them.',
@@ -492,18 +373,7 @@ function vfcLockPrintedStatementFacts_(summary,text){summary=summary||{};const f
 function vfcExtractPrintedStatementFacts_(text){const source=String(text||'').replace(/\u00a0/g,' '),out={startDate:'',endDate:'',opening:null,closing:null,deposits:null,withdrawals:null,totalsVerified:false};const monthRange=source.match(/([A-Za-z]{3,9}\s+\d{1,2},\s+\d{4})\s+(?:to|through|[-–—])\s+([A-Za-z]{3,9}\s+\d{1,2},\s+\d{4})/i),isoRange=source.match(/(\d{4}-\d{2}-\d{2})\s+(?:to|through|[-–—])\s+(\d{4}-\d{2}-\d{2})/i),range=monthRange||isoRange;if(range){out.startDate=vfcPrintedIsoDate_(range[1]);out.endDate=vfcPrintedIsoDate_(range[2]);}const printedDate='(?:[A-Za-z]{3,9}\\s+\\d{1,2},\\s+\\d{4}|\\d{4}-\\d{2}-\\d{2})';out.opening=vfcPrintedMoneyAfter_(source,[new RegExp('Opening\\s+balance(?:\\s+on\\s+'+printedDate+')?\\s+([+\\-]?\\s*\\$?\\s*\\(?\\-?\\$?[\\d,]+(?:\\.\\d{2})?\\)?)','i'),/Beginning\s+balance\s+([+\-]?\s*\$?\s*\(?\-?\$?[\d,]+(?:\.\d{2})?\)?)/i]);out.closing=vfcPrintedMoneyAfter_(source,[new RegExp('Closing\\s+balance(?:\\s+on\\s+'+printedDate+')?\\s*(?:=)?\\s*([+\\-]?\\s*\\$?\\s*\\(?\\-?\\$?[\\d,]+(?:\\.\\d{2})?\\)?)','i'),/Ending\s+balance\s+([+\-]?\s*\$?\s*\(?\-?\$?[\d,]+(?:\.\d{2})?\)?)/i]);out.deposits=vfcPrintedMoneyAfter_(source,[/Total\s+deposits\s*(?:&|and)\s+credits(?:\s*\(\d+\))?\s*([+\-]?\s*\$?\s*[\d,]+(?:\.\d{2})?)/i,/Total\s+credits(?:\s*\(\d+\))?\s*([+\-]?\s*\$?\s*[\d,]+(?:\.\d{2})?)/i,/Total\s+deposits(?:\s*\(\d+\))?\s*([+\-]?\s*\$?\s*[\d,]+(?:\.\d{2})?)/i]);out.withdrawals=vfcPrintedMoneyAfter_(source,[/Total\s+cheques?\s*(?:&|and)\s+debits(?:\s*\(\d+\))?\s*([+\-]?\s*\$?\s*[\d,]+(?:\.\d{2})?)/i,/Total\s+withdrawals(?:\s*\(\d+\))?\s*([+\-]?\s*\$?\s*[\d,]+(?:\.\d{2})?)/i,/Total\s+debits(?:\s*\(\d+\))?\s*([+\-]?\s*\$?\s*[\d,]+(?:\.\d{2})?)/i]);if(out.deposits!==null)out.deposits=Math.abs(out.deposits);if(out.withdrawals!==null)out.withdrawals=Math.abs(out.withdrawals);if(out.opening!==null&&out.closing!==null&&out.deposits!==null&&out.withdrawals!==null){const diff=(out.opening+out.deposits-out.withdrawals)-out.closing;out.totalsVerified=Math.abs(diff)<=.05;}return out;}
 function vfcPrintedMoneyAfter_(source,patterns){for(let i=0;i<patterns.length;i++){const match=source.match(patterns[i]);if(!match||!match[1])continue;const value=vfcPrintedMoney_(match[1]);if(value!==null)return value;}return null;}
 function vfcPrintedMoney_(value){const raw=String(value||'').trim();if(!raw)return null;const negative=/^\s*-/.test(raw)||/-\s*\$/.test(raw)||/^\s*\(/.test(raw),cleaned=raw.replace(/[^0-9.]/g,'');if(!cleaned)return null;const number=parseFloat(cleaned);return isFinite(number)?(negative?-number:number):null;}
-function vfcPrintedIsoDate_(value){
-  if(!value)return'';
-  const text=String(value).trim(),direct=text.match(/^\d{4}-\d{2}-\d{2}$/);if(direct)return direct[0];
-  const named=text.match(/^([A-Za-z]{3,9})\s+(\d{1,2}),\s*(\d{4})$/);
-  if(named){
-    const months={JAN:1,FEB:2,MAR:3,APR:4,MAY:5,JUN:6,JUL:7,AUG:8,SEP:9,OCT:10,NOV:11,DEC:12},month=months[named[1].slice(0,3).toUpperCase()],day=Number(named[2]),year=Number(named[3]);
-    if(!month)return'';
-    const date=new Date(Date.UTC(year,month-1,day));
-    return date.getUTCFullYear()===year&&date.getUTCMonth()===month-1&&date.getUTCDate()===day?date.toISOString().slice(0,10):'';
-  }
-  const date=new Date(text);return isNaN(date.getTime())?'':Utilities.formatDate(date,Session.getScriptTimeZone(),'yyyy-MM-dd');
-}
+function vfcPrintedIsoDate_(value){if(!value)return'';const direct=String(value).match(/^\d{4}-\d{2}-\d{2}$/);if(direct)return direct[0];const date=new Date(value);return isNaN(date.getTime())?'':Utilities.formatDate(date,Session.getScriptTimeZone(),'yyyy-MM-dd');}
 
 function summarizeBatch_(items, companyName, detectedPeriod) {
   const combined = items.map(function(item){
