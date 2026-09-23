@@ -82,6 +82,7 @@ function vfcRbcClassifyDebit_(t){
 const raw=String(t.description||'').replace(/\s+/g,' ').trim();
 const s=raw.toUpperCase();
 const cp=String(t.counterparty||'').replace(/\s+/g,' ').trim();
+const genericLoanPaymentOnly=/^LOAN\s+PAYMENT$/i.test(raw)&&(!cp||/^LOAN\s+PAYMENT$/i.test(cp));
 const hasFinancingSignal=/\bLOAN\b|\bMORTGAGE\b|\bLOC\b|LINE\s+OF\s+CREDIT|CREDIT\s+LINE|\bFINANC(?:E|ING)?\b|\bMCA\b|\bLEASE\b|\bLSE\b/.test(s);
 const isFeeLine=/\bFEES?\b|SERVICE\s+CHARGE|NSF\s+ITEM\s+FEES?|OVERDRAFT\s+INTEREST|PAYMENT\s+COVERAGE/.test(s);
 if(isFeeLine&&!hasFinancingSignal)return null;
@@ -140,7 +141,7 @@ family='OTHER';entityKey='RBC_OTHER_AUTOPAY_'+vfcCounterpartyKey_(clean||cp||raw
 const clean=raw.replace(/^MISC\s+PAYMENT\s*/i,'').trim();
 family='FINANCING';entityKey='AUTO_PAYMENT_FINANCE_'+vfcCounterpartyKey_(clean||cp||raw);label=clean||cp||raw;
 debtJustification='Recurring or retry payment to the same finance-like counterparty, even though RBC printed MISC PAYMENT instead of AUTO PAYMENT.';
-}else if(/^LOAN\s+PAYMENT$/i.test(raw)){
+}else if(genericLoanPaymentOnly){
 family='OTHER';entityKey='RBC_OTHER_GENERIC_LOAN_PAYMENT';label='Generic LOAN PAYMENT';
 }else if(hasFinancingSignal){
 family='FINANCING';
@@ -292,6 +293,9 @@ equal(d.returnedFinanceDebitsSuppressed,1,'returned financing debit suppression'
 return'monthly='+d.confirmedMonthlyDebtService+', suppressed='+d.returnedFinanceDebitsSuppressed;
 });
 test('Generic unnumbered LOAN PAYMENT remains informational even when recurring',function(){
+const classified=vfcRbcClassifyDebit_(tx('2026-01-10','LOAN PAYMENT','DEBIT',4500,'LOAN PAYMENT'));
+equal(classified.family,'OTHER','generic loan payment family');
+equal(classified.entityKey,'RBC_OTHER_GENERIC_LOAN_PAYMENT','generic loan payment identity');
 const d=vfcDebtProfile_([
 row('2026-01-31',[tx('2026-01-10','LOAN PAYMENT','DEBIT',4500,'LOAN PAYMENT')]),
 row('2026-02-28',[tx('2026-02-10','LOAN PAYMENT','DEBIT',5500,'LOAN PAYMENT')]),
