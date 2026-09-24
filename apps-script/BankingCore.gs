@@ -1,10 +1,10 @@
 /**
- * VFC Banking Core 4.11
+ * VFC Banking Core 4.12
  * Shared bank-agnostic banking math over frozen statement facts.
  * No PDF or OpenAI call occurs during underwriting.
  */
 const VFC_BANK_ENGINE={
-  VERSION:'VFC-BANKING-CORE-4.11',
+  VERSION:'VFC-BANKING-CORE-4.12',
   FACTS_VERSION:'VFC-BANK-FACTS-1.2',
   INTAKE_CONTRACT:'BANK_MATCHED_FROZEN_LEDGER_V2',
   CACHE_PREFIX:'VFC_BANK_FACTS_V1:',
@@ -62,11 +62,32 @@ function vfcStatementIdentityKey_(r){const m=vfcStatementMeta_(r),subject=m.acco
  * Known account numbers are authoritative. Legacy rows without an account number may join exactly one
  * account group only when bank + dates + normalized filename match. Ambiguous legacy rows stay separate.
  */
+function vfcNearStatementPeriod_(a,b,maxDays){
+  const am=vfcStatementMeta_(a),bm=vfcStatementMeta_(b),limit=Math.max(0,maxDays==null?3:maxDays);
+  if(!am.start||!am.end||!bm.start||!bm.end)return false;
+  return Math.abs(vfcTime_(am.start)-vfcTime_(bm.start))/86400000<=limit&&Math.abs(vfcTime_(am.end)-vfcTime_(bm.end))/86400000<=limit;
+}
+function vfcMergeNearDuplicateStatementGroups_(groups){
+  const merged=[];
+  (groups||[]).forEach(function(group){
+    if(!group||!group.length)return;
+    const gm=vfcStatementMeta_(group[0]);let target=null;
+    if(gm.account){
+      merged.some(function(existing){
+        const em=vfcStatementMeta_(existing[0]);
+        if(em.bankId===gm.bankId&&em.account&&em.account===gm.account&&vfcNearStatementPeriod_(existing[0],group[0],3)){target=existing;return true;}
+        return false;
+      });
+    }
+    if(target)Array.prototype.push.apply(target,group);else merged.push(group.slice());
+  });
+  return merged;
+}
 function vfcGroupLogicalStatementRows_(rows){
   const byPeriod={};(rows||[]).forEach(function(r){const key=vfcStatementBasePeriodKey_(r);if(!byPeriod[key])byPeriod[key]=[];byPeriod[key].push(r);});const out=[];
   Object.keys(byPeriod).sort().forEach(function(periodKey){const bucket=byPeriod[periodKey],accountGroups={},legacy=[];bucket.forEach(function(r){const m=vfcStatementMeta_(r);if(m.account){if(!accountGroups[m.account])accountGroups[m.account]=[];accountGroups[m.account].push(r);}else legacy.push(r);});const groups=Object.keys(accountGroups).sort().map(function(k){return accountGroups[k];});
     legacy.forEach(function(r){const m=vfcStatementMeta_(r),matches=[];if(m.fileKey)groups.forEach(function(g){if(g.some(function(x){return vfcStatementMeta_(x).fileKey===m.fileKey;}))matches.push(g);});if(matches.length===1){matches[0].push(r);return;}let target=null;out.some(function(){return false;});const legacyGroups=groups.filter(function(g){return!g.some(function(x){return!!vfcStatementMeta_(x).account;});});legacyGroups.some(function(g){const gm=vfcStatementMeta_(g[0]);if((m.fileKey&&gm.fileKey===m.fileKey)||(!m.fileKey&&m.holder&&gm.holder===m.holder)){target=g;return true;}return false;});if(target)target.push(r);else groups.push([r]);});groups.forEach(function(g){out.push(g);});
-  });return out;
+  });return vfcMergeNearDuplicateStatementGroups_(out);
 }
 function vfcStatementHolderRaw_(r){
   r=r||{};const p=vfcParseBankCache_(r.signalRaw);
@@ -88,19 +109,26 @@ function vfcIsolateBorrowerRows_(rows,companyName){
   const list=Object.keys(clusters).map(function(k){const c=clusters[k];c.match=vfcHolderMatchScore_(companyName,c.holder);return c;});
   if(list.length<=1)return rows;
   list.sort(function(a,b){return b.match-a.match||b.rows.length-a.rows.length||b.latest-a.latest||a.key.localeCompare(b.key);});
-  const best=list[0],second=list[1];
+  const best=list[0];
   if(!(best.match>=.5)){
     throw new Error('Multiple bank-statement account holders were found for "'+companyName+'" in the same assessment period. Refusing to mix borrower data. Holders detected: '+list.map(function(c){return c.holder||c.key;}).join(' | ')+'.');
   }
+  const allowedAccounts={},kept=best.rows.slice(),excluded=[],residualClusters=[];
+  best.rows.forEach(function(r){const a=vfcStatementMeta_(r).account;if(a)allowedAccounts[a]=1;});
+  list.slice(1).forEach(function(c){
+    const residual=[];
+    c.rows.forEach(function(r){const a=vfcStatementMeta_(r).account;if(a&&allowedAccounts[a])kept.push(r);else residual.push(r);});
+    if(residual.length){excluded.push.apply(excluded,residual);residualClusters.push({key:c.key,holder:c.holder,rows:residual,match:c.match});}
+  });
+  unknown.forEach(function(r){const a=vfcStatementMeta_(r).account;if(a&&allowedAccounts[a])kept.push(r);else excluded.push(r);});
+  const second=residualClusters.slice().sort(function(a,b){return b.match-a.match||b.rows.length-a.rows.length||a.key.localeCompare(b.key);})[0];
   if(second&&Math.abs(best.match-second.match)<.0001&&best.rows.length===second.rows.length){
     throw new Error('Bank-statement borrower selection is ambiguous for "'+companyName+'". Refusing to combine different account holders: '+best.holder+' | '+second.holder+'.');
   }
-  const allowedAccounts={};best.rows.forEach(function(r){const a=vfcStatementMeta_(r).account;if(a)allowedAccounts[a]=1;});
-  unknown.forEach(function(r){const a=vfcStatementMeta_(r).account;if(a&&allowedAccounts[a])best.rows.push(r);});
-  best.rows.forEach(function(r){
-    r.borrowerIsolation={selectedHolder:best.holder,excludedHolderCount:list.length-1,excludedStatementCount:list.slice(1).reduce(function(n,c){return n+c.rows.length;},0)};
+  kept.forEach(function(r){
+    r.borrowerIsolation={selectedHolder:best.holder,excludedHolderCount:residualClusters.length,excludedStatementCount:excluded.length,sameAccountHolderMismatchRecovered:kept.length-best.rows.length};
   });
-  return best.rows;
+  return kept;
 }
 function vfcSelectedStatementRows_(companyName,period){
   const all=vfcSummaryRows_(companyName,period),groups=vfcGroupLogicalStatementRows_(all),rows=groups.map(function(group){const latest=group.slice().sort(function(a,b){return vfcTime_(b.createdAt)-vfcTime_(a.createdAt)||b.rowNumber-a.rowNumber;})[0],bankId=vfcDetectBankId_(latest.bank||''),canonical=vfcCanonicalSignalRawFromRows_(group,bankId),row=Object.assign({},latest);if(canonical)row.signalRaw=canonical;row.statementIdentity=vfcStatementIdentityKey_(row);row.logicalRowNumbers=group.map(function(x){return x.rowNumber;});row.duplicateRowsCollapsed=Math.max(0,group.length-1);return row;});
@@ -153,7 +181,7 @@ function vfcBuildBankingFeatures_(base,rows){
   if(transferCreditsTotal)inputWarnings.push('Explicit bank-account transfer credits of $'+vfcRound_(transferCreditsTotal,.01)+' are excluded from estimated operating deposits. Generic customer e-Transfers are not excluded unless the bank-specific rules identify them as internal transfers.');
   if(recoveredTransferCredits.length)inputWarnings.push('Recovered '+recoveredTransferCredits.length+' internal-transfer credit'+(recoveredTransferCredits.length===1?'':'s')+' from a frozen debit/credit direction mismatch because the amount exactly reconciled the printed statement deposit total.');
   const isolation=rows.length&&rows[0].row&&rows[0].row.borrowerIsolation?rows[0].row.borrowerIsolation:null;
-  if(isolation&&isolation.excludedStatementCount)inputWarnings.push('Borrower isolation excluded '+isolation.excludedStatementCount+' statement set'+(isolation.excludedStatementCount===1?'':'s')+' belonging to other account holder(s); selected holder: '+isolation.selectedHolder+'.');
+  if(isolation&&isolation.excludedStatementCount)inputWarnings.push('Borrower isolation excluded '+isolation.excludedStatementCount+' statement set'+(isolation.excludedStatementCount===1?'':'s')+' belonging to other account holder(s); selected holder: '+isolation.selectedHolder+'.');if(isolation&&isolation.sameAccountHolderMismatchRecovered)inputWarnings.push('Borrower isolation retained '+isolation.sameAccountHolderMismatchRecovered+' statement set'+(isolation.sameAccountHolderMismatchRecovered===1?'':'s')+' because the known bank account number matched the selected borrower despite an inconsistent extracted account-holder label.');
   audit.forEach(function(a){if(a.duplicateRowsCollapsed)inputWarnings.push(a.fileName+': '+a.duplicateRowsCollapsed+' older re-upload row'+(a.duplicateRowsCollapsed===1?' was':'s were')+' collapsed into this logical statement before underwriting.');if((vfcNum_(a.totalDeposits)>0||vfcNum_(a.totalWithdrawals)>0)&&a.transactionCount===0)inputWarnings.push(a.fileName+': statement totals were present but no transaction rows were frozen; recurring-payment analysis may be incomplete.');});
   const result=Object.assign({},base,{statementCount:rows.length,monthsCovered:rows.length,totalDeposits:vfcRound_(totalDeposits,.01),averageMonthlyDeposits:vfcRound_(grossMonthly,.01),totalWithdrawals:vfcRound_(totalWithdrawals,.01),depositWithdrawalRatio:totalWithdrawals?vfcRound_(totalDeposits/totalWithdrawals,.01):0,averageOpeningBalance:vfcRound_(vfcMean_(openings),.01),averageClosingBalance:vfcRound_(vfcMean_(closings),.01),depositVolatility:vfcRound_(avgDep?vfcStdDev_(monthlyDeposits)/avgDep:1,.01),depositTrend:vfcRound_(vfcTrend_(monthlyDeposits),.01),nsfCount:nsf,nsfPerMonth:vfcRound_(nsf/months,.01),negativeBalanceFlag:negative,overdraftFlag:overdraftFlag,returnedPaymentFlag:returnedFlag,suspectedStacking:stackingFlag,missingInfoFlag:0,mcaPaymentFlag:debt.activeDebtObligations.length?1:0,monthlyDeposits:monthlyDeposits.slice(),monthlyWithdrawals:monthlyWithdrawals.slice(),estimatedOperatingTotalDeposits:vfcRound_(operatingTotal,.01),estimatedOperatingMonthlyDeposits:vfcRound_(operatingTotal/months,.01),detectedFinancingCredits:vfcRound_(debt.financingCreditsTotal,.01),excludedReversalCredits:vfcRound_(reversalCreditsTotal,.01),excludedReversalCreditTransactions:reversalCredits,excludedTransferCredits:vfcRound_(transferCreditsTotal,.01),excludedTransferCreditTransactions:transferCredits,existingMonthlyDebtService:vfcRound_(debt.confirmedMonthlyDebtService,.01),informationalRecurringMonthlyObligations:vfcRound_(debt.informationalMonthlyObligations,.01),otherRecurringMonthlyObligations:vfcRound_(debt.informationalMonthlyObligations,.01),debtServiceToDepositsRatio:grossMonthly?vfcRound_(debt.confirmedMonthlyDebtService/grossMonthly,.0001):0,debtProfile:debt,inputQualityAudit:{modelVersion:VFC_BANK_ENGINE.VERSION,intakeContract:VFC_BANK_ENGINE.INTAKE_CONTRACT,verified:true,statementAudit:audit,selectedStatementCount:rows.length,excludedReversalCredits:vfcRound_(reversalCreditsTotal,.01),excludedTransferCredits:vfcRound_(transferCreditsTotal,.01),warnings:inputWarnings}});
   result.resultFingerprint=vfcResultFingerprint_(result);result.inputQualityAudit.resultFingerprint=result.resultFingerprint;return result;
@@ -634,6 +662,24 @@ function runBankingCoreRecurrenceSelfTests(){
     const r=vfcResolveReturnedObligationDebits_(debits,credits);
     if(r.debits.length!==1)throw new Error('valid payment was suppressed by fee');
     return'preserved';
+  });
+  test('Same known account re-upload with two-day date drift collapses to one logical statement',function(){
+    const prefix=VFC_BANK_ENGINE.CACHE_PREFIX,base={bankId:'RBC',bankName:'RBC',accountNumber:'03296 100-282-3',accountHolder:'AIM HIGH TRANSPORTATION LTD.',transactionsVerified:true,transactions:[],totalDeposits:100,totalWithdrawals:90};
+    const a={bank:'RBC',startDate:'2026-03-02',endDate:'2026-04-02',signalRaw:prefix+JSON.stringify(Object.assign({},base,{statementStartDate:'2026-03-02',statementEndDate:'2026-04-02'}))};
+    const b={bank:'RBC',startDate:'2026-03-01',endDate:'2026-04-01',signalRaw:prefix+JSON.stringify(Object.assign({},base,{statementStartDate:'2026-03-01',statementEndDate:'2026-04-01'}))};
+    const g=vfcGroupLogicalStatementRows_([a,b]);if(g.length!==1)throw new Error('date-drifted re-upload was not collapsed');return g[0].length;
+  });
+  test('Adjacent monthly statements on same account remain separate',function(){
+    const prefix=VFC_BANK_ENGINE.CACHE_PREFIX,base={bankId:'RBC',bankName:'RBC',accountNumber:'03296 100-282-3',accountHolder:'AIM HIGH TRANSPORTATION LTD.',transactionsVerified:true,transactions:[],totalDeposits:100,totalWithdrawals:90};
+    const a={bank:'RBC',startDate:'2026-03-02',endDate:'2026-04-02',signalRaw:prefix+JSON.stringify(Object.assign({},base,{statementStartDate:'2026-03-02',statementEndDate:'2026-04-02'}))};
+    const b={bank:'RBC',startDate:'2026-04-02',endDate:'2026-05-01',signalRaw:prefix+JSON.stringify(Object.assign({},base,{statementStartDate:'2026-04-02',statementEndDate:'2026-05-01'}))};
+    const g=vfcGroupLogicalStatementRows_([a,b]);if(g.length!==2)throw new Error('adjacent monthly statements were merged');return g.length;
+  });
+  test('Same account number overrides one inconsistent holder label during borrower isolation',function(){
+    const prefix=VFC_BANK_ENGINE.CACHE_PREFIX;
+    function row(holder,account,end){return{bank:'RBC',accountHolder:holder,endDate:end,createdAt:end,signalRaw:prefix+JSON.stringify({bankId:'RBC',bankName:'RBC',accountNumber:account,accountHolder:holder,statementStartDate:'2026-01-01',statementEndDate:end,transactionsVerified:true,transactions:[],totalDeposits:100,totalWithdrawals:90})};}
+    const rows=[row('AIM HIGH TRANSPORTATION LTD.','03296 100-282-3','2026-02-01'),row('AIM HIGH TRANSPORTATION','03296 100-282-3','2026-03-01'),row('OTHER RESTAURANT LTD.','99999 111-222-3','2026-03-01')];
+    const kept=vfcIsolateBorrowerRows_(rows,'AIM HIGH TRANSPORTATION LTD.');if(kept.length!==2)throw new Error('same-account holder mismatch was not retained safely');return kept.length;
   });
   test('ISO literal dates are idempotent and do not drift backward',function(){
     const d='2026-06-23';
