@@ -1,10 +1,10 @@
 /**
- * VFC Banking Core 4.7
+ * VFC Banking Core 4.8
  * Shared bank-agnostic banking math over frozen statement facts.
  * No PDF or OpenAI call occurs during underwriting.
  */
 const VFC_BANK_ENGINE={
-  VERSION:'VFC-BANKING-CORE-4.7',
+  VERSION:'VFC-BANKING-CORE-4.8',
   FACTS_VERSION:'VFC-BANK-FACTS-1.2',
   INTAKE_CONTRACT:'BANK_MATCHED_FROZEN_LEDGER_V2',
   CACHE_PREFIX:'VFC_BANK_FACTS_V1:',
@@ -141,7 +141,8 @@ function vfcNonOperatingTransferCredits_(transactions){
 function vfcDebtProfile_(rows){
   let tx=[],latest='';rows.forEach(function(x){if(!latest||vfcTime_(x.payload.statementEndDate)>vfcTime_(latest))latest=x.payload.statementEndDate;(x.payload.transactions||[]).forEach(function(t){tx.push(Object.assign({bankId:x.payload.bankId||'UNKNOWN'},t));});});
   tx=vfcDedupeTx_(tx);const rawDebits=tx.filter(function(t){return t.direction==='DEBIT';}),credits=tx.filter(function(t){return t.direction==='CREDIT';}),returnResolution=vfcResolveReturnedObligationDebits_(rawDebits,credits),returnedCredits=returnResolution.returnedCredits,returnedCreditsTotal=returnedCredits.reduce(function(s,c){return s+vfcPos_(c.amount);},0),debits=returnResolution.debits,returnedFinanceDebitsSuppressed=returnResolution.suppressedCount,probableRetryPaymentsLinked=returnResolution.retryLinkedCount,classified=debits.map(function(t){return vfcClassifyObligationDebit_(t.bankId,t);}).filter(Boolean),groups={};
-  classified.forEach(function(t){const key=t.bankId+'|'+t.family+'|'+t.entityKey;if(!groups[key])groups[key]={bankId:t.bankId,family:t.family,entityKey:t.entityKey,label:t.label,debtJustification:t.debtJustification||'',items:[]};if(!groups[key].debtJustification&&t.debtJustification)groups[key].debtJustification=t.debtJustification;groups[key].items.push(t);});
+  classified.forEach(function(t){const key=t.bankId+'|'+t.family+'|'+t.entityKey;if(!groups[key])groups[key]={bankId:t.bankId,family:t.family,entityKey:t.entityKey,label:t.label,debtJustification:t.debtJustification||'',items:[],failedEvents:[]};if(!groups[key].debtJustification&&t.debtJustification)groups[key].debtJustification=t.debtJustification;groups[key].items.push(t);});
+  (returnResolution.events||[]).forEach(function(e){Object.keys(groups).forEach(function(k){const g=groups[k];if(String(g.bankId||'UNKNOWN')===String(e.bankId||'UNKNOWN')&&String(g.entityKey||'')===String(e.entityKey||''))g.failedEvents.push(e);});});
   let summaries=Object.keys(groups).sort().map(function(k){return vfcSummarizeGroup_(groups[k],latest);}).filter(Boolean);summaries=vfcMergeGenericAmountMatches_(summaries);
   const sweepByBank={};credits.forEach(function(c){if(/\bLOAN\s+CREDIT\b/i.test(c.description))sweepByBank[c.bankId]=(sweepByBank[c.bankId]||0)+1;});const active=[],revolving=[],tax=[],other=[],inactive=[],once=[];
   summaries.forEach(function(g){if((sweepByBank[g.bankId]||0)>=2&&g.entityKey==='GENERIC_LOAN_PAYMENT'){revolving.push(g);return;}if(!g.recurring){once.push(g);return;}if(g.family==='FINANCING'||g.family==='MCA'||g.family==='PAD'){if(g.active)active.push(g);else once.push(g);}else if(g.family==='TAX'){if(g.active)tax.push(g);else inactive.push(g);}else{if(g.active)other.push(g);else inactive.push(g);}});
@@ -284,6 +285,60 @@ function vfcResidualRecurringClassifyDebit_(bankId,t){
   });
 }
 
+function vfcCatchUpInstallmentBase_(items,failedEvents){
+  const success=(items||[]).slice(),failed=(failedEvents||[]).map(function(e){
+    const d=e&&e.failedDebit||{};
+    return{date:String(d.date||''),amount:vfcPos_(d.amount),failed:true};
+  }).filter(function(x){return x.date&&x.amount>0;});
+  if(!failed.length||success.length<1)return null;
+  const evidence=success.map(function(x){return{date:String(x.date||''),amount:vfcPos_(x.amount),failed:false};}).concat(failed);
+  if(evidence.length<3)return null;
+  const monthSet={};evidence.forEach(function(x){monthSet[String(x.date).slice(0,7)]=1;});
+  if(Object.keys(monthSet).length<3)return null;
+  const successMonthSet={};success.forEach(function(x){successMonthSet[String(x.date||'').slice(0,7)]=1;});
+  if(success.length/Math.max(1,Object.keys(successMonthSet).length)>1.5)return null;
+
+  const seeds=[];
+  evidence.forEach(function(x){
+    for(let n=1;n<=4;n++)seeds.push(x.amount/n);
+  });
+  let best=null;
+  seeds.forEach(function(seed){
+    if(!(seed>0))return;
+    const matched=[];
+    evidence.forEach(function(x){
+      const ratio=x.amount/seed,n=Math.round(ratio);
+      if(n<1||n>4)return;
+      const normalized=x.amount/n,tol=Math.max(20,seed*.055);
+      if(Math.abs(normalized-seed)>tol)return;
+      matched.push({date:x.date,amount:x.amount,multiple:n,normalized:normalized,failed:x.failed});
+    });
+    if(matched.length<3)return;
+    const direct=matched.filter(function(x){return x.multiple===1;}).length,multi=matched.filter(function(x){return x.multiple>=2;}).length,failedMatched=matched.filter(function(x){return x.failed;}).length;
+    if(!direct||!multi||!failedMatched)return;
+    const months={};matched.forEach(function(x){months[String(x.date).slice(0,7)]=1;});
+    if(Object.keys(months).length<3)return;
+    const base=vfcMedian_(matched.map(function(x){return x.normalized;}));
+    const verified=matched.filter(function(x){return Math.abs(x.normalized-base)<=Math.max(20,base*.055);});
+    if(verified.length<3)return;
+    const vDirect=verified.filter(function(x){return x.multiple===1;}).length,vMulti=verified.filter(function(x){return x.multiple>=2;}).length,vFailed=verified.filter(function(x){return x.failed;}).length;
+    if(!vDirect||!vMulti||!vFailed)return;
+    const vMonths={};verified.forEach(function(x){vMonths[String(x.date).slice(0,7)]=1;});
+    const score=Object.keys(vMonths).length*100+verified.length*20+vFailed*10+vDirect*5;
+    if(!best||score>best.score||(score===best.score&&base<best.baseInstallment)){
+      best={baseInstallment:base,score:score,evidence:verified};
+    }
+  });
+  if(!best)return null;
+  return{
+    monthlyEquivalent:vfcRound_(best.baseInstallment,.01),
+    baseInstallment:vfcRound_(best.baseInstallment,.01),
+    evidenceCount:best.evidence.length,
+    failedEvidenceCount:best.evidence.filter(function(x){return x.failed;}).length,
+    multiples:best.evidence.map(function(x){return{date:x.date,amount:vfcRound_(x.amount,.01),multiple:x.multiple,failed:!!x.failed};})
+  };
+}
+
 function vfcStableInstallmentComponents_(items,totalDistinctMonths){
   items=(items||[]).slice().sort(function(a,b){return vfcNum_(a.amount)-vfcNum_(b.amount);});
   totalDistinctMonths=Math.max(0,Number(totalDistinctMonths||0));
@@ -320,11 +375,11 @@ function vfcStableInstallmentComponents_(items,totalDistinctMonths){
 }
 
 function vfcSummarizeGroup_(g,latestEnd){
-  const items=(g.items||[]).slice().sort(function(a,b){return vfcTime_(a.date)-vfcTime_(b.date);});if(!items.length)return null;const amounts=items.map(function(x){return x.amount;}),months={};items.forEach(function(x){const m=x.date.slice(0,7);months[m]=(months[m]||0)+x.amount;});const distinct=Object.keys(months).length,occ=items.length,gaps=[];for(let i=1;i<items.length;i++)gaps.push((vfcDate_(items[i].date)-vfcDate_(items[i-1].date))/86400000);const medianGap=gaps.length?vfcMedian_(gaps):0,median=vfcMedian_(amounts),cv=vfcCv_(amounts),weeklyRatio=gaps.length?gaps.filter(function(x){return x>=5&&x<=10;}).length/gaps.length:0,biweeklyRatio=gaps.length?gaps.filter(function(x){return x>10&&x<=18;}).length/gaps.length:0,recurring=distinct>=2||occ>=3,daysSince=vfcDays_(items[items.length-1].date,latestEnd),active=daysSince===null?true:daysSince<=VFC_BANK_ENGINE.ACTIVE_DAYS;let frequency='Observed statement-period cash flow',monthly=0,method='OBSERVED_ONLY';
-  if(recurring&&medianGap>=5&&medianGap<=10&&occ>=4&&weeklyRatio>=.65){frequency='Weekly observed cadence';monthly=median*52/12;method='WEEKLY_MEDIAN';}else if(recurring&&medianGap>10&&medianGap<=18&&occ>=3&&biweeklyRatio>=.55){frequency='Biweekly observed cadence';monthly=median*26/12;method='BIWEEKLY_MEDIAN';}else if(recurring&&distinct>=2&&occ===distinct){frequency='Monthly observed cadence';monthly=cv<=.03?median:vfcMeanObject_(months);method=cv<=.03?'MONTHLY_MEDIAN':'MONTHLY_VARIABLE_MEAN';}else if(recurring){const stable=(g.family==='FINANCING'||g.family==='MCA'||g.family==='PAD')?vfcStableInstallmentComponents_(items,distinct):null;if(stable){frequency='Stable recurring installment component';monthly=stable.monthlyEquivalent;method='STABLE_INSTALLMENT_COMPONENTS';}else{frequency='Multiple payments per month';monthly=vfcRecentMonthAverage_(months,3);method='RECENT_3_MONTH_AVERAGE';}}
-  if(!active&&g.family!=='FINANCING'&&g.family!=='MCA'&&g.family!=='PAD'){monthly=0;method='STALE_INFORMATIONAL';}
+  const items=(g.items||[]).slice().sort(function(a,b){return vfcTime_(a.date)-vfcTime_(b.date);});if(!items.length)return null;const amounts=items.map(function(x){return x.amount;}),months={};items.forEach(function(x){const m=x.date.slice(0,7);months[m]=(months[m]||0)+x.amount;});const distinct=Object.keys(months).length,occ=items.length,gaps=[];for(let i=1;i<items.length;i++)gaps.push((vfcDate_(items[i].date)-vfcDate_(items[i-1].date))/86400000);const medianGap=gaps.length?vfcMedian_(gaps):0,median=vfcMedian_(amounts),cv=vfcCv_(amounts),weeklyRatio=gaps.length?gaps.filter(function(x){return x>=5&&x<=10;}).length/gaps.length:0,biweeklyRatio=gaps.length?gaps.filter(function(x){return x>10&&x<=18;}).length/gaps.length:0,recurring=distinct>=2||occ>=3,daysSince=vfcDays_(items[items.length-1].date,latestEnd),active=daysSince===null?true:daysSince<=VFC_BANK_ENGINE.ACTIVE_DAYS,isFinance=(g.family==='FINANCING'||g.family==='MCA'||g.family==='PAD'),catchup=isFinance?vfcCatchUpInstallmentBase_(items,g.failedEvents||[]):null;let frequency='Observed statement-period cash flow',monthly=0,method='OBSERVED_ONLY',displayPayment=median;
+  if(recurring&&medianGap>=5&&medianGap<=10&&occ>=4&&weeklyRatio>=.65){frequency='Weekly observed cadence';monthly=median*52/12;method='WEEKLY_MEDIAN';}else if(recurring&&medianGap>10&&medianGap<=18&&occ>=3&&biweeklyRatio>=.55){frequency='Biweekly observed cadence';monthly=median*26/12;method='BIWEEKLY_MEDIAN';}else if(recurring&&catchup){frequency='Catch-up normalized monthly installment';monthly=catchup.monthlyEquivalent;displayPayment=catchup.baseInstallment;method='CATCHUP_NORMALIZED_INSTALLMENT';}else if(recurring&&distinct>=2&&occ===distinct){frequency='Monthly observed cadence';monthly=cv<=.03?median:vfcMeanObject_(months);method=cv<=.03?'MONTHLY_MEDIAN':'MONTHLY_VARIABLE_MEAN';}else if(recurring){const stable=isFinance?vfcStableInstallmentComponents_(items,distinct):null;if(stable){frequency='Stable recurring installment component';monthly=stable.monthlyEquivalent;method='STABLE_INSTALLMENT_COMPONENTS';}else{frequency='Multiple payments per month';monthly=vfcRecentMonthAverage_(months,3);method='RECENT_3_MONTH_AVERAGE';}}
+  if(!active&&!isFinance){monthly=0;method='STALE_INFORMATIONAL';}
   let why=String(g.debtJustification||'').trim();if(why&&recurring)why+=' Recurrence evidence: '+occ+' observed payment'+(occ===1?'':'s')+' across '+distinct+' month'+(distinct===1?'':'s')+'; '+frequency+'.';
-  return{bankId:g.bankId||'',family:g.family,key:g.entityKey,entityKey:g.entityKey,counterparty:g.label,description:g.label,category:g.family==='FINANCING'?'LOAN':g.family,paymentAmount:vfcRound_(median,.01),averagePayment:vfcRound_(vfcMean_(amounts),.01),frequency:frequency,monthlyEquivalent:vfcRound_(monthly,.01),monthlyEquivalentMethod:method,occurrences:occ,distinctMonths:distinct,firstSeen:items[0].date,lastSeen:items[items.length-1].date,daysSinceLastObserved:daysSince,active:active,recurring:recurring,confidence:!recurring?'Low':(distinct>=3?'High':'Moderate'),observedTotal:vfcRound_(vfcSum_(amounts),.01),observedMonthlyTotals:vfcSortedMoneyObject_(months),components:vfcAmountComponents_(items),debtJustification:why};
+  return{bankId:g.bankId||'',family:g.family,key:g.entityKey,entityKey:g.entityKey,counterparty:g.label,description:g.label,category:g.family==='FINANCING'?'LOAN':g.family,paymentAmount:vfcRound_(displayPayment,.01),averagePayment:vfcRound_(vfcMean_(amounts),.01),frequency:frequency,monthlyEquivalent:vfcRound_(monthly,.01),monthlyEquivalentMethod:method,catchUpNormalization:catchup||null,occurrences:occ,distinctMonths:distinct,firstSeen:items[0].date,lastSeen:items[items.length-1].date,daysSinceLastObserved:daysSince,active:active,recurring:recurring,confidence:!recurring?'Low':(distinct>=3?'High':'Moderate'),observedTotal:vfcRound_(vfcSum_(amounts),.01),observedMonthlyTotals:vfcSortedMoneyObject_(months),components:vfcAmountComponents_(items),debtJustification:why};
 }
 
 function runBankingCoreRecurrenceSelfTests(){
@@ -332,6 +387,22 @@ function runBankingCoreRecurrenceSelfTests(){
   function test(name,fn){try{results.push({name:name,pass:true,detail:String(fn()||'')});}catch(e){results.push({name:name,pass:false,detail:String(e&&e.message||e)});}}
   function close(a,b,tol,label){tol=tol==null?.05:tol;if(Math.abs(Number(a||0)-Number(b||0))>tol)throw new Error((label||'value')+' expected '+b+' got '+a);}
   function item(date,amount){return{date:date,amount:amount};}
+  test('Returned-payment history normalizes accumulated catch-up multiples',function(){
+    const items=[item('2025-09-29',2800),item('2025-12-29',8400)];
+    const failed=[
+      {failedDebit:{date:'2025-10-27',amount:2800}},
+      {failedDebit:{date:'2025-11-27',amount:5600}}
+    ];
+    const r=vfcCatchUpInstallmentBase_(items,failed);
+    if(!r)throw new Error('catch-up base not detected');
+    close(r.monthlyEquivalent,2800,.05,'catch-up normalized installment');
+    return r.monthlyEquivalent;
+  });
+  test('Variable monthly payments are not normalized without returned-payment evidence',function(){
+    const r=vfcCatchUpInstallmentBase_([item('2026-01-10',1000),item('2026-02-10',2000)],[]);
+    if(r!==null)throw new Error('catch-up normalization must require failed/returned evidence');
+    return'not normalized';
+  });
   test('Stable installment ignores isolated large catch-up payment',function(){
     const r=vfcStableInstallmentComponents_([item('2026-03-27',2578.34),item('2026-04-27',2656.97),item('2026-07-27',7952.39),item('2026-08-17',2285.91)],4);
     if(!r)throw new Error('stable component not detected');
