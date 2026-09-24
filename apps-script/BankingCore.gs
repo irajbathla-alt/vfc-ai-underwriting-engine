@@ -74,6 +74,9 @@ function vfcStatementHolderRaw_(r){
 }
 function vfcHolderKey_(r){const raw=vfcStatementHolderRaw_(r);return raw?vfcCounterpartyKey_(raw):'';}
 function vfcHolderMatchScore_(companyName,holder){
+  function compact(v){return String(v||'').toUpperCase().replace(/\b(INCORPORATED|INC|LIMITED|LTD|CORPORATION|CORP|COMPANY|CO)\b/g,'').replace(/[^A-Z0-9]/g,'');}
+  const ca=compact(companyName),cb=compact(holder);
+  if(ca&&cb&&(ca===cb||ca.indexOf(cb)>=0||cb.indexOf(ca)>=0))return 1;
   const a=vfcTokens_(companyName),b=vfcTokens_(holder);if(!a.length||!b.length)return 0;
   let common=0;a.forEach(function(x){if(b.indexOf(x)>=0)common++;});
   return common/Math.max(1,Math.min(a.length,b.length));
