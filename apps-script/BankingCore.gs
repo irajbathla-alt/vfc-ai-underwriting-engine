@@ -678,7 +678,7 @@ function runBankingCoreRecurrenceSelfTests(){
   test('Same account number overrides one inconsistent holder label during borrower isolation',function(){
     const prefix=VFC_BANK_ENGINE.CACHE_PREFIX;
     function row(holder,account,end){return{bank:'RBC',accountHolder:holder,endDate:end,createdAt:end,signalRaw:prefix+JSON.stringify({bankId:'RBC',bankName:'RBC',accountNumber:account,accountHolder:holder,statementStartDate:'2026-01-01',statementEndDate:end,transactionsVerified:true,transactions:[],totalDeposits:100,totalWithdrawals:90})};}
-    const rows=[row('AIM HIGH TRANSPORTATION LTD.','03296 100-282-3','2026-02-01'),row('AIM HIGH TRANSPORTATION','03296 100-282-3','2026-03-01'),row('OTHER RESTAURANT LTD.','99999 111-222-3','2026-03-01')];
+    const rows=[row('AIM HIGH TRANSPORTATION LTD.','03296 100-282-3','2026-02-01'),row('BAD OCR HOLDER','03296 100-282-3','2026-03-01'),row('OTHER RESTAURANT LTD.','99999 111-222-3','2026-03-01')];
     const kept=vfcIsolateBorrowerRows_(rows,'AIM HIGH TRANSPORTATION LTD.');if(kept.length!==2)throw new Error('same-account holder mismatch was not retained safely');return kept.length;
   });
   test('ISO literal dates are idempotent and do not drift backward',function(){
