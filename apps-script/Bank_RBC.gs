@@ -1,5 +1,5 @@
 /**
- * RBC BANK ENGINE v2.1.1 — LOCKED
+ * RBC BANK ENGINE v2.1.2 — LOCKED
  * ONE PERMANENT RBC FILE.
  * Contains RBC extraction, deterministic printed-fact locking, debit/debt classification,
  * financing credits, returns, internal transfers, duplicate preservation and RBC self-tests.
@@ -10,7 +10,7 @@ return{
 id:'RBC',
 label:'RBC',
 status:'LOCKED',
-rulesVersion:'RBC-2.1.1-LOCKED',
+rulesVersion:'RBC-2.1.2-LOCKED',
 intakeContract:'BANK_MATCHED_FROZEN_LEDGER_V2',
 aliases:['ROYAL BANK OF CANADA','RBC ROYAL BANK','RBC']
 };
@@ -72,7 +72,7 @@ locked.negative_balance_detected=vfcRbcNegativeBalanceFlag_(text,facts);
 return locked;
 }
 function vfcRbcCountNsf_(text){
-return(String(text||'').match(/ITEM\s+RETURNED\s+NSF|RETURNED\s+ITEM\s+NSF/gi)||[]).length;
+return(String(text||'').match(/ITEM\s+RETURNED\s+NSF|RETURNED\s+ITEM\s+NSF|CHEQUE\s+RETURNED\s+NSF|CHECK\s+RETURNED\s+NSF|NSF\s+(?:ITEM\s+)?RETURN/gi)||[]).length;
 }
 function vfcRbcNegativeBalanceFlag_(text,facts){
 if((facts&&facts.opening<0)||(facts&&facts.closing<0))return true;
@@ -208,10 +208,10 @@ function equal(actual,expected,label){if(actual!==expected)throw new Error((labe
 function truthy(value,label){if(!value)throw new Error((label||'value')+' expected truthy');}
 function test(name,fn){try{const detail=fn()||'';results.push({name:name,pass:true,detail:String(detail||'')});}catch(e){results.push({name:name,pass:false,detail:String(e&&e.message||e)});}}
 test('RBC printed NSF count and negative balance flag are deterministic',function(){
-equal(vfcRbcCountNsf_('Item returned NSF 2375.88\nItem returned NSF 419.40'),2,'NSF count');
+equal(vfcRbcCountNsf_('Item returned NSF 2375.88\nItem returned NSF 419.40\nCheque returned NSF 500.00'),3,'NSF count');
 truthy(vfcRbcNegativeBalanceFlag_('Balance -1,915.48',{opening:462.40,closing:35606.52}),'negative running balance');
 equal(vfcRbcNegativeBalanceFlag_('Balance 1,915.48',{opening:462.40,closing:35606.52}),false,'positive-only statement');
-return'nsf=2, negative=true';
+return'nsf=3, negative=true';
 });
 test('RBC BR TO BR credit is internal transfer but customer e-Transfer is not',function(){
 truthy(vfcRbcIsNonOperatingTransferCredit_(tx('2026-01-14','BR TO BR - 0212','CREDIT',15000)),'BR TO BR transfer');
