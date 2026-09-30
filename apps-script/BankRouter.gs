@@ -129,23 +129,44 @@ function vfcParseTaggedStatementTransactions_(text,summary){
   summary=summary||{};
   const start=vfcPrintedIsoDate_(summary.statement_start_date||summary.statementStartDate||''),
         end=vfcPrintedIsoDate_(summary.statement_end_date||summary.statementEndDate||''),
+        opening=vfcIntakeAmount_(summary.opening_balance!=null?summary.opening_balance:summary.openingBalance),
         out=[];
+  let previousBalance=opening,previousKnown=opening!==null&&isFinite(opening);
   String(text||'').split(/\r?\n/).forEach(function(line,index){
     if(!/\bDATE\b/i.test(line)||!/\bDESCRIPTION\b/i.test(line)||!/\bDEBIT\b/i.test(line)||!/\bCREDIT\b/i.test(line))return;
     const f=vfcTaggedFields_(line),date=vfcResolveTaggedStatementDate_(f.DATE,start,end),desc=String(f.DESCRIPTION||'').replace(/\s+/g,' ').trim(),
-          debit=vfcIntakeAmount_(f.DEBIT),credit=vfcIntakeAmount_(f.CREDIT);
+          debit=vfcIntakeAmount_(f.DEBIT),credit=vfcIntakeAmount_(f.CREDIT),balance=vfcIntakeAmount_(f.BALANCE);
     const hasDebit=debit!==null&&Math.abs(debit)>0,hasCredit=credit!==null&&Math.abs(credit)>0;
-    if(!date||!desc||hasDebit===hasCredit)return;
+    if(!date||!desc||hasDebit===hasCredit){
+      if(balance!==null&&isFinite(balance)){previousBalance=balance;previousKnown=true;}
+      return;
+    }
+    const amount=Math.abs(hasDebit?debit:credit);
+    let direction=hasDebit?'DEBIT':'CREDIT',creditProtection='';
+    if(direction==='CREDIT'){
+      creditProtection='PRINTED_CREDIT_COLUMN';
+    }else if(previousKnown&&balance!==null&&isFinite(balance)&&amount>0){
+      const delta=Math.round((balance-previousBalance)*100)/100,
+            tolerance=Math.max(.02,Math.min(.10,amount*.0001));
+      if(delta>0&&Math.abs(delta-amount)<=tolerance){
+        direction='CREDIT';
+        creditProtection='RUNNING_BALANCE_INCREASE';
+      }
+    }
     out.push({
       date:date,
       description:desc,
       counterparty:desc,
-      direction:hasDebit?'DEBIT':'CREDIT',
-      amount:Math.abs(hasDebit?debit:credit),
+      direction:direction,
+      amount:amount,
+      sourceBalance:balance,
       sourceDirectionVerified:true,
       sourceTagged:true,
+      sourceCreditProtected:direction==='CREDIT',
+      sourceDirectionEvidence:creditProtection||(direction==='DEBIT'?'PRINTED_DEBIT_COLUMN':''),
       sourceRowIndex:index+1
     });
+    if(balance!==null&&isFinite(balance)){previousBalance=balance;previousKnown=true;}
   });
   return out;
 }
@@ -164,19 +185,26 @@ function vfcIntakeMatchScore_(a,b){
   return score;
 }
 function vfcMatchTaggedTransaction_(tx,tagged,used){
-  const date=vfcPrintedIsoDate_(tx&&tx.date||''),amount=Math.abs(vfcIntakeAmount_(tx&&tx.amount)||0),candidates=[];
+  const date=vfcPrintedIsoDate_(tx&&tx.date||''),amount=Math.abs(vfcIntakeAmount_(tx&&tx.amount)||0),candidates=[],protectedCredits=[];
   (tagged||[]).forEach(function(t,index){
     if(used[index])return;
     if(date&&String(t.date)!==date)return;
     if(Math.abs(Number(t.amount||0)-amount)>.01)return;
-    const score=vfcIntakeMatchScore_(tx,t);
-    if(score>0)candidates.push({index:index,t:t,score:score});
+    const score=vfcIntakeMatchScore_(tx,t),candidate={index:index,t:t,score:score};
+    if(score>0)candidates.push(candidate);
+    if(t.sourceCreditProtected===true&&String(t.direction||'').toUpperCase()==='CREDIT')protectedCredits.push(candidate);
   });
-  if(!candidates.length)return null;
-  candidates.sort(function(a,b){return b.score-a.score||a.index-b.index;});
-  if(candidates[1]&&candidates[0].score===candidates[1].score&&candidates[0].t.direction!==candidates[1].t.direction)return null;
-  used[candidates[0].index]=1;
-  return candidates[0].t;
+  if(candidates.length){
+    candidates.sort(function(a,b){return b.score-a.score||a.index-b.index;});
+    if(candidates[1]&&candidates[0].score===candidates[1].score&&candidates[0].t.direction!==candidates[1].t.direction)return null;
+    used[candidates[0].index]=1;
+    return candidates[0].t;
+  }
+  if(protectedCredits.length===1){
+    used[protectedCredits[0].index]=1;
+    return protectedCredits[0].t;
+  }
+  return null;
 }
 function vfcIntakeCriticalTaggedRow_(t){
   const s=String(t&&t.description||'').toUpperCase();
@@ -199,8 +227,11 @@ function vfcUnifiedBankStatementIntake_(bankId,summary,text,fileName){
       row.sourceDirectionVerified=true;
       row.sourceTagged=true;
       row.sourceRowIndex=match.sourceRowIndex;
+      row.sourceCreditProtected=match.sourceCreditProtected===true;
+      row.sourceDirectionEvidence=String(match.sourceDirectionEvidence||'');
+      if(match.sourceBalance!==null&&match.sourceBalance!==undefined)row.sourceBalance=match.sourceBalance;
       verified++;
-      if(before!==match.direction)corrected.push({index:index,description:String(row.description||''),amount:Math.abs(vfcIntakeAmount_(row.amount)||0),from:before,to:match.direction});
+      if(before!==match.direction)corrected.push({index:index,description:String(row.description||''),amount:Math.abs(vfcIntakeAmount_(row.amount)||0),from:before,to:match.direction,evidence:row.sourceDirectionEvidence});
     }else{
       const evidence=vfcDirectionEvidenceFromSource_(row,text);
       if(evidence){
@@ -235,6 +266,7 @@ function vfcUnifiedBankStatementIntake_(bankId,summary,text,fileName){
     correctedCount:corrected.length,
     unresolvedCount:unresolved,
     criticalRowsAdded:addedCritical,
+    creditProtectedCount:out.filter(function(t){return t.sourceCreditProtected===true&&String(t.direction||'').toUpperCase()==='CREDIT';}).length,
     corrections:corrected.slice(0,25)
   };
   locked._intake_engine_version='VFC-BANK-INTAKE-1.0';
@@ -281,6 +313,30 @@ function runBankingIntakeSelfTests(){
       k=vfcMatchTaggedTransaction_({date:'2026-08-31',description:'e-Transfer sent Keto Caveman',counterparty:'Keto Caveman',amount:5000},tagged,used),
       f=vfcMatchTaggedTransaction_({date:'2026-09-02',description:'Misc Payment FANTUAN',counterparty:'FANTUAN',amount:47.47},tagged,used);
     equal(z.direction,'CREDIT','ZOMI');equal(k.direction,'DEBIT','Keto');equal(f.direction,'CREDIT','FANTUAN');return'ZOMI/FANTUAN credits, Keto debit';
+  });
+
+  test('Printed credit column is permanently protected as incoming',function(){
+    const rows=vfcParseTaggedStatementTransactions_(
+      'DATE 13 May | DESCRIPTION Merchant Settlement | DEBIT | CREDIT 712.99 | BALANCE 6,848.71',
+      {statement_start_date:'2026-05-05',statement_end_date:'2026-06-05',opening_balance:6135.72}
+    );
+    equal(rows[0].direction,'CREDIT','direction');equal(rows[0].sourceCreditProtected,true,'protected');equal(rows[0].sourceDirectionEvidence,'PRINTED_CREDIT_COLUMN','evidence');return rows[0].direction;
+  });
+
+  test('Wrong debit tag is corrected only when running balance proves money came in',function(){
+    const rows=vfcParseTaggedStatementTransactions_(
+      'DATE 13 May | DESCRIPTION Merchant Settlement | DEBIT 712.99 | CREDIT | BALANCE 6,848.71',
+      {statement_start_date:'2026-05-05',statement_end_date:'2026-06-05',opening_balance:6135.72}
+    );
+    equal(rows[0].direction,'CREDIT','corrected direction');equal(rows[0].sourceCreditProtected,true,'protected');equal(rows[0].sourceDirectionEvidence,'RUNNING_BALANCE_INCREASE','evidence');return rows[0].direction;
+  });
+
+  test('Genuine debit keeps normal 4.17 behavior',function(){
+    const rows=vfcParseTaggedStatementTransactions_(
+      'DATE 13 May | DESCRIPTION Utility Payment | DEBIT 712.99 | CREDIT | BALANCE 5,422.73',
+      {statement_start_date:'2026-05-05',statement_end_date:'2026-06-05',opening_balance:6135.72}
+    );
+    equal(rows[0].direction,'DEBIT','direction');equal(rows[0].sourceCreditProtected,false,'not protected');return rows[0].direction;
   });
 
   test('Returned customer deposit marker is preserved as critical tagged row',function(){
