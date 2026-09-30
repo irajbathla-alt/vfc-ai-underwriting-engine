@@ -276,7 +276,7 @@ function vfcUnifiedBankStatementIntake_(bankId,summary,text,fileName){
   locked.banking_transactions=out;
   locked._direction_validation={
     method:'UNIFIED_ACCOUNTING_LEDGER_V3',
-    intakeEngineVersion:'VFC-BANK-INTAKE-1.1',
+    intakeEngineVersion:'VFC-BANK-INTAKE-1.2',
     bankId:id,
     transactionCount:out.length,
     taggedRowCount:tagged.length,
@@ -289,7 +289,7 @@ function vfcUnifiedBankStatementIntake_(bankId,summary,text,fileName){
     ledgerTotalsVerified:taggedAudit.ledgerTotalsVerified,
     corrections:corrected.slice(0,25)
   };
-  locked._intake_engine_version='VFC-BANK-INTAKE-1.1';
+  locked._intake_engine_version='VFC-BANK-INTAKE-1.2';
   return locked;
 }
 
@@ -392,7 +392,7 @@ function runBankingIntakeSelfTests(){
 
 
   const failed=results.filter(function(x){return!x.pass;});
-  return{ok:failed.length===0,intakeVersion:'VFC-BANK-INTAKE-1.1',total:results.length,passed:results.length-failed.length,failed:failed.length,results:results};
+  return{ok:failed.length===0,intakeVersion:'VFC-BANK-INTAKE-1.2',total:results.length,passed:results.length-failed.length,failed:failed.length,results:results};
 }
 
 function vfcNormalizeBankDocumentType_(value,summary){
