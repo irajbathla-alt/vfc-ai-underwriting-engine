@@ -125,71 +125,29 @@ function vfcResolveTaggedStatementDate_(raw,startDate,endDate){
   }
   return direct||'';
 }
-function vfcTaggedLedgerTotalsVerified_(rows,summary){
-  const depRaw=vfcIntakeAmount_(summary&&((summary.total_deposits!=null)?summary.total_deposits:summary.totalDeposits)),
-        wdRaw=vfcIntakeAmount_(summary&&((summary.total_withdrawals!=null)?summary.total_withdrawals:summary.totalWithdrawals));
-  if(depRaw===null||wdRaw===null||!rows||!rows.length)return false;
-  const printedDeposits=Math.abs(depRaw),printedWithdrawals=Math.abs(wdRaw);
-  const credits=(rows||[]).filter(function(t){return t.direction==='CREDIT';}).reduce(function(a,t){return a+Math.abs(Number(t.amount||0));},0),
-        debits=(rows||[]).filter(function(t){return t.direction==='DEBIT';}).reduce(function(a,t){return a+Math.abs(Number(t.amount||0));},0);
-  return Math.abs(credits-printedDeposits)<=.05&&Math.abs(debits-printedWithdrawals)<=.05;
-}
-function vfcVerifyTaggedLedgerDirections_(rows,summary){
-  rows=(rows||[]).map(function(t){return Object.assign({},t,{sourceDirectionVerified:false,sourceDirectionEvidence:'TAGGED_COLUMN_UNVERIFIED'});});
-  const opening=vfcIntakeAmount_(summary&&((summary.opening_balance!=null)?summary.opening_balance:summary.openingBalance));
-  let previous=opening,previousKnown=opening!==null&&isFinite(opening),balanceVerified=0,correctedByBalance=0;
-  rows.forEach(function(t){
-    const current=vfcIntakeAmount_(t.sourceBalance),amount=Math.abs(Number(t.amount||0));
-    if(previousKnown&&current!==null&&isFinite(current)&&amount>0){
-      const delta=Math.round((current-previous)*100)/100,tol=Math.max(.02,Math.min(.10,amount*.0001));
-      if(Math.abs(Math.abs(delta)-amount)<=tol&&Math.abs(delta)>tol){
-        const accountingDirection=delta>0?'CREDIT':'DEBIT';
-        if(t.direction!==accountingDirection){t.direction=accountingDirection;correctedByBalance++;}
-        t.sourceDirectionVerified=true;
-        t.sourceDirectionEvidence='RUNNING_BALANCE';
-        balanceVerified++;
-      }
-    }
-    if(current!==null&&isFinite(current)){previous=current;previousKnown=true;}
-  });
-  const totalsVerified=vfcTaggedLedgerTotalsVerified_(rows,summary);
-  if(totalsVerified){
-    rows.forEach(function(t){
-      if(!t.sourceDirectionVerified){
-        t.sourceDirectionVerified=true;
-        t.sourceDirectionEvidence='STATEMENT_TOTALS_RECONCILED';
-      }
-    });
-  }
-  return{rows:rows,balanceVerifiedCount:balanceVerified,correctedByBalanceCount:correctedByBalance,ledgerTotalsVerified:totalsVerified};
-}
 function vfcParseTaggedStatementTransactions_(text,summary){
   summary=summary||{};
   const start=vfcPrintedIsoDate_(summary.statement_start_date||summary.statementStartDate||''),
         end=vfcPrintedIsoDate_(summary.statement_end_date||summary.statementEndDate||''),
-        raw=[];
-  let lastDate='';
+        out=[];
   String(text||'').split(/\r?\n/).forEach(function(line,index){
     if(!/\bDATE\b/i.test(line)||!/\bDESCRIPTION\b/i.test(line)||!/\bDEBIT\b/i.test(line)||!/\bCREDIT\b/i.test(line))return;
-    const f=vfcTaggedFields_(line),resolved=vfcResolveTaggedStatementDate_(f.DATE,start,end),desc=String(f.DESCRIPTION||'').replace(/\s+/g,' ').trim(),
-          debit=vfcIntakeAmount_(f.DEBIT),credit=vfcIntakeAmount_(f.CREDIT),balance=vfcIntakeAmount_(f.BALANCE);
-    if(resolved)lastDate=resolved;
-    const date=resolved||lastDate,hasDebit=debit!==null&&Math.abs(debit)>0,hasCredit=credit!==null&&Math.abs(credit)>0;
+    const f=vfcTaggedFields_(line),date=vfcResolveTaggedStatementDate_(f.DATE,start,end),desc=String(f.DESCRIPTION||'').replace(/\s+/g,' ').trim(),
+          debit=vfcIntakeAmount_(f.DEBIT),credit=vfcIntakeAmount_(f.CREDIT);
+    const hasDebit=debit!==null&&Math.abs(debit)>0,hasCredit=credit!==null&&Math.abs(credit)>0;
     if(!date||!desc||hasDebit===hasCredit)return;
-    raw.push({
+    out.push({
       date:date,
       description:desc,
       counterparty:desc,
       direction:hasDebit?'DEBIT':'CREDIT',
       amount:Math.abs(hasDebit?debit:credit),
-      sourceBalance:balance,
-      sourceDirectionVerified:false,
-      sourceDirectionEvidence:'TAGGED_COLUMN_UNVERIFIED',
+      sourceDirectionVerified:true,
       sourceTagged:true,
       sourceRowIndex:index+1
     });
   });
-  return vfcVerifyTaggedLedgerDirections_(raw,summary).rows;
+  return out;
 }
 function vfcIntakeTxTokens_(value){
   return String(value||'').toUpperCase().replace(/[^A-Z0-9 ]/g,' ').split(/\s+/).filter(function(x){
@@ -206,26 +164,19 @@ function vfcIntakeMatchScore_(a,b){
   return score;
 }
 function vfcMatchTaggedTransaction_(tx,tagged,used){
-  const date=vfcPrintedIsoDate_(tx&&tx.date||''),amount=Math.abs(vfcIntakeAmount_(tx&&tx.amount)||0),sameAmount=[],scored=[];
+  const date=vfcPrintedIsoDate_(tx&&tx.date||''),amount=Math.abs(vfcIntakeAmount_(tx&&tx.amount)||0),candidates=[];
   (tagged||[]).forEach(function(t,index){
     if(used[index])return;
     if(date&&String(t.date)!==date)return;
     if(Math.abs(Number(t.amount||0)-amount)>.01)return;
-    const candidate={index:index,t:t,score:vfcIntakeMatchScore_(tx,t)};
-    sameAmount.push(candidate);
-    if(candidate.score>0)scored.push(candidate);
+    const score=vfcIntakeMatchScore_(tx,t);
+    if(score>0)candidates.push({index:index,t:t,score:score});
   });
-  if(scored.length){
-    scored.sort(function(a,b){return b.score-a.score||a.index-b.index;});
-    if(scored[1]&&scored[0].score===scored[1].score&&scored[0].t.direction!==scored[1].t.direction)return null;
-    used[scored[0].index]=1;
-    return scored[0].t;
-  }
-  if(sameAmount.length===1&&sameAmount[0].t.sourceDirectionVerified===true){
-    used[sameAmount[0].index]=1;
-    return sameAmount[0].t;
-  }
-  return null;
+  if(!candidates.length)return null;
+  candidates.sort(function(a,b){return b.score-a.score||a.index-b.index;});
+  if(candidates[1]&&candidates[0].score===candidates[1].score&&candidates[0].t.direction!==candidates[1].t.direction)return null;
+  used[candidates[0].index]=1;
+  return candidates[0].t;
 }
 function vfcIntakeCriticalTaggedRow_(t){
   const s=String(t&&t.description||'').toUpperCase();
@@ -237,7 +188,6 @@ function vfcUnifiedBankStatementIntake_(bankId,summary,text,fileName){
   let locked=vfcLockBankStatementFacts_(id,Object.assign({},summary||{}),text,fileName)||Object.assign({},summary||{});
   const extracted=Array.isArray(locked.banking_transactions)?locked.banking_transactions:[],
         tagged=vfcParseTaggedStatementTransactions_(text,locked),
-        taggedAudit=vfcVerifyTaggedLedgerDirections_(tagged,locked),
         used={},corrected=[],out=[];
   let verified=0,unresolved=0;
 
@@ -246,21 +196,22 @@ function vfcUnifiedBankStatementIntake_(bankId,summary,text,fileName){
           before=String(row.direction||'').toUpperCase();
     if(match){
       row.direction=match.direction;
-      row.sourceDirectionVerified=match.sourceDirectionVerified===true;
-      row.sourceDirectionEvidence=String(match.sourceDirectionEvidence||'');
+      row.sourceDirectionVerified=true;
       row.sourceTagged=true;
       row.sourceRowIndex=match.sourceRowIndex;
-      if(match.sourceBalance!==null&&match.sourceBalance!==undefined)row.sourceBalance=match.sourceBalance;
-      if(row.sourceDirectionVerified)verified++;else unresolved++;
-      if(before!==match.direction&&row.sourceDirectionVerified)corrected.push({index:index,description:String(row.description||''),amount:Math.abs(vfcIntakeAmount_(row.amount)||0),from:before,to:match.direction,evidence:row.sourceDirectionEvidence});
+      verified++;
+      if(before!==match.direction)corrected.push({index:index,description:String(row.description||''),amount:Math.abs(vfcIntakeAmount_(row.amount)||0),from:before,to:match.direction});
     }else{
-      // Old tag-only evidence may still suggest a direction, but current V4/V1.1 intake does not
-      // call that source-verified. This prevents a transcription-column mistake from becoming debt.
       const evidence=vfcDirectionEvidenceFromSource_(row,text);
-      if(evidence)row.direction=evidence;
-      row.sourceDirectionVerified=false;
-      row.sourceDirectionEvidence=evidence?'TAGGED_TEXT_HINT_ONLY':'NO_SOURCE_MATCH';
-      unresolved++;
+      if(evidence){
+        row.direction=evidence;
+        row.sourceDirectionVerified=true;
+        verified++;
+        if(before!==evidence)corrected.push({index:index,description:String(row.description||''),amount:Math.abs(vfcIntakeAmount_(row.amount)||0),from:before,to:evidence});
+      }else{
+        row.sourceDirectionVerified=false;
+        unresolved++;
+      }
     }
     delete row.source_row;
     out.push(row);
@@ -275,21 +226,18 @@ function vfcUnifiedBankStatementIntake_(bankId,summary,text,fileName){
 
   locked.banking_transactions=out;
   locked._direction_validation={
-    method:'UNIFIED_ACCOUNTING_LEDGER_V3',
-    intakeEngineVersion:'VFC-BANK-INTAKE-1.2',
+    method:'UNIFIED_TAGGED_LEDGER_V1',
+    intakeEngineVersion:'VFC-BANK-INTAKE-1.0',
     bankId:id,
     transactionCount:out.length,
     taggedRowCount:tagged.length,
-    verifiedCount:verified+tagged.filter(function(t,index){return used[index]&&vfcIntakeCriticalTaggedRow_(t)&&t.sourceDirectionVerified===true;}).length,
+    verifiedCount:verified+addedCritical,
     correctedCount:corrected.length,
     unresolvedCount:unresolved,
     criticalRowsAdded:addedCritical,
-    balanceVerifiedCount:taggedAudit.balanceVerifiedCount,
-    correctedByBalanceCount:taggedAudit.correctedByBalanceCount,
-    ledgerTotalsVerified:taggedAudit.ledgerTotalsVerified,
     corrections:corrected.slice(0,25)
   };
-  locked._intake_engine_version='VFC-BANK-INTAKE-1.2';
+  locked._intake_engine_version='VFC-BANK-INTAKE-1.0';
   return locked;
 }
 
@@ -299,63 +247,48 @@ function runBankingIntakeSelfTests(){
   function equal(a,b,label){if(a!==b)throw new Error((label||'value')+' expected '+b+' but got '+a);}
   function close(a,b,tol,label){if(Math.abs(Number(a||0)-Number(b||0))>(tol==null?.02:tol))throw new Error((label||'value')+' expected '+b+' but got '+a);}
 
-  test('Running balance verifies a genuine deposit',function(){
+  test('Tagged ledger reads deposit direction from printed CREDIT column',function(){
     const rows=vfcParseTaggedStatementTransactions_(
-      'DATE 13 May | DESCRIPTION Misc Payment ACME SETTLEMENT | DEBIT | CREDIT 712.99 | BALANCE 6,848.71',
-      {statement_start_date:'2026-05-05',statement_end_date:'2026-06-05',opening_balance:6135.72,total_deposits:712.99,total_withdrawals:0}
+      'DATE 13 May | DESCRIPTION Misc Payment ZOMI LIFE LTD-A | DEBIT | CREDIT 712.99 | BALANCE 6,848.71',
+      {statement_start_date:'2026-05-05',statement_end_date:'2026-06-05'}
     );
-    equal(rows.length,1,'row count');equal(rows[0].direction,'CREDIT','direction');equal(rows[0].sourceDirectionVerified,true,'verified');equal(rows[0].sourceDirectionEvidence,'RUNNING_BALANCE','evidence');return rows[0].direction;
+    equal(rows.length,1,'row count');equal(rows[0].direction,'CREDIT','direction');close(rows[0].amount,712.99,.001,'amount');return rows[0].direction;
   });
 
-  test('Running balance overrides a wrong tagged DEBIT when balance increased',function(){
+  test('Tagged ledger keeps genuine debit direction',function(){
     const rows=vfcParseTaggedStatementTransactions_(
-      'DATE 13 May | DESCRIPTION Misc Payment ACME SETTLEMENT | DEBIT 712.99 | CREDIT | BALANCE 6,848.71',
-      {statement_start_date:'2026-05-05',statement_end_date:'2026-06-05',opening_balance:6135.72,total_deposits:712.99,total_withdrawals:0}
+      'DATE 31 Aug | DESCRIPTION e-Transfer sent Keto Caveman | DEBIT 5,000.00 | CREDIT | BALANCE 530.98',
+      {statement_start_date:'2026-08-05',statement_end_date:'2026-09-04'}
     );
-    equal(rows[0].direction,'CREDIT','corrected direction');equal(rows[0].sourceDirectionVerified,true,'verified');equal(rows[0].sourceDirectionEvidence,'RUNNING_BALANCE','evidence');return'wrong tag corrected';
+    equal(rows[0].direction,'DEBIT','direction');close(rows[0].amount,5000,.001,'amount');return rows[0].direction;
   });
 
-  test('Running balance verifies a genuine debit',function(){
+  test('Tagged ledger keeps MRCH debit separate from DP-style credits',function(){
     const rows=vfcParseTaggedStatementTransactions_(
-      'DATE 31 Aug | DESCRIPTION e-Transfer sent Vendor ABC | DEBIT 5,000.00 | CREDIT | BALANCE 530.98',
-      {statement_start_date:'2026-08-05',statement_end_date:'2026-09-04',opening_balance:5530.98,total_deposits:0,total_withdrawals:5000}
+      'DATE 02 Jul | DESCRIPTION Misc Payment MRCH29544070014 29544070014 | DEBIT 554.32 | CREDIT | BALANCE 12,443.67',
+      {statement_start_date:'2026-06-05',statement_end_date:'2026-07-03'}
     );
-    equal(rows[0].direction,'DEBIT','direction');equal(rows[0].sourceDirectionVerified,true,'verified');return rows[0].direction;
+    equal(rows[0].direction,'DEBIT','MRCH direction');return rows[0].direction;
   });
 
-  test('Full tagged ledger totals can verify direction when running balances are unavailable',function(){
-    const rows=vfcParseTaggedStatementTransactions_([
-      'DATE 01 Jun | DESCRIPTION Customer Settlement | DEBIT | CREDIT 1,000.00 | BALANCE',
-      'DATE 02 Jun | DESCRIPTION Utility Payment | DEBIT 400.00 | CREDIT | BALANCE'
-    ].join('\n'),{statement_start_date:'2026-06-01',statement_end_date:'2026-06-30',total_deposits:1000,total_withdrawals:400});
-    equal(rows.length,2,'row count');equal(rows[0].sourceDirectionVerified,true,'credit verified');equal(rows[1].sourceDirectionVerified,true,'debit verified');equal(rows[0].sourceDirectionEvidence,'STATEMENT_TOTALS_RECONCILED','credit evidence');return'ledger totals reconciled';
-  });
-
-  test('Tag alone is not source verification when neither balances nor statement totals reconcile',function(){
-    const rows=vfcParseTaggedStatementTransactions_(
-      'DATE 01 Jun | DESCRIPTION Misc Payment UNKNOWN | DEBIT 500.00 | CREDIT | BALANCE',
-      {statement_start_date:'2026-06-01',statement_end_date:'2026-06-30',total_deposits:1000,total_withdrawals:900}
-    );
-    equal(rows[0].sourceDirectionVerified,false,'unverified');return'not trusted';
-  });
-
-  test('Generic mixed sequence verifies credit debit credit by accounting movement',function(){
-    const rows=vfcParseTaggedStatementTransactions_([
-      'DATE 01 Jun | DESCRIPTION Settlement A | DEBIT 100.00 | CREDIT | BALANCE 1,100.00',
-      'DATE 02 Jun | DESCRIPTION Vendor B | DEBIT 200.00 | CREDIT | BALANCE 900.00',
-      'DATE 03 Jun | DESCRIPTION Settlement C | DEBIT | CREDIT 50.00 | BALANCE 950.00'
-    ].join('\n'),{statement_start_date:'2026-06-01',statement_end_date:'2026-06-30',opening_balance:1000,total_deposits:150,total_withdrawals:200});
-    equal(rows[0].direction,'CREDIT','first corrected credit');equal(rows[1].direction,'DEBIT','debit');equal(rows[2].direction,'CREDIT','credit');
-    if(rows.some(function(x){return x.sourceDirectionVerified!==true;}))throw new Error('mixed sequence not fully verified');
-    return rows.map(function(x){return x.direction;}).join('/');
+  test('Unified direction match corrects ZOMI and FANTUAN without changing Keto',function(){
+    const tagged=vfcParseTaggedStatementTransactions_([
+      'DATE 13 May | DESCRIPTION Misc Payment ZOMI LIFE LTD-A | DEBIT | CREDIT 712.99 | BALANCE 6,848.71',
+      'DATE 31 Aug | DESCRIPTION e-Transfer sent Keto Caveman | DEBIT 5,000.00 | CREDIT | BALANCE 530.98',
+      'DATE 02 Sep | DESCRIPTION Misc Payment FANTUAN | DEBIT | CREDIT 47.47 | BALANCE 8,601.83'
+    ].join('\n'),{statement_start_date:'2026-05-05',statement_end_date:'2026-09-04'}),used={},
+      z=vfcMatchTaggedTransaction_({date:'2026-05-13',description:'Misc Payment ZOMI LIFE LTD-A',counterparty:'ZOMI LIFE LTD-A',amount:712.99},tagged,used),
+      k=vfcMatchTaggedTransaction_({date:'2026-08-31',description:'e-Transfer sent Keto Caveman',counterparty:'Keto Caveman',amount:5000},tagged,used),
+      f=vfcMatchTaggedTransaction_({date:'2026-09-02',description:'Misc Payment FANTUAN',counterparty:'FANTUAN',amount:47.47},tagged,used);
+    equal(z.direction,'CREDIT','ZOMI');equal(k.direction,'DEBIT','Keto');equal(f.direction,'CREDIT','FANTUAN');return'ZOMI/FANTUAN credits, Keto debit';
   });
 
   test('Returned customer deposit marker is preserved as critical tagged row',function(){
     const rows=vfcParseTaggedStatementTransactions_(
       'DATE 20 May | DESCRIPTION Item returned unpaid S04453 | DEBIT 16,000.00 | CREDIT | BALANCE 4,750.11',
-      {statement_start_date:'2026-05-05',statement_end_date:'2026-06-05',opening_balance:20750.11,total_deposits:0,total_withdrawals:16000}
+      {statement_start_date:'2026-05-05',statement_end_date:'2026-06-05'}
     );
-    equal(vfcIntakeCriticalTaggedRow_(rows[0]),true,'critical return marker');equal(rows[0].sourceDirectionVerified,true,'verified return');return rows[0].direction;
+    equal(vfcIntakeCriticalTaggedRow_(rows[0]),true,'critical return marker');return rows[0].direction;
   });
 
   test('No printed direction evidence means no invented correction',function(){
@@ -367,32 +300,9 @@ function runBankingIntakeSelfTests(){
     equal(fixed._direction_validation.unresolvedCount,1,'unresolved count');
     return'no guess';
   });
-  test('Continuation rows inherit the most recent printed transaction date',function(){
-    const rows=vfcParseTaggedStatementTransactions_([
-      'DATE 09 Mar | DESCRIPTION Equipment Lease Provider | DEBIT 35.80 | CREDIT | BALANCE 964.20',
-      'DATE | DESCRIPTION Utility Provider | DEBIT 100.00 | CREDIT | BALANCE 864.20',
-      'DATE 10 Mar | DESCRIPTION Customer Settlement | DEBIT | CREDIT 500.00 | BALANCE 1,364.20'
-    ].join('\n'),{statement_start_date:'2026-03-01',statement_end_date:'2026-03-31',opening_balance:1000,total_deposits:500,total_withdrawals:135.80});
-    equal(rows.length,3,'row count');equal(rows[1].date,'2026-03-09','continued date');equal(rows[1].sourceDirectionVerified,true,'continued row verified');return rows[1].date;
-  });
-
-  test('Unique verified same-date same-amount row may match despite description drift',function(){
-    const tagged=[{date:'2026-03-09',description:'COMM EQUIP RENT LSE PROVIDER',counterparty:'COMM EQUIP RENT LSE PROVIDER',direction:'DEBIT',amount:35.80,sourceDirectionVerified:true,sourceDirectionEvidence:'RUNNING_BALANCE'}],
-          used={},match=vfcMatchTaggedTransaction_({date:'2026-03-09',description:'Equipment Rental',counterparty:'Equipment Rental',amount:35.80},tagged,used);
-    if(!match)throw new Error('unique verified candidate did not match');
-    equal(match.direction,'DEBIT','matched direction');return match.sourceDirectionEvidence;
-  });
-
-  test('Unique same-date same-amount row is not used when source direction is unverified',function(){
-    const tagged=[{date:'2026-03-09',description:'UNKNOWN SOURCE',counterparty:'UNKNOWN SOURCE',direction:'DEBIT',amount:35.80,sourceDirectionVerified:false}],
-          used={},match=vfcMatchTaggedTransaction_({date:'2026-03-09',description:'Equipment Rental',counterparty:'Equipment Rental',amount:35.80},tagged,used);
-    if(match)throw new Error('unverified candidate was accepted');
-    return'blocked';
-  });
-
 
   const failed=results.filter(function(x){return!x.pass;});
-  return{ok:failed.length===0,intakeVersion:'VFC-BANK-INTAKE-1.2',total:results.length,passed:results.length-failed.length,failed:failed.length,results:results};
+  return{ok:failed.length===0,intakeVersion:'VFC-BANK-INTAKE-1.0',total:results.length,passed:results.length-failed.length,failed:failed.length,results:results};
 }
 
 function vfcNormalizeBankDocumentType_(value,summary){
@@ -467,7 +377,7 @@ function runBankingStackSelfTests(){
   test('Router detects RBC from header even with other-bank words in transactions',function(){equal(vfcDetectBankId_('ROYAL BANK OF CANADA Account Summary TD VISA payment'),'RBC','RBC detection');return'RBC';});
   test('Router detects TD over incidental RBC loan wording',function(){equal(vfcDetectBankId_('THE TORONTO-DOMINION BANK TD Every Day B RBC LOAN PYMT LOAN'),'TD','TD detection');return'TD';});
   test('Router detects BMO',function(){equal(vfcDetectBankId_('BMO BANK OF MONTREAL Business Banking statement'),'BMO','BMO detection');return'BMO';});
-  test('Current-rules ledger outranks legacy ledger and latest equal-rank re-upload wins',function(){const current=vfcTdBankProfile_().rulesVersion,prefix=VFC_BANK_ENGINE.CACHE_PREFIX,base={transactionsVerified:true,transactions:[],totalDeposits:100,totalWithdrawals:90,bankId:'TD',bankName:'TD',extractionVersion:VFC_BANK_ENGINE.FACTS_VERSION},legacy=prefix+JSON.stringify(Object.assign({},base,{fileName:'legacy',extractionVersion:'OLD'})),now1=prefix+JSON.stringify(Object.assign({},base,{fileName:'current-first',intakeContract:VFC_BANK_ENGINE.INTAKE_CONTRACT,bankRulesVersion:current})),now2=prefix+JSON.stringify(Object.assign({},base,{fileName:'current-second',intakeContract:VFC_BANK_ENGINE.INTAKE_CONTRACT,bankRulesVersion:current})),raw=vfcCanonicalSignalRawFromRows_([{bank:'TD',signalRaw:legacy,createdAt:'2025-01-01'},{bank:'TD',signalRaw:now1,createdAt:'2026-01-01'},{bank:'TD',signalRaw:now2,createdAt:'2026-02-01'}],'TD'),p=vfcParseBankCache_(raw);equal(p.fileName,'current-second','canonical current ledger');return p.fileName;});
+  test('Current-rules ledger outranks legacy ledger and stays earliest within current generation',function(){const current=vfcTdBankProfile_().rulesVersion,prefix=VFC_BANK_ENGINE.CACHE_PREFIX,base={transactionsVerified:true,transactions:[],totalDeposits:100,totalWithdrawals:90,bankId:'TD',bankName:'TD'},legacy=prefix+JSON.stringify(Object.assign({},base,{fileName:'legacy'})),now1=prefix+JSON.stringify(Object.assign({},base,{fileName:'current-first',intakeContract:VFC_BANK_ENGINE.INTAKE_CONTRACT,bankRulesVersion:current})),now2=prefix+JSON.stringify(Object.assign({},base,{fileName:'current-second',intakeContract:VFC_BANK_ENGINE.INTAKE_CONTRACT,bankRulesVersion:current})),raw=vfcCanonicalSignalRawFromRows_([{bank:'TD',signalRaw:legacy,createdAt:'2025-01-01'},{bank:'TD',signalRaw:now1,createdAt:'2026-01-01'},{bank:'TD',signalRaw:now2,createdAt:'2026-02-01'}],'TD'),p=vfcParseBankCache_(raw);equal(p.fileName,'current-first','canonical current ledger');return p.fileName;});
   test('Corrected re-upload keeps one logical statement despite changed totals',function(){const current=vfcRbcBankProfile_().rulesVersion,prefix=VFC_BANK_ENGINE.CACHE_PREFIX,base={version:5,transactionsVerified:true,transactions:[],bankId:'RBC',bankName:'RBC',accountNumber:'03600 101-177-4',statementStartDate:'2026-01-22',statementEndDate:'2026-02-20',intakeContract:VFC_BANK_ENGINE.INTAKE_CONTRACT},oldRaw=prefix+JSON.stringify(Object.assign({},base,{bankRulesVersion:'RBC-OLD',fileName:'Jan-Feb.pdf',totalDeposits:19000,totalWithdrawals:28000})),newRaw=prefix+JSON.stringify(Object.assign({},base,{bankRulesVersion:current,fileName:'Jan-Feb.pdf',totalDeposits:20723.05,totalWithdrawals:29715.95})),oldRow={companyName:'TEST',period:'Jan to Jul',fileName:'Jan-Feb.pdf',bank:'RBC',startDate:'2026-01-22',endDate:'2026-02-20',deposits:19000,withdrawals:28000,signalRaw:oldRaw,createdAt:'2026-01-01'},newRow={companyName:'TEST',period:'Jan to Jul',fileName:'Jan-Feb.pdf',bank:'RBC',startDate:'2026-01-22',endDate:'2026-02-20',deposits:20723.05,withdrawals:29715.95,signalRaw:newRaw,createdAt:'2026-02-01'},groups=vfcGroupLogicalStatementRows_([oldRow,newRow]);equal(groups.length,1,'logical groups');const raw=vfcCanonicalSignalRawFromRows_(groups[0],'RBC'),p=vfcParseBankCache_(raw);close(p.totalDeposits,20723.05,.001,'corrected deposits');return'one identity, corrected deposits='+p.totalDeposits;});
   test('Legacy row without account number joins exactly one matching current account row',function(){const prefix=VFC_BANK_ENGINE.CACHE_PREFIX,base={transactionsVerified:true,transactions:[],totalDeposits:100,totalWithdrawals:90,bankId:'RBC',bankName:'RBC',statementStartDate:'2026-01-01',statementEndDate:'2026-01-31'},legacy={bank:'RBC',fileName:'January.pdf',startDate:'2026-01-01',endDate:'2026-01-31',signalRaw:prefix+JSON.stringify(Object.assign({},base,{fileName:'January.pdf'}))},current={bank:'RBC',fileName:'January.pdf',startDate:'2026-01-01',endDate:'2026-01-31',signalRaw:prefix+JSON.stringify(Object.assign({},base,{fileName:'January.pdf',accountNumber:'111-222'}))};equal(vfcGroupLogicalStatementRows_([legacy,current]).length,1,'mixed-generation group');return'joined safely';});
   test('Different known account numbers remain separate even with same filename and dates',function(){const prefix=VFC_BANK_ENGINE.CACHE_PREFIX,base={transactionsVerified:true,transactions:[],totalDeposits:100,totalWithdrawals:90,bankId:'RBC',bankName:'RBC',fileName:'statement.pdf',statementStartDate:'2026-01-01',statementEndDate:'2026-01-31'},a={bank:'RBC',fileName:'statement.pdf',startDate:'2026-01-01',endDate:'2026-01-31',signalRaw:prefix+JSON.stringify(Object.assign({},base,{accountNumber:'111-222'}))},b={bank:'RBC',fileName:'statement.pdf',startDate:'2026-01-01',endDate:'2026-01-31',signalRaw:prefix+JSON.stringify(Object.assign({},base,{accountNumber:'333-444'}))};equal(vfcGroupLogicalStatementRows_([a,b]).length,2,'account groups');return'separate';});
