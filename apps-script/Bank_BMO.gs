@@ -21,7 +21,7 @@ function vfcBmoBankProfile_(){
     label:'BMO',
     status:'CANDIDATE',
     rulesVersion:'BMO-1.4-CANDIDATE',
-    intakeContract:'BANK_MATCHED_FROZEN_LEDGER_V2',
+    intakeContract:'BANK_MATCHED_FROZEN_LEDGER_V4',
     aliases:['BANK OF MONTREAL','BMO BANK OF MONTREAL','BMO.COM','BMO']
   };
 }
