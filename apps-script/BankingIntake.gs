@@ -346,3 +346,67 @@ function vfcUnifiedBankStatementIntake_(bankId,summary,text,fileName){
   locked._intake_engine_version='VFC-BANK-INTAKE-1.0';
   return locked;
 }
+
+function runBankingIntakeSelfTests(){
+  const results=[];
+  function test(name,fn){try{results.push({name:name,pass:true,detail:String(fn()||'')});}catch(e){results.push({name:name,pass:false,detail:String(e&&e.message||e)});}}
+  function equal(a,b,label){if(a!==b)throw new Error((label||'value')+' expected '+b+' but got '+a);}
+  function close(a,b,tol,label){if(Math.abs(Number(a||0)-Number(b||0))>(tol==null?.02:tol))throw new Error((label||'value')+' expected '+b+' but got '+a);}
+
+  test('Tagged ledger reads deposit direction from printed CREDIT column',function(){
+    const rows=vfcParseTaggedStatementTransactions_(
+      'DATE 13 May | DESCRIPTION Misc Payment ZOMI LIFE LTD-A | DEBIT | CREDIT 712.99 | BALANCE 6,848.71',
+      {statement_start_date:'2026-05-05',statement_end_date:'2026-06-05'}
+    );
+    equal(rows.length,1,'row count');equal(rows[0].direction,'CREDIT','direction');close(rows[0].amount,712.99,.001,'amount');return rows[0].direction;
+  });
+
+  test('Tagged ledger keeps genuine debit direction',function(){
+    const rows=vfcParseTaggedStatementTransactions_(
+      'DATE 31 Aug | DESCRIPTION e-Transfer sent Keto Caveman | DEBIT 5,000.00 | CREDIT | BALANCE 530.98',
+      {statement_start_date:'2026-08-05',statement_end_date:'2026-09-04'}
+    );
+    equal(rows[0].direction,'DEBIT','direction');close(rows[0].amount,5000,.001,'amount');return rows[0].direction;
+  });
+
+  test('Tagged ledger keeps MRCH debit separate from DP-style credits',function(){
+    const rows=vfcParseTaggedStatementTransactions_(
+      'DATE 02 Jul | DESCRIPTION Misc Payment MRCH29544070014 29544070014 | DEBIT 554.32 | CREDIT | BALANCE 12,443.67',
+      {statement_start_date:'2026-06-05',statement_end_date:'2026-07-03'}
+    );
+    equal(rows[0].direction,'DEBIT','MRCH direction');return rows[0].direction;
+  });
+
+  test('Unified direction match corrects ZOMI and FANTUAN without changing Keto',function(){
+    const tagged=vfcParseTaggedStatementTransactions_([
+      'DATE 13 May | DESCRIPTION Misc Payment ZOMI LIFE LTD-A | DEBIT | CREDIT 712.99 | BALANCE 6,848.71',
+      'DATE 31 Aug | DESCRIPTION e-Transfer sent Keto Caveman | DEBIT 5,000.00 | CREDIT | BALANCE 530.98',
+      'DATE 02 Sep | DESCRIPTION Misc Payment FANTUAN | DEBIT | CREDIT 47.47 | BALANCE 8,601.83'
+    ].join('\n'),{statement_start_date:'2026-05-05',statement_end_date:'2026-09-04'}),used={},
+      z=vfcMatchTaggedTransaction_({date:'2026-05-13',description:'Misc Payment ZOMI LIFE LTD-A',counterparty:'ZOMI LIFE LTD-A',amount:712.99},tagged,used),
+      k=vfcMatchTaggedTransaction_({date:'2026-08-31',description:'e-Transfer sent Keto Caveman',counterparty:'Keto Caveman',amount:5000},tagged,used),
+      f=vfcMatchTaggedTransaction_({date:'2026-09-02',description:'Misc Payment FANTUAN',counterparty:'FANTUAN',amount:47.47},tagged,used);
+    equal(z.direction,'CREDIT','ZOMI');equal(k.direction,'DEBIT','Keto');equal(f.direction,'CREDIT','FANTUAN');return'ZOMI/FANTUAN credits, Keto debit';
+  });
+
+  test('Returned customer deposit marker is preserved as critical tagged row',function(){
+    const rows=vfcParseTaggedStatementTransactions_(
+      'DATE 20 May | DESCRIPTION Item returned unpaid S04453 | DEBIT 16,000.00 | CREDIT | BALANCE 4,750.11',
+      {statement_start_date:'2026-05-05',statement_end_date:'2026-06-05'}
+    );
+    equal(vfcIntakeCriticalTaggedRow_(rows[0]),true,'critical return marker');return rows[0].direction;
+  });
+
+  test('No printed direction evidence means no invented correction',function(){
+    const fixed=vfcValidateTransactionDirectionsFromSource_(
+      {banking_transactions:[{date:'2026-01-01',description:'Misc Payment ABC',counterparty:'ABC',direction:'DEBIT',amount:500}]},
+      '01 Jan Misc Payment ABC 500.00 1000.00','RBC'
+    );
+    equal(fixed.banking_transactions[0].direction,'DEBIT','unchanged direction');
+    equal(fixed._direction_validation.unresolvedCount,1,'unresolved count');
+    return'no guess';
+  });
+
+  const failed=results.filter(function(x){return!x.pass;});
+  return{ok:failed.length===0,intakeVersion:'VFC-BANK-INTAKE-1.0',total:results.length,passed:results.length-failed.length,failed:failed.length,results:results};
+}
