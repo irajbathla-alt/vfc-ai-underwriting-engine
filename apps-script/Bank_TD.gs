@@ -20,14 +20,14 @@ function vfcTdBankProfile_(){
     label:'TD',
     status:'CANDIDATE',
     rulesVersion:'TD-2.2-CANDIDATE',
-    intakeContract:'BANK_MATCHED_FROZEN_LEDGER_V2',
+    intakeContract:'BANK_MATCHED_FROZEN_LEDGER_V4',
     aliases:['TD CANADA TRUST','THE TORONTO-DOMINION BANK','TORONTO-DOMINION','TD BANK','TD CANADA TRUST BUSINESS']
   };
 }
 
 function vfcTdExtractionRules_(){return[
   'TD statement direction is controlled only by the printed CHEQUE/DEBIT versus DEPOSIT/CREDIT columns.',
-  'Before a TD statement is saved, its transaction ledger must satisfy Banking Core 4.2 BANK_MATCHED_FROZEN_LEDGER_V2 validation. Assessment never re-OCRs or guesses missing transaction facts.',
+  'Before a TD statement is saved, its transaction ledger must satisfy Banking Core 4.2 BANK_MATCHED_FROZEN_LEDGER_V4 validation. Assessment never re-OCRs or guesses missing transaction facts.',
   'The Credits and Debits boxes printed at the bottom of each TD activity page are PAGE SUBTOTALS, not whole-statement totals. Sum every verified activity-page Credits amount for total_deposits and every verified activity-page Debits amount for total_withdrawals.',
   'TD Page X of Y can include cheque-image support pages. Cheque-image pages do not contain Credits/Debits activity subtotals and must not be treated as missing activity or duplicated as transactions.',
   'The TD lock step independently reads the statement period, first BALANCE FORWARD, all activity-page subtotals, deterministic closing balance and monthly minimum OD flag. Never use later continuation-page BALANCE FORWARD values as the opening balance.',
