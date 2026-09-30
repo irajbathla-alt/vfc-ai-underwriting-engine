@@ -1,11 +1,11 @@
 /**
- * VFC Banking Core 4.17
+ * VFC Banking Core 4.18
  * Shared bank-agnostic banking math over frozen statement facts.
  * No PDF or OpenAI call occurs during underwriting.
  */
 const VFC_BANK_ENGINE={
-  VERSION:'VFC-BANKING-CORE-4.17',
-  FACTS_VERSION:'VFC-BANK-FACTS-1.4',
+  VERSION:'VFC-BANKING-CORE-4.18',
+  FACTS_VERSION:'VFC-BANK-FACTS-1.5',
   INTAKE_CONTRACT:'BANK_MATCHED_FROZEN_LEDGER_V4',
   CACHE_PREFIX:'VFC_BANK_FACTS_V1:',
   LEGACY_PREFIXES:['VFC_BANK_PURE_V46:','VFC_BANK_PURE_V45:','VFC_BANK_PURE_V44:','VFC_BANK_PURE_V43:','VFC_BANK_PURE_V42:','VFC_BANK_PURE_V41:','VFC_BANK_PURE_V40:','VFC_BANK_PURE_V35:','VFC_BANK_PURE_V34:','VFC_BANK_PURE_V1:'],
@@ -144,7 +144,7 @@ function vfcCurrentBankRulesVersion_(bankId){if(typeof vfcGetBankProfile_!=='fun
 function vfcCanonicalSignalRawFromRows_(rows,expectedBankId){
   const expected=String(expectedBankId||'').toUpperCase(),currentRules=vfcCurrentBankRulesVersion_(expected),currentContract=VFC_BANK_ENGINE.INTAKE_CONTRACT,currentFacts=VFC_BANK_ENGINE.FACTS_VERSION,candidates=[];
   (rows||[]).forEach(function(row){const raw=String(row.signalRaw||''),p=vfcParseBankCache_(raw);if(!vfcPayloadUsable_(p))return;const actual=vfcPayloadBankId_(p,row.bank||'');if(expected&&actual!==expected)return;let rank=0;if(String(p.intakeContract||'')===currentContract)rank+=1;if(currentRules&&String(p.bankRulesVersion||'')===currentRules)rank+=2;if(currentFacts&&String(p.extractionVersion||'')===currentFacts)rank+=4;candidates.push({raw:raw,payload:p,row:row,rank:rank});});
-  candidates.sort(function(a,b){return b.rank-a.rank||vfcTime_(a.row&&a.row.createdAt)-vfcTime_(b.row&&b.row.createdAt);});
+  candidates.sort(function(a,b){return b.rank-a.rank||vfcTime_(b.row&&b.row.createdAt)-vfcTime_(a.row&&a.row.createdAt)||(b.row&&b.row.rowNumber||0)-(a.row&&a.row.rowNumber||0);});
   return candidates.length?candidates[0].raw:'';
 }
 function vfcCanonicalPayloadForRow_(row){
@@ -162,6 +162,7 @@ function vfcNormalizeTransactions_(items,bankId){
     const t={date:date,description:desc.substring(0,220),counterparty:String(x.counterparty||desc).replace(/\s+/g,' ').trim().substring(0,140),direction:direction,amount:vfcRound_(amount,.01)};
     if(x.sourceDirectionVerified===true)t.sourceDirectionVerified=true;
     else if(x.sourceDirectionVerified===false)t.sourceDirectionVerified=false;
+    if(x.sourceDirectionEvidence)t.sourceDirectionEvidence=String(x.sourceDirectionEvidence).substring(0,60);
     if(x.sourceTagged===true)t.sourceTagged=true;
     if(x.sourceRowIndex!==undefined&&x.sourceRowIndex!==null)t.sourceRowIndex=Number(x.sourceRowIndex)||0;
     raw.push(t);
@@ -215,7 +216,7 @@ function vfcIsNonOperatingReversalCredit_(bankId,t){return vfcIsGenericReturnedP
 function vfcRequiresVerifiedDirection_(t){
   if(!t)return false;
   return String(t.intakeContract||'')===String(VFC_BANK_ENGINE.INTAKE_CONTRACT)||
-         String(t.intakeEngineVersion||'')==='VFC-BANK-INTAKE-1.0';
+         /^VFC-BANK-INTAKE-1\./.test(String(t.intakeEngineVersion||''));
 }
 function vfcCanEnterObligationPipeline_(t){
   if(!t||String(t.direction||'').toUpperCase()!=='DEBIT')return false;
@@ -766,6 +767,14 @@ function runBankingCoreRecurrenceSelfTests(){
     const r=vfcResolveReturnedObligationDebits_(debits,credits);
     if(r.debits.length!==1)throw new Error('valid payment was suppressed by fee');
     return'preserved';
+  });
+  test('Latest equally ranked frozen re-upload is canonical',function(){
+    const prefix=VFC_BANK_ENGINE.CACHE_PREFIX,base={bankId:'RBC',bankName:'RBC',accountNumber:'12345',accountHolder:'TEST BUSINESS',statementStartDate:'2026-01-01',statementEndDate:'2026-01-31',transactionsVerified:true,totalDeposits:1000,totalWithdrawals:900,intakeContract:VFC_BANK_ENGINE.INTAKE_CONTRACT,extractionVersion:VFC_BANK_ENGINE.FACTS_VERSION,bankRulesVersion:vfcCurrentBankRulesVersion_('RBC')};
+    const oldRow={bank:'RBC',createdAt:'2026-02-01T10:00:00Z',rowNumber:2,signalRaw:prefix+JSON.stringify(Object.assign({},base,{transactions:[{date:'2026-01-10',description:'Old wrong row',counterparty:'OLD',direction:'DEBIT',amount:100,sourceDirectionVerified:true}]}))};
+    const newRow={bank:'RBC',createdAt:'2026-02-02T10:00:00Z',rowNumber:3,signalRaw:prefix+JSON.stringify(Object.assign({},base,{transactions:[{date:'2026-01-10',description:'Corrected row',counterparty:'NEW',direction:'CREDIT',amount:100,sourceDirectionVerified:true}]}))};
+    const raw=vfcCanonicalSignalRawFromRows_([oldRow,newRow],'RBC'),p=vfcParseBankCache_(raw);
+    if(!p||!p.transactions||p.transactions[0].description!=='Corrected row')throw new Error('older equally ranked re-upload was selected');
+    return p.transactions[0].description;
   });
   test('Same known account re-upload with two-day date drift collapses to one logical statement',function(){
     const prefix=VFC_BANK_ENGINE.CACHE_PREFIX,base={bankId:'RBC',bankName:'RBC',accountNumber:'03296 100-282-3',accountHolder:'AIM HIGH TRANSPORTATION LTD.',transactionsVerified:true,transactions:[],totalDeposits:100,totalWithdrawals:90};
