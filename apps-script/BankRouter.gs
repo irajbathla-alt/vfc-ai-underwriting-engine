@@ -23,6 +23,53 @@ function vfcBankPreservePrintedDuplicate_(bankId,t,occurrence,items){switch(Stri
 function vfcBankExtractionRules_(bankId){switch(String(bankId||'').toUpperCase()){case'RBC':return vfcRbcExtractionRules_();case'TD':return vfcTdExtractionRules_();case'SCOTIA':return vfcScotiaExtractionRules_();case'BMO':return vfcBmoExtractionRules_();case'CIBC':return vfcCibcExtractionRules_();case'COAST_CAPITAL':return vfcCoastCapitalExtractionRules_();default:return'Extract conservatively. Do not infer missing transactions.';}}
 function vfcLockBankStatementFacts_(bankId,summary,text,fileName){switch(String(bankId||'').toUpperCase()){case'RBC':return vfcRbcLockFacts_(summary,text,fileName);case'TD':return vfcTdLockFacts_(summary,text,fileName);case'SCOTIA':return vfcScotiaLockFacts_(summary,text,fileName);case'BMO':return vfcBmoLockFacts_(summary,text,fileName);case'CIBC':return vfcCibcLockFacts_(summary,text,fileName);case'COAST_CAPITAL':return vfcCoastCapitalLockFacts_(summary,text,fileName);default:return vfcLockPrintedStatementFacts_(summary,text);}}
 
+function vfcTaggedSourceAmount_(row,label){
+  const text=String(row||'').replace(/\u00a0/g,' '),re=new RegExp('\\b'+String(label||'')+'\\s*(?:[:=]\\s*)?(?:\\$\\s*)?(\\(?-?[0-9][0-9,]*\\.\\d{2}\\)?)','i'),m=text.match(re);
+  if(!m)return null;return vfcNumNull_(m[1]);
+}
+function vfcTaggedSourceDirection_(row,amount){
+  const target=vfcRound_(vfcNum_(amount),.01);if(!(target>0))return'';
+  const debit=vfcTaggedSourceAmount_(row,'DEBIT'),credit=vfcTaggedSourceAmount_(row,'CREDIT'),
+        d=debit!==null&&Math.abs(debit-target)<=.01,c=credit!==null&&Math.abs(credit-target)<=.01;
+  if(d===c)return'';return d?'DEBIT':'CREDIT';
+}
+function vfcSourceDirectionMatchScore_(t,row){
+  const hay=String(row||'').toUpperCase(),tokens=vfcTokens_(String(t&&t.counterparty||'')+' '+String(t&&t.description||''));let score=0,seen={};
+  tokens.forEach(function(token){if(seen[token])return;seen[token]=1;if(hay.indexOf(token)>=0)score++;});
+  return score;
+}
+function vfcDirectionEvidenceFromSource_(t,text){
+  if(!t||!(vfcNum_(t.amount)>0))return'';
+  const candidates=[];
+  function consider(row,bonus){
+    const dir=vfcTaggedSourceDirection_(row,t.amount);if(!dir)return;
+    const score=vfcSourceDirectionMatchScore_(t,row)+(bonus||0);
+    if(score>0)candidates.push({direction:dir,score:score});
+  }
+  if(t.source_row)consider(t.source_row,100);
+  String(text||'').split(/\r?\n/).forEach(function(line){consider(line,0);});
+  if(!candidates.length)return'';
+  candidates.sort(function(a,b){return b.score-a.score||a.direction.localeCompare(b.direction);});
+  const best=candidates[0],conflict=candidates.some(function(x){return x.direction!==best.direction&&x.score===best.score;});
+  return conflict?'':best.direction;
+}
+function vfcValidateTransactionDirectionsFromSource_(summary,text,bankId){
+  summary=Object.assign({},summary||{});
+  const txs=Array.isArray(summary.banking_transactions)?summary.banking_transactions:[],corrected=[],verified=[],unresolved=[];
+  summary.banking_transactions=txs.map(function(t,index){
+    const row=Object.assign({},t),evidence=vfcDirectionEvidenceFromSource_(row,text),before=String(row.direction||'').toUpperCase();
+    if(evidence){
+      verified.push(index);
+      row.source_column=evidence;
+      if(before!==evidence){row.direction=evidence;corrected.push({index:index,description:String(row.description||''),amount:vfcRound_(vfcNum_(row.amount),.01),from:before,to:evidence});}
+    }else unresolved.push(index);
+    delete row.source_row;
+    return row;
+  });
+  summary._direction_validation={method:'SOURCE_COLUMN_TAGS_V1',bankId:String(bankId||'UNKNOWN').toUpperCase(),transactionCount:txs.length,verifiedCount:verified.length,correctedCount:corrected.length,unresolvedCount:unresolved.length,corrections:corrected.slice(0,25)};
+  return summary;
+}
+
 function vfcNormalizeBankDocumentType_(value,summary){
   const s=String(value||'').trim().toUpperCase().replace(/[^A-Z0-9]+/g,'_');
   if(/^(NOT|NON)_?BANK/.test(s)||/NOT_BANK_STATEMENT|NON_BANK_STATEMENT/.test(s))return'NOT_BANK_STATEMENT';
@@ -44,7 +91,7 @@ function uploadStatementBatchByBank(bankId,companyName,files){
     const summaries=callOpenAIJsonBatch_(staged.map(function(item){return vfcBuildBankStatementPrompt_(profile,item.text,companyName,item.fileName);}));if(summaries.length!==staged.length)throw new Error(profile.label+' statement reader returned an incomplete batch.');
     const starts=[],ends=[];
     const processed=staged.map(function(item,index){
-      let summary=summaries[index]||{};summary=vfcLockBankStatementFacts_(profile.id,summary,item.text,item.fileName)||summary;summary.bank_name=profile.label;summary.document_type=vfcNormalizeBankDocumentType_(summary.document_type,summary);
+      let summary=summaries[index]||{};summary=vfcLockBankStatementFacts_(profile.id,summary,item.text,item.fileName)||summary;summary=vfcValidateTransactionDirectionsFromSource_(summary,item.text,profile.id);summary.bank_name=profile.label;summary.document_type=vfcNormalizeBankDocumentType_(summary.document_type,summary);
       if(summary.document_type==='NOT_BANK_STATEMENT')throw new Error(item.fileName+' was not recognized as a bank statement.');
       if(!Array.isArray(summary.banking_transactions))throw new Error('Banking ledger extraction was incomplete for '+item.fileName+'.');
       summary.possible_mca_or_loan_payments=vfcBankCreateIntakePayload_(summary,item.fileName);vfcVerifyFrozenIntake_(summary.possible_mca_or_loan_payments,profile.id,item.fileName);
@@ -67,10 +114,10 @@ function vfcBuildBankStatementPrompt_(profile,text,companyName,fileName){return[
   'Return fields: document_type, bank_name, account_holder, account_number, statement_start_date, statement_end_date, opening_balance, closing_balance, total_deposits, total_withdrawals, nsf_count, negative_balance_detected, banking_transactions, summary, risks, missing_info.',
   'For a valid bank statement set document_type exactly to BANK_STATEMENT.',
   'account_number must be the exact printed account number when clearly visible; otherwise return an empty string. Never invent or infer an account number.',
-  'banking_transactions is an array of {date:"YYYY-MM-DD",description:"exact visible description",counterparty:"short counterparty",direction:"DEBIT" or "CREDIT",amount:number}.',
+  'banking_transactions is an array of {date:"YYYY-MM-DD",description:"exact visible description",counterparty:"short counterparty",direction:"DEBIT" or "CREDIT",amount:number,source_column:"DEBIT" or "CREDIT",source_row:"exact tagged transaction row from the transcribed statement"}.',
   'COMMON RULES:',
   '1. Header totals come from the printed statement summary, never by summing the transaction list.',
-  '2. Printed debit/withdrawal versus credit/deposit columns control direction; wording never overrides the printed column.',
+  '2. Printed debit/withdrawal versus credit/deposit columns control direction; wording never overrides the printed column. Copy source_column from the explicit DEBIT/CREDIT tag in the transcribed row, set direction equal to source_column, and copy that full tagged row into source_row.',
   '3. Preserve exact amounts, account identifiers and visible descriptions. Never borrow an amount or account number from an adjacent row.',
   '4. Do not duplicate cheque-image pages when the transaction already appears in account activity.',
   '5. Preserve every visible transaction required by the bank-specific rules, especially recurring-looking debits, financing/loan/MCA/PAD/advance/funding activity, loan interest, tax/government, insurance/premium finance, credit-card payments, equipment finance/lease payments and every required financing-credit candidate.',
@@ -101,6 +148,9 @@ function runBankingStackSelfTests(){
   test('Different known account numbers remain separate even with same filename and dates',function(){const prefix=VFC_BANK_ENGINE.CACHE_PREFIX,base={transactionsVerified:true,transactions:[],totalDeposits:100,totalWithdrawals:90,bankId:'RBC',bankName:'RBC',fileName:'statement.pdf',statementStartDate:'2026-01-01',statementEndDate:'2026-01-31'},a={bank:'RBC',fileName:'statement.pdf',startDate:'2026-01-01',endDate:'2026-01-31',signalRaw:prefix+JSON.stringify(Object.assign({},base,{accountNumber:'111-222'}))},b={bank:'RBC',fileName:'statement.pdf',startDate:'2026-01-01',endDate:'2026-01-31',signalRaw:prefix+JSON.stringify(Object.assign({},base,{accountNumber:'333-444'}))};equal(vfcGroupLogicalStatementRows_([a,b]).length,2,'account groups');return'separate';});
   test('Possible financing credit cannot be created from tax/card/other debit matching',function(){const credit={bankId:'RBC',date:'2026-01-05',description:'BRXM Payroll credit',counterparty:'BRXM Payroll',direction:'CREDIT',amount:10000},other={bankId:'RBC',date:'2026-01-06',description:'Business PAD BRXM Payroll',counterparty:'BRXM Payroll',direction:'DEBIT',amount:1000,family:'OTHER',entityKey:'RBC_OTHER_PAD_BRXM_PAYROLL'},f=vfcFinancingCredits_([credit],[other]);equal(f.possible.length,0,'possible financing');equal(f.confirmed.length,0,'confirmed financing');return'no false financing match';});
   test('BMO error correction is non-operating but not a financing-return marker',function(){const t={bankId:'BMO',date:'2026-02-03',description:'Error Correction, 0709-1985-790 0749',direction:'CREDIT',amount:5020.38};equal(vfcBankIsNonOperatingReversalCredit_('BMO',t),true,'non-operating reversal');equal(vfcBankIsReturnedFinancingCredit_('BMO',t),false,'financing return');return'separated';});
+  test('Shared source-column validator corrects a deposit frozen as debit',function(){const summary={banking_transactions:[{date:'2026-03-06',description:'Misc Payment DP29544070014 29544070014',counterparty:'DP29544070014',direction:'DEBIT',amount:1087.85,source_row:'06 Mar | DESCRIPTION Misc Payment DP29544070014 29544070014 | DEBIT | CREDIT 1,087.85 | BALANCE 2,366.41'}]},fixed=vfcValidateTransactionDirectionsFromSource_(summary,summary.banking_transactions[0].source_row,'RBC');equal(fixed.banking_transactions[0].direction,'CREDIT','corrected direction');equal(fixed._direction_validation.correctedCount,1,'correction count');return'credit corrected';});
+  test('Shared source-column validator preserves a true debit',function(){const summary={banking_transactions:[{date:'2026-03-13',description:'e-Transfer sent Keto Caveman',counterparty:'Keto Caveman',direction:'DEBIT',amount:2000,source_row:'13 Mar | DESCRIPTION e-Transfer sent Keto Caveman | DEBIT 2,000.00 | CREDIT | BALANCE 7,204.95'}]},fixed=vfcValidateTransactionDirectionsFromSource_(summary,summary.banking_transactions[0].source_row,'RBC');equal(fixed.banking_transactions[0].direction,'DEBIT','debit direction');equal(fixed._direction_validation.correctedCount,0,'no correction');return'debit preserved';});
+  test('Shared direction validator never guesses without explicit tagged source evidence',function(){const summary={banking_transactions:[{date:'2026-03-06',description:'Misc Payment ABC',counterparty:'ABC',direction:'DEBIT',amount:500}]},fixed=vfcValidateTransactionDirectionsFromSource_(summary,'06 Mar Misc Payment ABC 500.00 1000.00','RBC');equal(fixed.banking_transactions[0].direction,'DEBIT','unchanged direction');equal(fixed._direction_validation.unresolvedCount,1,'unresolved count');return'no guess';});
   const suites={RBC:runRbcBankingSelfTests(),TD:runTdBankingSelfTests(),BMO:runBmoBankingSelfTests()},routerFailed=router.filter(function(x){return!x.pass;}).length,suiteFailed=Object.keys(suites).reduce(function(n,k){return n+(suites[k].failed||0);},0),suiteTotal=Object.keys(suites).reduce(function(n,k){return n+(suites[k].total||0);},0),suitePassed=Object.keys(suites).reduce(function(n,k){return n+(suites[k].passed||0);},0);
   return{ok:routerFailed===0&&suiteFailed===0,coreVersion:VFC_BANK_ENGINE.VERSION,intakeContract:VFC_BANK_ENGINE.INTAKE_CONTRACT,total:router.length+suiteTotal,passed:(router.length-routerFailed)+suitePassed,failed:routerFailed+suiteFailed,routerTests:router,suites:suites};
 }
