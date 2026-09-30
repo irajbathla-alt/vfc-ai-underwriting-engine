@@ -168,11 +168,13 @@ function vfcParseTaggedStatementTransactions_(text,summary){
   const start=vfcPrintedIsoDate_(summary.statement_start_date||summary.statementStartDate||''),
         end=vfcPrintedIsoDate_(summary.statement_end_date||summary.statementEndDate||''),
         raw=[];
+  let lastDate='';
   String(text||'').split(/\r?\n/).forEach(function(line,index){
     if(!/\bDATE\b/i.test(line)||!/\bDESCRIPTION\b/i.test(line)||!/\bDEBIT\b/i.test(line)||!/\bCREDIT\b/i.test(line))return;
-    const f=vfcTaggedFields_(line),date=vfcResolveTaggedStatementDate_(f.DATE,start,end),desc=String(f.DESCRIPTION||'').replace(/\s+/g,' ').trim(),
+    const f=vfcTaggedFields_(line),resolved=vfcResolveTaggedStatementDate_(f.DATE,start,end),desc=String(f.DESCRIPTION||'').replace(/\s+/g,' ').trim(),
           debit=vfcIntakeAmount_(f.DEBIT),credit=vfcIntakeAmount_(f.CREDIT),balance=vfcIntakeAmount_(f.BALANCE);
-    const hasDebit=debit!==null&&Math.abs(debit)>0,hasCredit=credit!==null&&Math.abs(credit)>0;
+    if(resolved)lastDate=resolved;
+    const date=resolved||lastDate,hasDebit=debit!==null&&Math.abs(debit)>0,hasCredit=credit!==null&&Math.abs(credit)>0;
     if(!date||!desc||hasDebit===hasCredit)return;
     raw.push({
       date:date,
@@ -204,19 +206,26 @@ function vfcIntakeMatchScore_(a,b){
   return score;
 }
 function vfcMatchTaggedTransaction_(tx,tagged,used){
-  const date=vfcPrintedIsoDate_(tx&&tx.date||''),amount=Math.abs(vfcIntakeAmount_(tx&&tx.amount)||0),candidates=[];
+  const date=vfcPrintedIsoDate_(tx&&tx.date||''),amount=Math.abs(vfcIntakeAmount_(tx&&tx.amount)||0),sameAmount=[],scored=[];
   (tagged||[]).forEach(function(t,index){
     if(used[index])return;
     if(date&&String(t.date)!==date)return;
     if(Math.abs(Number(t.amount||0)-amount)>.01)return;
-    const score=vfcIntakeMatchScore_(tx,t);
-    if(score>0)candidates.push({index:index,t:t,score:score});
+    const candidate={index:index,t:t,score:vfcIntakeMatchScore_(tx,t)};
+    sameAmount.push(candidate);
+    if(candidate.score>0)scored.push(candidate);
   });
-  if(!candidates.length)return null;
-  candidates.sort(function(a,b){return b.score-a.score||a.index-b.index;});
-  if(candidates[1]&&candidates[0].score===candidates[1].score&&candidates[0].t.direction!==candidates[1].t.direction)return null;
-  used[candidates[0].index]=1;
-  return candidates[0].t;
+  if(scored.length){
+    scored.sort(function(a,b){return b.score-a.score||a.index-b.index;});
+    if(scored[1]&&scored[0].score===scored[1].score&&scored[0].t.direction!==scored[1].t.direction)return null;
+    used[scored[0].index]=1;
+    return scored[0].t;
+  }
+  if(sameAmount.length===1&&sameAmount[0].t.sourceDirectionVerified===true){
+    used[sameAmount[0].index]=1;
+    return sameAmount[0].t;
+  }
+  return null;
 }
 function vfcIntakeCriticalTaggedRow_(t){
   const s=String(t&&t.description||'').toUpperCase();
@@ -266,7 +275,7 @@ function vfcUnifiedBankStatementIntake_(bankId,summary,text,fileName){
 
   locked.banking_transactions=out;
   locked._direction_validation={
-    method:'UNIFIED_ACCOUNTING_LEDGER_V2',
+    method:'UNIFIED_ACCOUNTING_LEDGER_V3',
     intakeEngineVersion:'VFC-BANK-INTAKE-1.1',
     bankId:id,
     transactionCount:out.length,
@@ -358,6 +367,29 @@ function runBankingIntakeSelfTests(){
     equal(fixed._direction_validation.unresolvedCount,1,'unresolved count');
     return'no guess';
   });
+  test('Continuation rows inherit the most recent printed transaction date',function(){
+    const rows=vfcParseTaggedStatementTransactions_([
+      'DATE 09 Mar | DESCRIPTION Equipment Lease Provider | DEBIT 35.80 | CREDIT | BALANCE 964.20',
+      'DATE | DESCRIPTION Utility Provider | DEBIT 100.00 | CREDIT | BALANCE 864.20',
+      'DATE 10 Mar | DESCRIPTION Customer Settlement | DEBIT | CREDIT 500.00 | BALANCE 1,364.20'
+    ].join('\n'),{statement_start_date:'2026-03-01',statement_end_date:'2026-03-31',opening_balance:1000,total_deposits:500,total_withdrawals:135.80});
+    equal(rows.length,3,'row count');equal(rows[1].date,'2026-03-09','continued date');equal(rows[1].sourceDirectionVerified,true,'continued row verified');return rows[1].date;
+  });
+
+  test('Unique verified same-date same-amount row may match despite description drift',function(){
+    const tagged=[{date:'2026-03-09',description:'COMM EQUIP RENT LSE PROVIDER',counterparty:'COMM EQUIP RENT LSE PROVIDER',direction:'DEBIT',amount:35.80,sourceDirectionVerified:true,sourceDirectionEvidence:'RUNNING_BALANCE'}],
+          used={},match=vfcMatchTaggedTransaction_({date:'2026-03-09',description:'Equipment Rental',counterparty:'Equipment Rental',amount:35.80},tagged,used);
+    if(!match)throw new Error('unique verified candidate did not match');
+    equal(match.direction,'DEBIT','matched direction');return match.sourceDirectionEvidence;
+  });
+
+  test('Unique same-date same-amount row is not used when source direction is unverified',function(){
+    const tagged=[{date:'2026-03-09',description:'UNKNOWN SOURCE',counterparty:'UNKNOWN SOURCE',direction:'DEBIT',amount:35.80,sourceDirectionVerified:false}],
+          used={},match=vfcMatchTaggedTransaction_({date:'2026-03-09',description:'Equipment Rental',counterparty:'Equipment Rental',amount:35.80},tagged,used);
+    if(match)throw new Error('unverified candidate was accepted');
+    return'blocked';
+  });
+
 
   const failed=results.filter(function(x){return!x.pass;});
   return{ok:failed.length===0,intakeVersion:'VFC-BANK-INTAKE-1.1',total:results.length,passed:results.length-failed.length,failed:failed.length,results:results};
