@@ -126,9 +126,10 @@ function vfcResolveTaggedStatementDate_(raw,startDate,endDate){
   return direct||'';
 }
 function vfcTaggedLedgerTotalsVerified_(rows,summary){
-  const printedDeposits=Math.abs(vfcIntakeAmount_(summary&&((summary.total_deposits!=null)?summary.total_deposits:summary.totalDeposits))||0),
-        printedWithdrawals=Math.abs(vfcIntakeAmount_(summary&&((summary.total_withdrawals!=null)?summary.total_withdrawals:summary.totalWithdrawals))||0);
-  if(!(printedDeposits>=0)||!(printedWithdrawals>=0)||!rows||!rows.length)return false;
+  const depRaw=vfcIntakeAmount_(summary&&((summary.total_deposits!=null)?summary.total_deposits:summary.totalDeposits)),
+        wdRaw=vfcIntakeAmount_(summary&&((summary.total_withdrawals!=null)?summary.total_withdrawals:summary.totalWithdrawals));
+  if(depRaw===null||wdRaw===null||!rows||!rows.length)return false;
+  const printedDeposits=Math.abs(depRaw),printedWithdrawals=Math.abs(wdRaw);
   const credits=(rows||[]).filter(function(t){return t.direction==='CREDIT';}).reduce(function(a,t){return a+Math.abs(Number(t.amount||0));},0),
         debits=(rows||[]).filter(function(t){return t.direction==='DEBIT';}).reduce(function(a,t){return a+Math.abs(Number(t.amount||0));},0);
   return Math.abs(credits-printedDeposits)<=.05&&Math.abs(debits-printedWithdrawals)<=.05;
