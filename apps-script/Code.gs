@@ -356,6 +356,28 @@ function runPdfIntakeSelfTests(){
     return'pipe-tagged summary parsed';
   });
 
+  test('Verified header fallback accepts exact visible values when primary parser misses layout',function(){
+    const text=[
+      'Business Account Statement',
+      'July 3, 2026 to August 5, 2026',
+      'Opening balance on July 3, 2026',
+      'BALANCE VALUE $13,276.30',
+      'Total deposits & credits (25)',
+      'CREDIT VALUE + 48,582.37',
+      'Total cheques & debits (51)',
+      'DEBIT VALUE - 50,706.02',
+      'Closing balance on August 5, 2026',
+      'BALANCE VALUE $11,152.65'
+    ].join('\n'),summary={
+      statement_start_date:'2026-07-03',statement_end_date:'2026-08-05',
+      opening_balance:13276.30,total_deposits:48582.37,total_withdrawals:50706.02,closing_balance:11152.65
+    },f=vfcResolvePrintedStatementFacts_(text,summary);
+    equal(f.verificationSource,'VISIBLE_HEADER_VALUES','fallback source');
+    equal(f.deposits,48582.37,'deposits');
+    if(!f.totalsVerified)throw new Error('verified fallback did not reconcile');
+    return f.verificationSource;
+  });
+
   test('Printed statement facts accept source-column words in summary lines',function(){
     const text=[
       'Business Account Statement',
@@ -474,6 +496,71 @@ function vfcExtractPrintedStatementFacts_(text){
     out.totalsVerified=Math.abs(diff)<=5;
   }
   return out;
+}
+function vfcPrintedLineHasAmount_(source,labelPatterns,value){
+  const target=Math.abs(Number(value));
+  if(!isFinite(target))return false;
+  const lines=String(source||'').replace(/\u00a0/g,' ').split(/\r?\n/);
+  function hasAmount_(text){
+    const matches=String(text||'').match(/[+\-]?\s*\$?\s*\(?\-?\$?[0-9][0-9,]*\.\d{2}\)?/g)||[];
+    return matches.some(function(m){const n=vfcPrintedMoney_(m);return n!==null&&Math.abs(Math.abs(n)-target)<=.01;});
+  }
+  for(let i=0;i<lines.length;i++){
+    if(!labelPatterns.some(function(re){return re.test(lines[i]);}))continue;
+    let block=String(lines[i]||'');
+    for(let j=1;j<=3&&i+j<lines.length;j++){
+      const next=String(lines[i+j]||'');
+      if(j>1&&/\b(?:Opening|Beginning|Closing|Ending)\s+balance\b|\bTotal\s+(?:deposits|credits|cheques?|debits|withdrawals)\b/i.test(next))break;
+      block+='\n'+next;
+    }
+    if(hasAmount_(block))return true;
+  }
+  return false;
+}
+function vfcPrintedDateVisible_(source,isoDate){
+  const iso=String(isoDate||'').trim();
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(iso))return false;
+  const d=new Date(iso+'T12:00:00');
+  if(isNaN(d.getTime()))return false;
+  const months=['January','February','March','April','May','June','July','August','September','October','November','December'],
+        short=months[d.getMonth()].slice(0,3),day=d.getDate(),year=d.getFullYear(),
+        text=String(source||'');
+  return text.indexOf(iso)>=0||
+    new RegExp('(?:'+months[d.getMonth()]+'|'+short+')\\s+'+day+',\\s*'+year,'i').test(text);
+}
+function vfcSummaryMoneyNull_(v){
+  if(v===null||v===undefined||String(v).trim()==='')return null;
+  const n=Number(String(v).replace(/[$,()]/g,'').replace(/^\s*\+/,'').trim());
+  if(!isFinite(n))return null;
+  return /^\s*\(/.test(String(v))?-Math.abs(n):n;
+}
+function vfcVerifiedHeaderFactsFromText_(text,summary){
+  summary=summary||{};
+  const start=vfcPrintedIsoDate_(summary.statement_start_date||summary.statementStartDate||''),
+        end=vfcPrintedIsoDate_(summary.statement_end_date||summary.statementEndDate||''),
+        opening=vfcSummaryMoneyNull_(summary.opening_balance!=null?summary.opening_balance:summary.openingBalance),
+        closing=vfcSummaryMoneyNull_(summary.closing_balance!=null?summary.closing_balance:summary.closingBalance),
+        deposits=vfcSummaryMoneyNull_(summary.total_deposits!=null?summary.total_deposits:summary.totalDeposits),
+        withdrawals=vfcSummaryMoneyNull_(summary.total_withdrawals!=null?summary.total_withdrawals:summary.totalWithdrawals);
+  if(!start||!end||opening===null||closing===null||deposits===null||withdrawals===null)return null;
+  if(!vfcPrintedDateVisible_(text,start)||!vfcPrintedDateVisible_(text,end))return null;
+  if(!vfcPrintedLineHasAmount_(text,[/\bOpening\s+balance\b/i,/\bBeginning\s+balance\b/i],opening))return null;
+  if(!vfcPrintedLineHasAmount_(text,[/\bClosing\s+balance\b/i,/\bEnding\s+balance\b/i],closing))return null;
+  if(!vfcPrintedLineHasAmount_(text,[/\bTotal\s+deposits\s*(?:&|and)\s+credits\b/i,/\bTotal\s+credits\b/i,/\bTotal\s+deposits\b/i],deposits))return null;
+  if(!vfcPrintedLineHasAmount_(text,[/\bTotal\s+cheques?\s*(?:&|and)\s+debits\b/i,/\bTotal\s+withdrawals\b/i,/\bTotal\s+debits\b/i],withdrawals))return null;
+  const d=Math.abs((opening+Math.abs(deposits)-Math.abs(withdrawals))-closing);
+  if(d>.05)return null;
+  return{startDate:start,endDate:end,opening:opening,closing:closing,deposits:Math.abs(deposits),withdrawals:Math.abs(withdrawals),totalsVerified:true,verificationSource:'VISIBLE_HEADER_VALUES'};
+}
+function vfcResolvePrintedStatementFacts_(text,summary){
+  const parsed=vfcExtractPrintedStatementFacts_(text),
+        complete=parsed.startDate&&parsed.endDate&&parsed.opening!==null&&parsed.closing!==null&&parsed.deposits!==null&&parsed.withdrawals!==null,
+        diff=complete?Math.abs((parsed.opening+parsed.deposits-parsed.withdrawals)-parsed.closing):Infinity;
+  if(complete&&diff<=.05){parsed.totalsVerified=true;parsed.verificationSource='PRINTED_PARSER';return parsed;}
+  const verified=vfcVerifiedHeaderFactsFromText_(text,summary);
+  if(verified)return verified;
+  parsed.verificationSource='UNVERIFIED';
+  return parsed;
 }
 function vfcPrintedMoneyAfter_(source,patterns){for(let i=0;i<patterns.length;i++){const match=source.match(patterns[i]);if(!match||!match[1])continue;const value=vfcPrintedMoney_(match[1]);if(value!==null)return value;}return null;}
 function vfcPrintedMoney_(value){const raw=String(value||'').trim();if(!raw)return null;const negative=/^\s*-/.test(raw)||/-\s*\$/.test(raw)||/^\s*\(/.test(raw),cleaned=raw.replace(/[^0-9.]/g,'');if(!cleaned)return null;const number=parseFloat(cleaned);return isFinite(number)?(negative?-number:number):null;}
