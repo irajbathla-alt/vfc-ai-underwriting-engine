@@ -4,7 +4,7 @@ const VFC_CONFIG = {
 
   // PDF intake: OpenAI file input is primary. Google Drive OCR is fallback only.
   PDF_TEXT_PROVIDER: 'OPENAI_FILE_INPUT',
-  PDF_TEXT_CACHE_VERSION: 'VFC-PDF-TEXT-2.0',
+  PDF_TEXT_CACHE_VERSION: 'VFC-PDF-TEXT-2.1',
   PDF_TEXT_MAX_OUTPUT_TOKENS: 20000,
   PDF_TEXT_CACHE_FOLDER_NAME: '_PDF_TEXT_CACHE',
   DRIVE_OCR_FALLBACK_ENABLED: true,
@@ -175,7 +175,8 @@ function vfcExtractPdfTextWithOpenAI_(pdfBlob,fileName){
       'Return plain text only: no Markdown, no bullets, no code fences.',
       'Preserve every printed statement date, account number, account-summary line, transaction date, description, amount, debit/credit column and running balance that is visibly readable.',
       'Keep Account Summary wording as close to the PDF as possible, including transaction counts in parentheses and signs on totals.',
-      'For tables, preserve row boundaries. If column spacing cannot be preserved, linearize the row and explicitly retain the printed column meaning, for example: DESCRIPTION ... | DEBIT 123.45 | CREDIT | BALANCE -45.67.',
+      'For EVERY Account Activity transaction row, output one explicit tagged row even when the original column spacing is readable: DATE <printed date> | DESCRIPTION <exact visible description> | DEBIT <amount or blank> | CREDIT <amount or blank> | BALANCE <printed balance or blank>.',
+      'Never place the transaction amount under both DEBIT and CREDIT. The amount must appear only under the printed source column.',
       'Never decide debit/credit direction from the description. Use only the column in which the amount is printed.',
       'Preserve NSF, returned/unpaid/reversal wording exactly when readable.',
       'Do not add Opening balance, Closing balance, summary totals or cheque-image/support-page values as transaction rows when they are not Account Activity.',
