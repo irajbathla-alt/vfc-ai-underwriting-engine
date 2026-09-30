@@ -412,7 +412,7 @@ function vfcExtractPrintedStatementFacts_(text){
         isoRange=source.match(/(\d{4}-\d{2}-\d{2})\s+(?:to|through|[-–—])\s+(\d{4}-\d{2}-\d{2})/i),range=monthRange||isoRange;
   if(range){out.startDate=vfcPrintedIsoDate_(range[1]);out.endDate=vfcPrintedIsoDate_(range[2]);}
   const printedDate='(?:[A-Za-z]{3,9}\\s+\\d{1,2},\\s+\\d{4}|\\d{4}-\\d{2}-\\d{2})',
-        sep='\\s*(?:[|:=]\\s*)?',
+        sep='\\s*(?:[|:=]\\s*)*',
         money='([+\\-]?\\s*\\$?\\s*\\(?\\-?\\$?[\\d,]+(?:\\.\\d{2})?\\)?)';
   out.opening=vfcPrintedMoneyAfter_(source,[
     new RegExp('Opening\\s+balance(?:\\s+on\\s+'+printedDate+')?'+sep+money,'i'),
