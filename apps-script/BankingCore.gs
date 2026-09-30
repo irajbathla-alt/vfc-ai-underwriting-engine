@@ -13,7 +13,7 @@ const VFC_BANK_ENGINE={
 };
 const VFC_BANK_SIMPLE=VFC_BANK_ENGINE;
 
-function getBankingInputQualityStatus(){return{modelVersion:VFC_BANK_ENGINE.VERSION,factsVersion:VFC_BANK_ENGINE.FACTS_VERSION,intakeContract:VFC_BANK_ENGINE.INTAKE_CONTRACT,deterministic:true,pdfReReadDuringUnderwriting:false,frozenStatementFacts:true,logicalStatementDeduplication:true,allRiskDrivingFeaturesFromFrozenFacts:true,architecture:'BankingIntake + BankRouter + BankingCore + one isolated file per bank',banks:getBankParserTabs()};}
+function getBankingInputQualityStatus(){return{modelVersion:VFC_BANK_ENGINE.VERSION,factsVersion:VFC_BANK_ENGINE.FACTS_VERSION,intakeContract:VFC_BANK_ENGINE.INTAKE_CONTRACT,deterministic:true,pdfReReadDuringUnderwriting:false,frozenStatementFacts:true,logicalStatementDeduplication:true,allRiskDrivingFeaturesFromFrozenFacts:true,architecture:'Code + BankRouter + BankingCore + one isolated file per bank',banks:getBankParserTabs()};}
 
 function vfcBankCreateIntakePayload_(summary,fileName){
   summary=summary||{};
