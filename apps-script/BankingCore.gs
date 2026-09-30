@@ -144,7 +144,7 @@ function vfcCurrentBankRulesVersion_(bankId){if(typeof vfcGetBankProfile_!=='fun
 function vfcCanonicalSignalRawFromRows_(rows,expectedBankId){
   const expected=String(expectedBankId||'').toUpperCase(),currentRules=vfcCurrentBankRulesVersion_(expected),currentContract=VFC_BANK_ENGINE.INTAKE_CONTRACT,currentFacts=VFC_BANK_ENGINE.FACTS_VERSION,candidates=[];
   (rows||[]).forEach(function(row){const raw=String(row.signalRaw||''),p=vfcParseBankCache_(raw);if(!vfcPayloadUsable_(p))return;const actual=vfcPayloadBankId_(p,row.bank||'');if(expected&&actual!==expected)return;let rank=0;if(String(p.intakeContract||'')===currentContract)rank+=1;if(currentRules&&String(p.bankRulesVersion||'')===currentRules)rank+=2;if(currentFacts&&String(p.extractionVersion||'')===currentFacts)rank+=4;candidates.push({raw:raw,payload:p,row:row,rank:rank});});
-  candidates.sort(function(a,b){return b.rank-a.rank||vfcTime_(a.row&&a.row.createdAt)-vfcTime_(b.row&&b.row.createdAt);});
+  candidates.sort(function(a,b){return b.rank-a.rank||vfcTime_(b.row&&b.row.createdAt)-vfcTime_(a.row&&a.row.createdAt)||(b.row&&b.row.rowNumber||0)-(a.row&&a.row.rowNumber||0);});
   return candidates.length?candidates[0].raw:'';
 }
 function vfcCanonicalPayloadForRow_(row){
