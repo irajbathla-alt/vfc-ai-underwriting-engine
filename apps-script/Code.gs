@@ -337,6 +337,41 @@ function runPdfIntakeSelfTests(){
     return String(VFC_CONFIG.DRIVE_OCR_FALLBACK_ENABLED);
   });
 
+  test('Printed statement facts accept pipe-tagged Account Summary formatting',function(){
+    const text=[
+      'Business Account Statement',
+      'July 3, 2026 to August 5, 2026',
+      'Opening balance on July 3, 2026 | $13,276.30',
+      'Total deposits & credits (25) | + 48,582.37',
+      'Total cheques & debits (51) | - 50,706.02',
+      'Closing balance on August 5, 2026 | = $11,152.65'
+    ].join('\n'),f=vfcExtractPrintedStatementFacts_(text);
+    equal(f.startDate,'2026-07-03','start');
+    equal(f.endDate,'2026-08-05','end');
+    equal(f.opening,13276.30,'opening');
+    equal(f.deposits,48582.37,'deposits');
+    equal(f.withdrawals,50706.02,'withdrawals');
+    equal(f.closing,11152.65,'closing');
+    if(!f.totalsVerified)throw new Error('pipe-tagged summary did not reconcile');
+    return'pipe-tagged summary parsed';
+  });
+
+  test('Printed statement facts still parse legacy RBC summary formatting',function(){
+    const text=[
+      'March 5, 2026 to April 2, 2026',
+      'Opening balance on March 5, 2026 $1,278.56',
+      'Total deposits & credits (25) + 37,855.37',
+      'Total cheques & debits (52) - 37,138.97',
+      'Closing balance on April 2, 2026 = $1,994.96'
+    ].join('\n'),f=vfcExtractPrintedStatementFacts_(text);
+    equal(f.opening,1278.56,'opening');
+    equal(f.deposits,37855.37,'deposits');
+    equal(f.withdrawals,37138.97,'withdrawals');
+    equal(f.closing,1994.96,'closing');
+    if(!f.totalsVerified)throw new Error('legacy summary did not reconcile');
+    return'legacy summary parsed';
+  });
+
   const failed=results.filter(function(x){return!x.pass;});
   return{
     ok:failed.length===0,
@@ -371,7 +406,40 @@ function buildSingleBankStatementPrompt_(text, companyName, fileName) {
 
 function summarizeSingleBankStatement_(text, companyName, fileName){return callOpenAIJson_(buildSingleBankStatementPrompt_(text,companyName,fileName));}
 function vfcLockPrintedStatementFacts_(summary,text){summary=summary||{};const facts=vfcExtractPrintedStatementFacts_(text);if(facts.startDate)summary.statement_start_date=facts.startDate;if(facts.endDate)summary.statement_end_date=facts.endDate;if(facts.totalsVerified){summary.opening_balance=facts.opening;summary.closing_balance=facts.closing;summary.total_deposits=facts.deposits;summary.total_withdrawals=facts.withdrawals;}return summary;}
-function vfcExtractPrintedStatementFacts_(text){const source=String(text||'').replace(/\u00a0/g,' '),out={startDate:'',endDate:'',opening:null,closing:null,deposits:null,withdrawals:null,totalsVerified:false};const monthRange=source.match(/([A-Za-z]{3,9}\s+\d{1,2},\s+\d{4})\s+(?:to|through|[-–—])\s+([A-Za-z]{3,9}\s+\d{1,2},\s+\d{4})/i),isoRange=source.match(/(\d{4}-\d{2}-\d{2})\s+(?:to|through|[-–—])\s+(\d{4}-\d{2}-\d{2})/i),range=monthRange||isoRange;if(range){out.startDate=vfcPrintedIsoDate_(range[1]);out.endDate=vfcPrintedIsoDate_(range[2]);}const printedDate='(?:[A-Za-z]{3,9}\\s+\\d{1,2},\\s+\\d{4}|\\d{4}-\\d{2}-\\d{2})';out.opening=vfcPrintedMoneyAfter_(source,[new RegExp('Opening\\s+balance(?:\\s+on\\s+'+printedDate+')?\\s+([+\\-]?\\s*\\$?\\s*\\(?\\-?\\$?[\\d,]+(?:\\.\\d{2})?\\)?)','i'),/Beginning\s+balance\s+([+\-]?\s*\$?\s*\(?\-?\$?[\d,]+(?:\.\d{2})?\)?)/i]);out.closing=vfcPrintedMoneyAfter_(source,[new RegExp('Closing\\s+balance(?:\\s+on\\s+'+printedDate+')?\\s*(?:=)?\\s*([+\\-]?\\s*\\$?\\s*\\(?\\-?\\$?[\\d,]+(?:\\.\\d{2})?\\)?)','i'),/Ending\s+balance\s+([+\-]?\s*\$?\s*\(?\-?\$?[\d,]+(?:\.\d{2})?\)?)/i]);out.deposits=vfcPrintedMoneyAfter_(source,[/Total\s+deposits\s*(?:&|and)\s+credits(?:\s*\(\d+\))?\s*([+\-]?\s*\$?\s*[\d,]+(?:\.\d{2})?)/i,/Total\s+credits(?:\s*\(\d+\))?\s*([+\-]?\s*\$?\s*[\d,]+(?:\.\d{2})?)/i,/Total\s+deposits(?:\s*\(\d+\))?\s*([+\-]?\s*\$?\s*[\d,]+(?:\.\d{2})?)/i]);out.withdrawals=vfcPrintedMoneyAfter_(source,[/Total\s+cheques?\s*(?:&|and)\s+debits(?:\s*\(\d+\))?\s*([+\-]?\s*\$?\s*[\d,]+(?:\.\d{2})?)/i,/Total\s+withdrawals(?:\s*\(\d+\))?\s*([+\-]?\s*\$?\s*[\d,]+(?:\.\d{2})?)/i,/Total\s+debits(?:\s*\(\d+\))?\s*([+\-]?\s*\$?\s*[\d,]+(?:\.\d{2})?)/i]);if(out.deposits!==null)out.deposits=Math.abs(out.deposits);if(out.withdrawals!==null)out.withdrawals=Math.abs(out.withdrawals);if(out.opening!==null&&out.closing!==null&&out.deposits!==null&&out.withdrawals!==null){const diff=(out.opening+out.deposits-out.withdrawals)-out.closing;out.totalsVerified=Math.abs(diff)<=5;}return out;}
+function vfcExtractPrintedStatementFacts_(text){
+  const source=String(text||'').replace(/\u00a0/g,' '),out={startDate:'',endDate:'',opening:null,closing:null,deposits:null,withdrawals:null,totalsVerified:false};
+  const monthRange=source.match(/([A-Za-z]{3,9}\s+\d{1,2},\s+\d{4})\s+(?:to|through|[-–—])\s+([A-Za-z]{3,9}\s+\d{1,2},\s+\d{4})/i),
+        isoRange=source.match(/(\d{4}-\d{2}-\d{2})\s+(?:to|through|[-–—])\s+(\d{4}-\d{2}-\d{2})/i),range=monthRange||isoRange;
+  if(range){out.startDate=vfcPrintedIsoDate_(range[1]);out.endDate=vfcPrintedIsoDate_(range[2]);}
+  const printedDate='(?:[A-Za-z]{3,9}\\s+\\d{1,2},\\s+\\d{4}|\\d{4}-\\d{2}-\\d{2})',
+        sep='\\s*(?:[|:=]\\s*)?',
+        money='([+\\-]?\\s*\\$?\\s*\\(?\\-?\\$?[\\d,]+(?:\\.\\d{2})?\\)?)';
+  out.opening=vfcPrintedMoneyAfter_(source,[
+    new RegExp('Opening\\s+balance(?:\\s+on\\s+'+printedDate+')?'+sep+money,'i'),
+    new RegExp('Beginning\\s+balance'+sep+money,'i')
+  ]);
+  out.closing=vfcPrintedMoneyAfter_(source,[
+    new RegExp('Closing\\s+balance(?:\\s+on\\s+'+printedDate+')?'+sep+money,'i'),
+    new RegExp('Ending\\s+balance'+sep+money,'i')
+  ]);
+  out.deposits=vfcPrintedMoneyAfter_(source,[
+    new RegExp('Total\\s+deposits\\s*(?:&|and)\\s+credits(?:\\s*\\(\\d+\\))?'+sep+money,'i'),
+    new RegExp('Total\\s+credits(?:\\s*\\(\\d+\\))?'+sep+money,'i'),
+    new RegExp('Total\\s+deposits(?:\\s*\\(\\d+\\))?'+sep+money,'i')
+  ]);
+  out.withdrawals=vfcPrintedMoneyAfter_(source,[
+    new RegExp('Total\\s+cheques?\\s*(?:&|and)\\s+debits(?:\\s*\\(\\d+\\))?'+sep+money,'i'),
+    new RegExp('Total\\s+withdrawals(?:\\s*\\(\\d+\\))?'+sep+money,'i'),
+    new RegExp('Total\\s+debits(?:\\s*\\(\\d+\\))?'+sep+money,'i')
+  ]);
+  if(out.deposits!==null)out.deposits=Math.abs(out.deposits);
+  if(out.withdrawals!==null)out.withdrawals=Math.abs(out.withdrawals);
+  if(out.opening!==null&&out.closing!==null&&out.deposits!==null&&out.withdrawals!==null){
+    const diff=(out.opening+out.deposits-out.withdrawals)-out.closing;
+    out.totalsVerified=Math.abs(diff)<=5;
+  }
+  return out;
+}
 function vfcPrintedMoneyAfter_(source,patterns){for(let i=0;i<patterns.length;i++){const match=source.match(patterns[i]);if(!match||!match[1])continue;const value=vfcPrintedMoney_(match[1]);if(value!==null)return value;}return null;}
 function vfcPrintedMoney_(value){const raw=String(value||'').trim();if(!raw)return null;const negative=/^\s*-/.test(raw)||/-\s*\$/.test(raw)||/^\s*\(/.test(raw),cleaned=raw.replace(/[^0-9.]/g,'');if(!cleaned)return null;const number=parseFloat(cleaned);return isFinite(number)?(negative?-number:number):null;}
 function vfcPrintedIsoDate_(value){if(!value)return'';const direct=String(value).match(/^\d{4}-\d{2}-\d{2}$/);if(direct)return direct[0];const date=new Date(value);return isNaN(date.getTime())?'':Utilities.formatDate(date,Session.getScriptTimeZone(),'yyyy-MM-dd');}
