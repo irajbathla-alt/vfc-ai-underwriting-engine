@@ -1,5 +1,5 @@
 /**
- * RBC BANK ENGINE v2.1.2 — LOCKED
+ * RBC BANK ENGINE v2.1.3 — LOCKED
  * ONE PERMANENT RBC FILE.
  * Contains RBC extraction, deterministic printed-fact locking, debit/debt classification,
  * financing credits, returns, internal transfers, duplicate preservation and RBC self-tests.
@@ -10,8 +10,8 @@ return{
 id:'RBC',
 label:'RBC',
 status:'LOCKED',
-rulesVersion:'RBC-2.1.2-LOCKED',
-intakeContract:'BANK_MATCHED_FROZEN_LEDGER_V2',
+rulesVersion:'RBC-2.1.3-LOCKED',
+intakeContract:'BANK_MATCHED_FROZEN_LEDGER_V3',
 aliases:['ROYAL BANK OF CANADA','RBC ROYAL BANK','RBC']
 };
 }
@@ -51,25 +51,33 @@ return[
 ].join('\n');
 }
 function vfcRbcLockFacts_(summary,text,fileName){
-const facts=vfcExtractPrintedStatementFacts_(text);
-const name=String(fileName||'statement');
-if(!facts.startDate||!facts.endDate||facts.opening===null||facts.closing===null||facts.deposits===null||facts.withdrawals===null){
-throw new Error('RBC printed Account Summary could not be fully verified for '+name+'. Upload was stopped before saving incomplete statement totals.');
-}
-const diff=Math.abs((facts.opening+facts.deposits-facts.withdrawals)-facts.closing);
-if(diff>.05){
-throw new Error('RBC printed Account Summary does not reconcile for '+name+'. Difference: $'+vfcRound_(diff,.01)+'.');
-}
-const locked=Object.assign({},summary||{});
-locked.statement_start_date=facts.startDate;
-locked.statement_end_date=facts.endDate;
-locked.opening_balance=facts.opening;
-locked.closing_balance=facts.closing;
-locked.total_deposits=facts.deposits;
-locked.total_withdrawals=facts.withdrawals;
-locked.nsf_count=vfcRbcCountNsf_(text);
-locked.negative_balance_detected=vfcRbcNegativeBalanceFlag_(text,facts);
-return locked;
+  const facts=vfcResolvePrintedStatementFacts_(text,summary);
+  const name=String(fileName||'statement');
+  if(!facts.startDate||!facts.endDate||facts.opening===null||facts.closing===null||facts.deposits===null||facts.withdrawals===null){
+    const missing=[];
+    if(!facts.startDate)missing.push('start date');
+    if(!facts.endDate)missing.push('end date');
+    if(facts.opening===null)missing.push('opening balance');
+    if(facts.deposits===null)missing.push('total deposits');
+    if(facts.withdrawals===null)missing.push('total withdrawals');
+    if(facts.closing===null)missing.push('closing balance');
+    throw new Error('RBC Account Summary could not be safely verified for '+name+'. Missing/unverified: '+missing.join(', ')+'. Upload was stopped before saving incomplete statement totals.');
+  }
+  const diff=Math.abs((facts.opening+facts.deposits-facts.withdrawals)-facts.closing);
+  if(diff>.05){
+    throw new Error('RBC printed Account Summary does not reconcile for '+name+'. Difference: $'+vfcRound_(diff,.01)+'.');
+  }
+  const locked=Object.assign({},summary||{});
+  locked.statement_start_date=facts.startDate;
+  locked.statement_end_date=facts.endDate;
+  locked.opening_balance=facts.opening;
+  locked.closing_balance=facts.closing;
+  locked.total_deposits=facts.deposits;
+  locked.total_withdrawals=facts.withdrawals;
+  locked._printed_fact_verification_source=facts.verificationSource||'PRINTED_PARSER';
+  locked.nsf_count=vfcRbcCountNsf_(text);
+  locked.negative_balance_detected=vfcRbcNegativeBalanceFlag_(text,facts);
+  return locked;
 }
 function vfcRbcCountNsf_(text){
 return(String(text||'').match(/ITEM\s+RETURNED\s+NSF|RETURNED\s+ITEM\s+NSF|CHEQUE\s+RETURNED\s+NSF|CHECK\s+RETURNED\s+NSF|NSF\s+(?:ITEM\s+)?RETURN/gi)||[]).length;
