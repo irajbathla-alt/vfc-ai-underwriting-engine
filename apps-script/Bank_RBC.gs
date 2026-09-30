@@ -11,7 +11,7 @@ id:'RBC',
 label:'RBC',
 status:'LOCKED',
 rulesVersion:'RBC-2.1.3-LOCKED',
-intakeContract:'BANK_MATCHED_FROZEN_LEDGER_V3',
+intakeContract:'BANK_MATCHED_FROZEN_LEDGER_V4',
 aliases:['ROYAL BANK OF CANADA','RBC ROYAL BANK','RBC']
 };
 }
