@@ -1,10 +1,11 @@
 const VFC_CONFIG = {
   ROOT_FOLDER_NAME: 'VFC AI Engine',
-  OPENAI_MODEL: 'gpt-4.1-mini',
+  OPENAI_MODEL: 'gpt-6-luna',
+  OPENAI_REASONING_EFFORT: 'none',
 
   // PDF intake: OpenAI file input is primary. Google Drive OCR is fallback only.
   PDF_TEXT_PROVIDER: 'OPENAI_FILE_INPUT',
-  PDF_TEXT_CACHE_VERSION: 'VFC-PDF-TEXT-2.1',
+  PDF_TEXT_CACHE_VERSION: 'VFC-PDF-TEXT-2.2-GPT6-LUNA',
   PDF_TEXT_MAX_OUTPUT_TOKENS: 20000,
   PDF_TEXT_CACHE_FOLDER_NAME: '_PDF_TEXT_CACHE',
   DRIVE_OCR_FALLBACK_ENABLED: true,
@@ -190,6 +191,7 @@ function vfcExtractPdfTextWithOpenAI_(pdfBlob,fileName){
       headers:{Authorization:'Bearer '+apiKey},
       payload:JSON.stringify({
         model:VFC_CONFIG.OPENAI_MODEL,
+        reasoning:{effort:VFC_CONFIG.OPENAI_REASONING_EFFORT||'none'},
         temperature:0,
         max_output_tokens:Number(VFC_CONFIG.PDF_TEXT_MAX_OUTPUT_TOKENS||20000),
         input:[{
@@ -574,8 +576,8 @@ function summarizeBatch_(items, companyName, detectedPeriod) {
     'Return every field as a readable string, not an array. Do not approve or decline and do not invent figures.\nCompany: ' + companyName + '\nDetected period: ' + detectedPeriod + '\nPDF summaries:\n' + combined;
   return callOpenAIJson_(prompt);
 }
-function callOpenAIJsonBatch_(prompts){if(!Array.isArray(prompts)||!prompts.length)return[];const apiKey=PropertiesService.getScriptProperties().getProperty('OPENAI_API_KEY');if(!apiKey)throw new Error('Missing OPENAI_API_KEY in Script Properties.');const requests=prompts.map(function(prompt){return{url:'https://api.openai.com/v1/responses',method:'post',contentType:'application/json',headers:{Authorization:'Bearer '+apiKey},payload:JSON.stringify({model:VFC_CONFIG.OPENAI_MODEL,input:prompt,text:{format:{type:'json_object'}}}),muteHttpExceptions:true};});const responses=UrlFetchApp.fetchAll(requests);return responses.map(function(response,index){return parseOpenAIJsonResponse_(response,'statement '+(index+1));});}
-function callOpenAIJson_(prompt){const apiKey=PropertiesService.getScriptProperties().getProperty('OPENAI_API_KEY');if(!apiKey)throw new Error('Missing OPENAI_API_KEY in Script Properties.');const response=UrlFetchApp.fetch('https://api.openai.com/v1/responses',{method:'post',contentType:'application/json',headers:{Authorization:'Bearer '+apiKey},payload:JSON.stringify({model:VFC_CONFIG.OPENAI_MODEL,input:prompt,text:{format:{type:'json_object'}}}),muteHttpExceptions:true});return parseOpenAIJsonResponse_(response,'OpenAI');}
+function callOpenAIJsonBatch_(prompts){if(!Array.isArray(prompts)||!prompts.length)return[];const apiKey=PropertiesService.getScriptProperties().getProperty('OPENAI_API_KEY');if(!apiKey)throw new Error('Missing OPENAI_API_KEY in Script Properties.');const requests=prompts.map(function(prompt){return{url:'https://api.openai.com/v1/responses',method:'post',contentType:'application/json',headers:{Authorization:'Bearer '+apiKey},payload:JSON.stringify({model:VFC_CONFIG.OPENAI_MODEL,reasoning:{effort:VFC_CONFIG.OPENAI_REASONING_EFFORT||'none'},input:prompt,text:{format:{type:'json_object'}}}),muteHttpExceptions:true};});const responses=UrlFetchApp.fetchAll(requests);return responses.map(function(response,index){return parseOpenAIJsonResponse_(response,'statement '+(index+1));});}
+function callOpenAIJson_(prompt){const apiKey=PropertiesService.getScriptProperties().getProperty('OPENAI_API_KEY');if(!apiKey)throw new Error('Missing OPENAI_API_KEY in Script Properties.');const response=UrlFetchApp.fetch('https://api.openai.com/v1/responses',{method:'post',contentType:'application/json',headers:{Authorization:'Bearer '+apiKey},payload:JSON.stringify({model:VFC_CONFIG.OPENAI_MODEL,reasoning:{effort:VFC_CONFIG.OPENAI_REASONING_EFFORT||'none'},input:prompt,text:{format:{type:'json_object'}}}),muteHttpExceptions:true});return parseOpenAIJsonResponse_(response,'OpenAI');}
 function parseOpenAIJsonResponse_(response,label){const code=response.getResponseCode?response.getResponseCode():200,text=response.getContentText?response.getContentText():String(response||'');let body;try{body=JSON.parse(text);}catch(e){throw new Error((label||'OpenAI')+' returned invalid JSON (HTTP '+code+').');}if(body.error)throw new Error((label||'OpenAI')+': '+body.error.message);if(code<200||code>=300)throw new Error((label||'OpenAI')+' failed with HTTP '+code+'.');let outputText=body.output_text||'';if(!outputText&&body.output&&body.output[0]&&body.output[0].content&&body.output[0].content[0])outputText=body.output[0].content[0].text||'';if(!outputText)throw new Error((label||'OpenAI')+' response text not found.');try{return JSON.parse(outputText);}catch(e){throw new Error((label||'OpenAI')+' returned non-JSON output.');}}
 function getLatestBatchSummary_(companyName,period){const rows=getSheetObjects_('Batch Summaries').filter(function(row){return sameText_(row.companyName,companyName)&&(!period||sameText_(row.detectedPeriod,period));});return rows.length?rows[rows.length-1]:null;}
 function getSheetObjects_(sheetName){const sheet=SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);if(!sheet)return[];const values=sheet.getDataRange().getValues();if(values.length<2)return[];const headers=values[0].map(normalizeHeader_);return values.slice(1).filter(function(row){return row.some(function(cell){return String(cell).trim()!=='';});}).map(function(row){const obj={};headers.forEach(function(header,index){obj[header]=row[index];});return obj;});}
