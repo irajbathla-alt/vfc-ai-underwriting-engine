@@ -7,6 +7,8 @@ const VFC_CONFIG = {
   PDF_TEXT_PROVIDER: 'OPENAI_FILE_INPUT',
   PDF_TEXT_CACHE_VERSION: 'VFC-PDF-TEXT-2.2-GPT6-LUNA',
   PDF_TEXT_MAX_OUTPUT_TOKENS: 20000,
+  BANK_JSON_MAX_OUTPUT_TOKENS: 30000,
+  BANK_JSON_RETRY_MAX_OUTPUT_TOKENS: 50000,
   PDF_TEXT_CACHE_FOLDER_NAME: '_PDF_TEXT_CACHE',
   DRIVE_OCR_FALLBACK_ENABLED: true,
   OCR_RETRY_ATTEMPTS: 2,
@@ -576,8 +578,105 @@ function summarizeBatch_(items, companyName, detectedPeriod) {
     'Return every field as a readable string, not an array. Do not approve or decline and do not invent figures.\nCompany: ' + companyName + '\nDetected period: ' + detectedPeriod + '\nPDF summaries:\n' + combined;
   return callOpenAIJson_(prompt);
 }
-function callOpenAIJsonBatch_(prompts){if(!Array.isArray(prompts)||!prompts.length)return[];const apiKey=PropertiesService.getScriptProperties().getProperty('OPENAI_API_KEY');if(!apiKey)throw new Error('Missing OPENAI_API_KEY in Script Properties.');const requests=prompts.map(function(prompt){return{url:'https://api.openai.com/v1/responses',method:'post',contentType:'application/json',headers:{Authorization:'Bearer '+apiKey},payload:JSON.stringify({model:VFC_CONFIG.OPENAI_MODEL,reasoning:{effort:VFC_CONFIG.OPENAI_REASONING_EFFORT||'none'},input:prompt,text:{format:{type:'json_object'}}}),muteHttpExceptions:true};});const responses=UrlFetchApp.fetchAll(requests);return responses.map(function(response,index){return parseOpenAIJsonResponse_(response,'statement '+(index+1));});}
-function callOpenAIJson_(prompt){const apiKey=PropertiesService.getScriptProperties().getProperty('OPENAI_API_KEY');if(!apiKey)throw new Error('Missing OPENAI_API_KEY in Script Properties.');const response=UrlFetchApp.fetch('https://api.openai.com/v1/responses',{method:'post',contentType:'application/json',headers:{Authorization:'Bearer '+apiKey},payload:JSON.stringify({model:VFC_CONFIG.OPENAI_MODEL,reasoning:{effort:VFC_CONFIG.OPENAI_REASONING_EFFORT||'none'},input:prompt,text:{format:{type:'json_object'}}}),muteHttpExceptions:true});return parseOpenAIJsonResponse_(response,'OpenAI');}
+function vfcBankStatementJsonFormat_(){
+  const nullableNumber={type:['number','null']},nullableInteger={type:['integer','null']},nullableBoolean={type:['boolean','null']};
+  return{
+    type:'json_schema',
+    name:'vfc_bank_statement_facts',
+    strict:true,
+    schema:{
+      type:'object',
+      additionalProperties:false,
+      properties:{
+        document_type:{type:'string',enum:['BANK_STATEMENT','NOT_BANK_STATEMENT']},
+        bank_name:{type:'string'},
+        account_holder:{type:'string'},
+        account_number:{type:'string'},
+        statement_start_date:{type:'string'},
+        statement_end_date:{type:'string'},
+        opening_balance:nullableNumber,
+        closing_balance:nullableNumber,
+        total_deposits:nullableNumber,
+        total_withdrawals:nullableNumber,
+        nsf_count:nullableInteger,
+        negative_balance_detected:nullableBoolean,
+        banking_transactions:{
+          type:'array',
+          items:{
+            type:'object',
+            additionalProperties:false,
+            properties:{
+              date:{type:'string'},
+              description:{type:'string'},
+              counterparty:{type:'string'},
+              direction:{type:'string',enum:['DEBIT','CREDIT']},
+              amount:{type:'number'},
+              source_column:{type:'string',enum:['DEBIT','CREDIT']},
+              source_row:{type:'string'}
+            },
+            required:['date','description','counterparty','direction','amount','source_column','source_row']
+          }
+        },
+        summary:{type:'string'},
+        risks:{type:'string'},
+        missing_info:{type:'string'}
+      },
+      required:['document_type','bank_name','account_holder','account_number','statement_start_date','statement_end_date','opening_balance','closing_balance','total_deposits','total_withdrawals','nsf_count','negative_balance_detected','banking_transactions','summary','risks','missing_info']
+    }
+  };
+}
+
+function vfcOpenAIJsonRequest_(apiKey,prompt,maxOutputTokens,statementSchema){
+  return{
+    url:'https://api.openai.com/v1/responses',
+    method:'post',
+    contentType:'application/json',
+    headers:{Authorization:'Bearer '+apiKey},
+    payload:JSON.stringify({
+      model:VFC_CONFIG.OPENAI_MODEL,
+      reasoning:{effort:VFC_CONFIG.OPENAI_REASONING_EFFORT||'none'},
+      max_output_tokens:Number(maxOutputTokens||VFC_CONFIG.BANK_JSON_MAX_OUTPUT_TOKENS||30000),
+      input:prompt,
+      text:{format:statementSchema?vfcBankStatementJsonFormat_():{type:'json_object'}}
+    }),
+    muteHttpExceptions:true
+  };
+}
+
+function vfcRetryableJsonError_(error){
+  return /non-JSON output|response text not found|response was incomplete|failed with status|temporar|timeout/i.test(String(error&&error.message||error));
+}
+
+function callOpenAIJsonBatch_(prompts){
+  if(!Array.isArray(prompts)||!prompts.length)return[];
+  const apiKey=PropertiesService.getScriptProperties().getProperty('OPENAI_API_KEY');
+  if(!apiKey)throw new Error('Missing OPENAI_API_KEY in Script Properties.');
+  const primaryTokens=Number(VFC_CONFIG.BANK_JSON_MAX_OUTPUT_TOKENS||30000),
+        retryTokens=Math.max(primaryTokens,Number(VFC_CONFIG.BANK_JSON_RETRY_MAX_OUTPUT_TOKENS||50000)),
+        requests=prompts.map(function(prompt){return vfcOpenAIJsonRequest_(apiKey,prompt,primaryTokens,true);}),
+        responses=UrlFetchApp.fetchAll(requests);
+
+  return responses.map(function(response,index){
+    const label='statement '+(index+1);
+    try{
+      return parseOpenAIJsonResponse_(response,label);
+    }catch(firstError){
+      if(!vfcRetryableJsonError_(firstError))throw firstError;
+      console.warn(label+' structured-output retry after: '+String(firstError&&firstError.message||firstError));
+      const retry=UrlFetchApp.fetch('https://api.openai.com/v1/responses',vfcOpenAIJsonRequest_(apiKey,prompts[index],retryTokens,true));
+      return parseOpenAIJsonResponse_(retry,label+' retry');
+    }
+  });
+}
+
+function callOpenAIJson_(prompt){
+  const apiKey=PropertiesService.getScriptProperties().getProperty('OPENAI_API_KEY');
+  if(!apiKey)throw new Error('Missing OPENAI_API_KEY in Script Properties.');
+  const request=vfcOpenAIJsonRequest_(apiKey,prompt,12000,false),
+        response=UrlFetchApp.fetch(request.url,request);
+  return parseOpenAIJsonResponse_(response,'OpenAI');
+}
+
 function parseOpenAIJsonResponse_(response,label){
   const name=label||'OpenAI';
   const code=response&&response.getResponseCode?response.getResponseCode():200;
@@ -600,8 +699,19 @@ function parseOpenAIJsonResponse_(response,label){
     throw new Error(name+' failed with HTTP '+code+'.');
   }
 
+  const status=String(body&&body.status||'').toLowerCase();
+  if(status==='incomplete'){
+    const reason=body&&body.incomplete_details&&body.incomplete_details.reason?body.incomplete_details.reason:'unknown reason';
+    console.warn(name+' incomplete response: '+String(raw).slice(0,3000));
+    throw new Error(name+' response was incomplete ('+reason+').');
+  }
+  if(status&&status!=='completed'){
+    console.warn(name+' response status '+status+': '+String(raw).slice(0,3000));
+    throw new Error(name+' failed with status '+status+'.');
+  }
+
   // Responses API may place usable text in output_text or in any output[].content[] item.
-  const candidates=[];
+  const candidates=[],refusals=[];
   if(typeof body.output_text==='string'&&body.output_text.trim())candidates.push(body.output_text);
 
   if(Array.isArray(body.output)){
@@ -613,11 +723,15 @@ function parseOpenAIJsonResponse_(response,label){
           if(!part)return;
           if(typeof part.text==='string'&&part.text.trim())candidates.push(part.text);
           if(typeof part.output_text==='string'&&part.output_text.trim())candidates.push(part.output_text);
+          if(typeof part.refusal==='string'&&part.refusal.trim())refusals.push(part.refusal);
         });
       }
     });
   }
 
+  if(refusals.length&&!candidates.length){
+    throw new Error(name+' was refused: '+refusals.join(' ').slice(0,500));
+  }
   if(!candidates.length){
     console.error(name+' response text not found: '+String(raw).slice(0,3000));
     throw new Error(name+' response text not found.');
