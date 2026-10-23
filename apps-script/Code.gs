@@ -578,7 +578,82 @@ function summarizeBatch_(items, companyName, detectedPeriod) {
 }
 function callOpenAIJsonBatch_(prompts){if(!Array.isArray(prompts)||!prompts.length)return[];const apiKey=PropertiesService.getScriptProperties().getProperty('OPENAI_API_KEY');if(!apiKey)throw new Error('Missing OPENAI_API_KEY in Script Properties.');const requests=prompts.map(function(prompt){return{url:'https://api.openai.com/v1/responses',method:'post',contentType:'application/json',headers:{Authorization:'Bearer '+apiKey},payload:JSON.stringify({model:VFC_CONFIG.OPENAI_MODEL,reasoning:{effort:VFC_CONFIG.OPENAI_REASONING_EFFORT||'none'},input:prompt,text:{format:{type:'json_object'}}}),muteHttpExceptions:true};});const responses=UrlFetchApp.fetchAll(requests);return responses.map(function(response,index){return parseOpenAIJsonResponse_(response,'statement '+(index+1));});}
 function callOpenAIJson_(prompt){const apiKey=PropertiesService.getScriptProperties().getProperty('OPENAI_API_KEY');if(!apiKey)throw new Error('Missing OPENAI_API_KEY in Script Properties.');const response=UrlFetchApp.fetch('https://api.openai.com/v1/responses',{method:'post',contentType:'application/json',headers:{Authorization:'Bearer '+apiKey},payload:JSON.stringify({model:VFC_CONFIG.OPENAI_MODEL,reasoning:{effort:VFC_CONFIG.OPENAI_REASONING_EFFORT||'none'},input:prompt,text:{format:{type:'json_object'}}}),muteHttpExceptions:true});return parseOpenAIJsonResponse_(response,'OpenAI');}
-function parseOpenAIJsonResponse_(response,label){const code=response.getResponseCode?response.getResponseCode():200,text=response.getContentText?response.getContentText():String(response||'');let body;try{body=JSON.parse(text);}catch(e){throw new Error((label||'OpenAI')+' returned invalid JSON (HTTP '+code+').');}if(body.error)throw new Error((label||'OpenAI')+': '+body.error.message);if(code<200||code>=300)throw new Error((label||'OpenAI')+' failed with HTTP '+code+'.');let outputText=body.output_text||'';if(!outputText&&body.output&&body.output[0]&&body.output[0].content&&body.output[0].content[0])outputText=body.output[0].content[0].text||'';if(!outputText)throw new Error((label||'OpenAI')+' response text not found.');try{return JSON.parse(outputText);}catch(e){throw new Error((label||'OpenAI')+' returned non-JSON output.');}}
+function parseOpenAIJsonResponse_(response,label){
+  const name=label||'OpenAI';
+  const code=response&&response.getResponseCode?response.getResponseCode():200;
+  const raw=response&&response.getContentText?response.getContentText():String(response||'');
+  let body;
+
+  try{
+    body=JSON.parse(raw);
+  }catch(e){
+    console.error(name+' invalid API JSON (HTTP '+code+'): '+String(raw).slice(0,2000));
+    throw new Error(name+' returned invalid JSON (HTTP '+code+').');
+  }
+
+  if(body&&body.error){
+    const msg=body.error.message||body.error.code||JSON.stringify(body.error);
+    throw new Error(name+': '+msg);
+  }
+  if(code<200||code>=300){
+    console.error(name+' HTTP '+code+': '+String(raw).slice(0,2000));
+    throw new Error(name+' failed with HTTP '+code+'.');
+  }
+
+  // Responses API may place usable text in output_text or in any output[].content[] item.
+  const candidates=[];
+  if(typeof body.output_text==='string'&&body.output_text.trim())candidates.push(body.output_text);
+
+  if(Array.isArray(body.output)){
+    body.output.forEach(function(item){
+      if(!item)return;
+      if(typeof item.text==='string'&&item.text.trim())candidates.push(item.text);
+      if(Array.isArray(item.content)){
+        item.content.forEach(function(part){
+          if(!part)return;
+          if(typeof part.text==='string'&&part.text.trim())candidates.push(part.text);
+          if(typeof part.output_text==='string'&&part.output_text.trim())candidates.push(part.output_text);
+        });
+      }
+    });
+  }
+
+  if(!candidates.length){
+    console.error(name+' response text not found: '+String(raw).slice(0,3000));
+    throw new Error(name+' response text not found.');
+  }
+
+  for(let i=0;i<candidates.length;i++){
+    const parsed=parseJsonCandidate_(candidates[i]);
+    if(parsed!==null)return parsed;
+  }
+
+  console.error(name+' non-JSON model output: '+candidates.join('\n---\n').slice(0,4000));
+  throw new Error(name+' returned non-JSON output.');
+}
+
+function parseJsonCandidate_(value){
+  let text=String(value||'').trim();
+  if(!text)return null;
+
+  // Tolerate accidental markdown fences even though JSON mode requests raw JSON.
+  text=text.replace(/^\`\`\`(?:json)?\s*/i,'').replace(/\s*\`\`\`$/,'').trim();
+
+  try{return JSON.parse(text);}catch(e){}
+
+  // Tolerate a short explanatory prefix/suffix by extracting the outer JSON object/array.
+  const objStart=text.indexOf('{'),objEnd=text.lastIndexOf('}');
+  if(objStart>=0&&objEnd>objStart){
+    try{return JSON.parse(text.slice(objStart,objEnd+1));}catch(e){}
+  }
+
+  const arrStart=text.indexOf('['),arrEnd=text.lastIndexOf(']');
+  if(arrStart>=0&&arrEnd>arrStart){
+    try{return JSON.parse(text.slice(arrStart,arrEnd+1));}catch(e){}
+  }
+
+  return null;
+}
 function getLatestBatchSummary_(companyName,period){const rows=getSheetObjects_('Batch Summaries').filter(function(row){return sameText_(row.companyName,companyName)&&(!period||sameText_(row.detectedPeriod,period));});return rows.length?rows[rows.length-1]:null;}
 function getSheetObjects_(sheetName){const sheet=SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);if(!sheet)return[];const values=sheet.getDataRange().getValues();if(values.length<2)return[];const headers=values[0].map(normalizeHeader_);return values.slice(1).filter(function(row){return row.some(function(cell){return String(cell).trim()!=='';});}).map(function(row){const obj={};headers.forEach(function(header,index){obj[header]=row[index];});return obj;});}
 function ensureSheetSchema_(sheetName,headers){const ss=SpreadsheetApp.getActiveSpreadsheet();let sheet=ss.getSheetByName(sheetName);if(!sheet)sheet=ss.insertSheet(sheetName);if(sheet.getLastRow()===0){sheet.appendRow(headers);return;}const current=sheet.getRange(1,1,1,Math.max(sheet.getLastColumn(),1)).getValues()[0].map(function(v){return String(v).trim();});headers.forEach(function(header){if(current.indexOf(header)===-1){current.push(header);sheet.getRange(1,current.length).setValue(header);}});}
