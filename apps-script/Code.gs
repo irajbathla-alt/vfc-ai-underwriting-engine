@@ -647,6 +647,12 @@ function vfcRetryableJsonError_(error){
   return /non-JSON output|response text not found|response was incomplete|failed with status|temporar|timeout/i.test(String(error&&error.message||error));
 }
 
+function vfcFetchOpenAIJson_(request){
+  const params=Object.assign({},request),url=params.url;
+  delete params.url;
+  return UrlFetchApp.fetch(url,params);
+}
+
 function callOpenAIJsonBatch_(prompts){
   if(!Array.isArray(prompts)||!prompts.length)return[];
   const apiKey=PropertiesService.getScriptProperties().getProperty('OPENAI_API_KEY');
@@ -663,7 +669,7 @@ function callOpenAIJsonBatch_(prompts){
     }catch(firstError){
       if(!vfcRetryableJsonError_(firstError))throw firstError;
       console.warn(label+' structured-output retry after: '+String(firstError&&firstError.message||firstError));
-      const retry=UrlFetchApp.fetch('https://api.openai.com/v1/responses',vfcOpenAIJsonRequest_(apiKey,prompts[index],retryTokens,true));
+      const retry=vfcFetchOpenAIJson_(vfcOpenAIJsonRequest_(apiKey,prompts[index],retryTokens,true));
       return parseOpenAIJsonResponse_(retry,label+' retry');
     }
   });
@@ -673,7 +679,7 @@ function callOpenAIJson_(prompt){
   const apiKey=PropertiesService.getScriptProperties().getProperty('OPENAI_API_KEY');
   if(!apiKey)throw new Error('Missing OPENAI_API_KEY in Script Properties.');
   const request=vfcOpenAIJsonRequest_(apiKey,prompt,12000,false),
-        response=UrlFetchApp.fetch(request.url,request);
+        response=vfcFetchOpenAIJson_(request);
   return parseOpenAIJsonResponse_(response,'OpenAI');
 }
 
