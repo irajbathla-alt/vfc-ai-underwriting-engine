@@ -4,10 +4,12 @@
  * No PDF or OpenAI call occurs during underwriting.
  */
 const VFC_BANK_ENGINE={
-  VERSION:'VFC-BANKING-CORE-4.17',
+  VERSION:'VFC-BANKING-CORE-4.18',
   FACTS_VERSION:'VFC-BANK-FACTS-1.4',
   INTAKE_CONTRACT:'BANK_MATCHED_FROZEN_LEDGER_V4',
   CACHE_PREFIX:'VFC_BANK_FACTS_V1:',
+  COMPRESSED_CACHE_PREFIX:'VFC_BANK_FACTS_GZIP_V1:',
+  SHEET_CELL_SAFE_LIMIT:45000,
   LEGACY_PREFIXES:['VFC_BANK_PURE_V46:','VFC_BANK_PURE_V45:','VFC_BANK_PURE_V44:','VFC_BANK_PURE_V43:','VFC_BANK_PURE_V42:','VFC_BANK_PURE_V41:','VFC_BANK_PURE_V40:','VFC_BANK_PURE_V35:','VFC_BANK_PURE_V34:','VFC_BANK_PURE_V1:'],
   MAX_STATEMENTS:12,DEBT_LOOKBACK:6,ACTIVE_DAYS:75,RECONCILE_TOLERANCE:.05
 };
@@ -18,7 +20,34 @@ function getBankingInputQualityStatus(){return{modelVersion:VFC_BANK_ENGINE.VERS
 function vfcBankCreateIntakePayload_(summary,fileName){
   summary=summary||{};
   const opening=vfcNumNull_(summary.opening_balance),closing=vfcNumNull_(summary.closing_balance),deposits=vfcNumNull_(summary.total_deposits),withdrawals=vfcNumNull_(summary.total_withdrawals),diff=(opening!==null&&closing!==null&&deposits!==null&&withdrawals!==null)?vfcRound_((opening+deposits-withdrawals)-closing,.01):null,bankName=String(summary.bank_name||'Unknown'),bankId=vfcDetectBankId_(bankName),profile=typeof vfcGetBankProfile_==='function'?vfcGetBankProfile_(bankId):null;
-  return VFC_BANK_ENGINE.CACHE_PREFIX+JSON.stringify({version:7,extractionVersion:VFC_BANK_ENGINE.FACTS_VERSION,intakeContract:VFC_BANK_ENGINE.INTAKE_CONTRACT,bankRulesVersion:profile&&profile.rulesVersion?profile.rulesVersion:'',fileName:String(fileName||''),bankId:bankId,bankName:bankName,accountHolder:String(summary.account_holder||'').trim(),accountNumber:String(summary.account_number||summary.account_no||'').trim(),statementStartDate:vfcIso_(summary.statement_start_date),statementEndDate:vfcIso_(summary.statement_end_date),openingBalance:opening,closingBalance:closing,totalDeposits:deposits,totalWithdrawals:withdrawals,reconciliationDifference:diff,nsfCount:Math.max(0,vfcNum_(summary.nsf_count)),negativeBalanceDetected:vfcBool_(summary.negative_balance_detected),transactionsVerified:true,directionValidation:summary._direction_validation||null,intakeEngineVersion:String(summary._intake_engine_version||''),transactions:vfcNormalizeTransactions_(summary.banking_transactions||[],bankId)});
+  const payload={version:8,extractionVersion:VFC_BANK_ENGINE.FACTS_VERSION,intakeContract:VFC_BANK_ENGINE.INTAKE_CONTRACT,bankRulesVersion:profile&&profile.rulesVersion?profile.rulesVersion:'',fileName:String(fileName||''),bankId:bankId,bankName:bankName,accountHolder:String(summary.account_holder||'').trim(),accountNumber:String(summary.account_number||summary.account_no||'').trim(),statementStartDate:vfcIso_(summary.statement_start_date),statementEndDate:vfcIso_(summary.statement_end_date),openingBalance:opening,closingBalance:closing,totalDeposits:deposits,totalWithdrawals:withdrawals,reconciliationDifference:diff,nsfCount:Math.max(0,vfcNum_(summary.nsf_count)),negativeBalanceDetected:vfcBool_(summary.negative_balance_detected),transactionsVerified:true,directionValidation:summary._direction_validation||null,intakeEngineVersion:String(summary._intake_engine_version||''),transactions:vfcNormalizeTransactions_(summary.banking_transactions||[],bankId)};
+  return vfcEncodeBankCache_(payload);
+}
+
+function vfcEncodeBankCache_(payload){
+  const json=JSON.stringify(payload||{}),plain=VFC_BANK_ENGINE.CACHE_PREFIX+json;
+  if(plain.length<=VFC_BANK_ENGINE.SHEET_CELL_SAFE_LIMIT)return plain;
+  try{
+    const gz=Utilities.gzip(Utilities.newBlob(json,'application/json','frozen-ledger.json'));
+    const encoded=Utilities.base64Encode(gz.getBytes());
+    const compressed=VFC_BANK_ENGINE.COMPRESSED_CACHE_PREFIX+encoded;
+    if(compressed.length<=49000)return compressed;
+    throw new Error('Compressed frozen ledger is '+compressed.length+' characters.');
+  }catch(e){
+    throw new Error('Frozen banking ledger is too large to store safely. '+String(e&&e.message||e));
+  }
+}
+
+function vfcDecodeCompressedBankCache_(raw){
+  const s=String(raw||''),prefix=VFC_BANK_ENGINE.COMPRESSED_CACHE_PREFIX;
+  if(s.indexOf(prefix)!==0)return null;
+  try{
+    const bytes=Utilities.base64Decode(s.slice(prefix.length));
+    const json=Utilities.ungzip(Utilities.newBlob(bytes,'application/gzip')).getDataAsString('UTF-8');
+    return JSON.parse(json);
+  }catch(e){
+    return null;
+  }
 }
 
 /** One shared intake contract for every bank: usable frozen facts, correct bank, dates and exact reconciliation. */
@@ -151,7 +180,7 @@ function vfcCanonicalPayloadForRow_(row){
   const all=vfcSummaryRows_(row.companyName,row.period),numbers=Array.isArray(row.logicalRowNumbers)?row.logicalRowNumbers:[],groups=vfcGroupLogicalStatementRows_(all);let pool=[];if(numbers.length)pool=all.filter(function(x){return numbers.indexOf(x.rowNumber)>=0;});if(!pool.length){groups.some(function(g){if(g.some(function(x){return x.rowNumber===row.rowNumber||(row.uploadId&&x.uploadId===row.uploadId);})) {pool=g;return true;}return false;});}if(!pool.length)pool=[row];const expected=vfcDetectBankId_(row.bank||''),raw=vfcCanonicalSignalRawFromRows_(pool,expected)||String(row.signalRaw||'');
   if(raw){const p=vfcParseBankCache_(raw);if(vfcPayloadUsable_(p))return vfcNormalizePayload_(p,row);}const exact=vfcParseBankCache_(row.signalRaw);return vfcPayloadUsable_(exact)&&(!expected||vfcPayloadBankId_(exact,row.bank)===expected)?vfcNormalizePayload_(exact,row):null;
 }
-function vfcParseBankCache_(raw){const s=String(raw||''),prefixes=[VFC_BANK_ENGINE.CACHE_PREFIX].concat(VFC_BANK_ENGINE.LEGACY_PREFIXES);for(let i=0;i<prefixes.length;i++){if(s.indexOf(prefixes[i])!==0)continue;try{return JSON.parse(s.slice(prefixes[i].length));}catch(e){return null;}}return null;}
+function vfcParseBankCache_(raw){const s=String(raw||'');if(s.indexOf(VFC_BANK_ENGINE.COMPRESSED_CACHE_PREFIX)===0)return vfcDecodeCompressedBankCache_(s);const prefixes=[VFC_BANK_ENGINE.CACHE_PREFIX].concat(VFC_BANK_ENGINE.LEGACY_PREFIXES);for(let i=0;i<prefixes.length;i++){if(s.indexOf(prefixes[i])!==0)continue;try{return JSON.parse(s.slice(prefixes[i].length));}catch(e){return null;}}return null;}
 function vfcPayloadUsable_(p){return!!(p&&p.transactionsVerified&&Array.isArray(p.transactions)&&vfcNumNull_(p.totalDeposits)!==null&&vfcNumNull_(p.totalWithdrawals)!==null);}
 function vfcNormalizePayload_(p,row){const bankId=vfcPayloadBankId_(p,row.bank||'');return{version:Number(p.version)||4,extractionVersion:String(p.extractionVersion||VFC_BANK_ENGINE.FACTS_VERSION),intakeContract:String(p.intakeContract||''),bankRulesVersion:String(p.bankRulesVersion||''),fileName:String(p.fileName||row.fileName||''),bankId:bankId,bankName:String(p.bankName||row.bank||'Unknown'),accountHolder:String(p.accountHolder||row.accountHolder||''),accountNumber:String(p.accountNumber||''),statementStartDate:vfcIso_(p.statementStartDate||row.startDate),statementEndDate:vfcIso_(p.statementEndDate||row.endDate),openingBalance:vfcNumNull_(p.openingBalance),closingBalance:vfcNumNull_(p.closingBalance),totalDeposits:vfcPos_(p.totalDeposits),totalWithdrawals:vfcPos_(p.totalWithdrawals),reconciliationDifference:vfcNum_(p.reconciliationDifference),nsfCount:Math.max(0,vfcNum_(p.nsfCount||row.nsf)),negativeBalanceDetected:!!(p.negativeBalanceDetected||row.negative),transactionsVerified:true,directionValidation:p.directionValidation||null,intakeEngineVersion:String(p.intakeEngineVersion||''),transactions:vfcNormalizeTransactions_(p.transactions||[],bankId)};}
 function vfcReconcilePayload_(p,row){const opening=p.openingBalance!==null?p.openingBalance:row.opening,closing=p.closingBalance!==null?p.closingBalance:row.closing,deposits=p.totalDeposits,withdrawals=p.totalWithdrawals;if(opening===null||closing===null||deposits===null||withdrawals===null)return{ok:false,diff:null};const diff=Math.abs((opening+deposits-withdrawals)-closing);return{ok:diff<=VFC_BANK_ENGINE.RECONCILE_TOLERANCE,diff:diff};}
