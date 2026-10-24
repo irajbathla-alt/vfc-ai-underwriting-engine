@@ -1,5 +1,5 @@
 /**
- * TD BANK ENGINE v2.7 — CANDIDATE
+ * TD BANK ENGINE v2.8 — CANDIDATE
  *
  * One permanent TD module. All TD-specific behavior lives here:
  * - extraction instructions
@@ -19,7 +19,7 @@ function vfcTdBankProfile_(){
     id:'TD',
     label:'TD',
     status:'CANDIDATE',
-    rulesVersion:'TD-2.7-CANDIDATE',
+    rulesVersion:'TD-2.8-CANDIDATE',
     intakeContract:'BANK_MATCHED_FROZEN_LEDGER_V4',
     aliases:['TD CANADA TRUST','THE TORONTO-DOMINION BANK','TORONTO-DOMINION','TD BANK','TD CANADA TRUST BUSINESS']
   };
@@ -103,7 +103,7 @@ function vfcTdLoanReference_(s){s=String(s||'').toUpperCase();let m=s.match(/\*(
 function vfcTdKnownFinancingCredit_(t){const s=String((t&&t.description)||'').toUpperCase();if(vfcTdIsReturnedFinancingCredit_(t))return false;return/JOURNEY|ONDECK|MERCHANT\s+GROWTH|\bCANACAP\b|GREENBOX|\bICAPITAL\b|\bBDC\b|LOAN\s+(?:ADVANCE|PROCEEDS|CREDIT)|\bMCA\b|\bMORTGAGE\b|\bLOC\b|LINE\s+OF\s+CREDIT|CREDIT\s+LINE|\bFINANC(?:E|ING)?\b/.test(s);}
 function vfcTdStrongEntityKey_(key){return/^(TD_JOURNEY_ONDECK|TD_MERCHANT_GROWTH|TD_CANACAP|TD_GREENBOX|TD_ICAPITAL|TD_BDC|TD_FORD_CREDIT|TD_AFFIRM_CANADA|TD_RBC_LOAN_PAYMENT_|TD_INSURANCE_LOAN_|TD_PREMIUM_FINANCE_|TD_LOAN_|TD_UNREFERENCED_LOAN_|TD_FINANCE_|TD_STANDALONE_LOAN_)/.test(String(key||'').toUpperCase());}
 function vfcTdIsReturnedFinancingCredit_(t){const s=String((t&&t.description)||'').toUpperCase();return/\bLN\s+PYMT-C\b|\bLOAN\s+PYMT-C\b|\bLOAN\s+PAYMENT-C\b|^RTN\s+NSF\b|^RTN#?\d+\s+(?:NSF|FUNDS\s+HELD)\b|RETURNED\s+CHEQUE|CHEQUE\s+RETURNED/.test(s);}
-function vfcTdIsNonOperatingReversalCredit_(t){if(String((t&&t.direction)||'').toUpperCase()!=='CREDIT')return false;const s=String((t&&t.description)||'').toUpperCase().replace(/\s+/g,' ').trim();if(vfcTdIsReturnedFinancingCredit_(t))return true;return /^RECLAIM\s+E-TFR\b|^REVERSE\s+E-TFR\s+FEE\b|^CANCEL\s+E-TFR\b|^ACCT\s+BAL\s+REBATE\b|^SQ\s+ACCTVERIFY\s+MSP\b|\bDELETED\b/.test(s);}
+function vfcTdIsNonOperatingReversalCredit_(t){if(String((t&&t.direction)||'').toUpperCase()!=='CREDIT')return false;const s=String((t&&t.description)||'').toUpperCase().replace(/\s+/g,' ').trim();if(vfcTdIsReturnedFinancingCredit_(t))return true;return /^RECLAIM\s+E-TFR\b|^REVERSE\s+E-TFR\s+FEE\b|^CANCEL\s+E-TFR\b|^ACCT\s+BAL\s+REBATE\b|^SQ\s+ACCTVERIFY\s+MSP\b|^NSF$|\bDELETED\b/.test(s);}
 
 function runTdBankingSelfTests(){
   const results=[];
@@ -269,6 +269,74 @@ function runTdBankingSelfTests(){
     ]);
     close(d.confirmedMonthlyDebtService,0,.02,'one-off standalone loan debt');
     return'one-off LOAN not monthly debt';
+  });
+
+  test('Lotus Pharmacy six real TD statements reconcile exactly',function(){
+    const cases=[
+      {range:'APR 30/25 - MAY 30/25',opening:-13860.16,closing:87569.78,pages:[[30324.40,9110.85,20,11],[27337.51,62985.31,23,8],[29595.72,10631.20,27,4],[29557.15,15492.49,25,6],[34578.29,72099.88,23,8],[209806.93,89450.33,12,10]],min:'MONTHLY MIN. BAL. $39,804.16OD'},
+      {range:'MAY 30/25 - JUN 30/25',opening:87569.78,closing:13944.63,pages:[[17644.23,7233.98,21,10],[27958.91,97820.34,24,7],[39229.00,54638.91,26,5],[33663.12,45647.36,28,3],[37306.65,7638.01,22,5],[9164.95,25613.41,9,7]],min:'MONTHLY MIN. BAL. $676.80'},
+      {range:'JUN 30/25 - JUL 31/25',opening:13944.63,closing:303922.17,pages:[[114869.69,49249.65,21,10],[48783.94,80047.25,28,3],[97297.54,13120.06,26,5],[120401.53,41064.17,26,5],[35468.45,31114.37,22,6],[108943.36,21191.47,12,4]],min:'MONTHLY MIN. BAL. $9,959.27'},
+      {range:'JUL 31/25 - AUG 29/25',opening:303922.17,closing:-28117.16,pages:[[30503.02,44762.45,20,11],[29347.90,11456.79,26,5],[44184.95,377708.74,27,4],[34585.29,13494.31,26,5],[31863.72,19987.64,24,6],[2257.56,37371.84,5,8]],min:'MONTHLY MIN. BAL. $45,729.79OD'},
+      {range:'AUG 29/25 - SEP 29/25',opening:-28117.16,closing:-37718.73,pages:[[17421.86,11657.65,21,10],[32883.64,16154.74,26,5],[38580.22,60315.78,26,5],[95737.17,78563.06,25,6],[26625.32,21747.06,25,7],[11078.37,43489.86,13,7]],min:'MONTHLY MIN. BAL. $45,781.89OD'},
+      {range:'SEP 29/25 - OCT 31/25',opening:-37718.73,closing:-29077.87,pages:[[17137.87,20548.64,16,15],[42170.52,12235.66,27,4],[61324.81,51328.94,28,3],[20852.44,50856.41,24,7],[44680.35,42570.02,27,4],[28928.13,27023.99,25,6],[1248.35,3137.95,2,4]],min:'MONTHLY MIN. BAL. $41,129.50OD'}
+    ];
+    let gross=0;
+    cases.forEach(function(x,i){
+      const s=vfcTdLockFacts_({},footerText(x.range,x.opening,x.pages,x.min),'lotus-'+i+'.pdf');
+      close(s.total_deposits,x.pages.reduce(function(a,p){return a+p[0];},0),.02,'Lotus deposits '+i);
+      close(s.total_withdrawals,x.pages.reduce(function(a,p){return a+p[1];},0),.02,'Lotus withdrawals '+i);
+      close(s.closing_balance,x.closing,.02,'Lotus closing '+i);
+      gross+=s.total_deposits;
+    });
+    close(gross,1663342.86,.02,'Lotus gross deposits');
+    close(gross/6,277223.81,.02,'Lotus average deposits');
+    return'average deposits=277223.81';
+  });
+  test('Lotus financing credits and recurring debt reconcile end-to-end',function(){
+    const rows=[
+      row('2025-07-31',[
+        tx('2025-07-22','BDC LOAN','CREDIT',90000,'BDC LOAN'),
+        tx('2025-07-31','JOURNEY/ONDECK BUS','CREDIT',100000,'JOURNEY/ONDECK BUS')
+      ]),
+      row('2025-08-29',[
+        tx('2025-08-07','JOURNEY/ONDECK BUS','DEBIT',4274.21),
+        tx('2025-08-14','JOURNEY/ONDECK BUS','DEBIT',4274.21),
+        tx('2025-08-18','BDC BUS','DEBIT',664.09),
+        tx('2025-08-21','JOURNEY/ONDECK BUS','DEBIT',4274.21),
+        tx('2025-08-28','JOURNEY/ONDECK BUS','DEBIT',4274.21)
+      ]),
+      row('2025-09-29',[
+        tx('2025-09-04','JOURNEY/ONDECK BUS','DEBIT',4274.21),
+        tx('2025-09-11','JOURNEY/ONDECK BUS','DEBIT',4274.21),
+        tx('2025-09-18','BDC BUS','DEBIT',762.47),
+        tx('2025-09-18','JOURNEY/ONDECK BUS','DEBIT',4274.21),
+        tx('2025-09-25','JOURNEY/ONDECK BUS','DEBIT',4274.21)
+      ]),
+      row('2025-10-31',[
+        tx('2025-10-02','JOURNEY/ONDECK BUS','DEBIT',4274.21),
+        tx('2025-10-09','JOURNEY/ONDECK BUS','DEBIT',4274.21),
+        tx('2025-10-16','JOURNEY/ONDECK BUS','DEBIT',4274.21),
+        tx('2025-10-20','BDC BUS','DEBIT',719.39),
+        tx('2025-10-23','JOURNEY/ONDECK BUS','DEBIT',4274.21),
+        tx('2025-10-30','JOURNEY/ONDECK BUS','DEBIT',4274.21)
+      ])
+    ];
+    const d=vfcDebtProfile_(rows);
+    close(d.financingCreditsTotal,190000,.02,'Lotus financing credits');
+    const journey=d.activeDebtObligations.filter(function(x){return x.entityKey==='TD_JOURNEY_ONDECK';})[0];
+    const bdc=d.activeDebtObligations.filter(function(x){return x.entityKey==='TD_BDC';})[0];
+    truthy(journey,'Journey obligation');
+    truthy(bdc,'BDC obligation');
+    close(journey.monthlyEquivalent,18521.58,.05,'Journey monthly');
+    close(bdc.monthlyEquivalent,715.32,.05,'BDC variable monthly');
+    equal(bdc.monthlyEquivalentMethod,'MONTHLY_VARIABLE_MEAN','BDC variable method');
+    close(d.confirmedMonthlyDebtService,19236.89,.05,'Lotus total monthly debt');
+    return'financing=190000, debt=19236.89';
+  });
+  test('Lotus plain NSF fee reversal credit is non-operating',function(){
+    truthy(vfcTdIsNonOperatingReversalCredit_(tx('2025-05-29','NSF','CREDIT',48)),'plain NSF reversal');
+    equal(vfcTdIsReturnedFinancingCredit_(tx('2025-05-29','NSF','CREDIT',48)),false,'plain NSF is not a financing-payment return matcher');
+    return'plain NSF credit excluded from operating deposits only';
   });
   const failed=results.filter(function(x){return!x.pass;});return{ok:failed.length===0,coreVersion:VFC_BANK_ENGINE.VERSION,tdRulesVersion:vfcTdBankProfile_().rulesVersion,total:results.length,passed:results.length-failed.length,failed:failed.length,results:results};
 }
