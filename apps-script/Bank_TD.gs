@@ -1,5 +1,5 @@
 /**
- * TD BANK ENGINE v2.2 — CANDIDATE
+ * TD BANK ENGINE v2.3 — CANDIDATE
  *
  * One permanent TD module. All TD-specific behavior lives here:
  * - extraction instructions
@@ -19,7 +19,7 @@ function vfcTdBankProfile_(){
     id:'TD',
     label:'TD',
     status:'CANDIDATE',
-    rulesVersion:'TD-2.2-CANDIDATE',
+    rulesVersion:'TD-2.3-CANDIDATE',
     intakeContract:'BANK_MATCHED_FROZEN_LEDGER_V4',
     aliases:['TD CANADA TRUST','THE TORONTO-DOMINION BANK','TORONTO-DOMINION','TD BANK','TD CANADA TRUST BUSINESS']
   };
@@ -47,6 +47,9 @@ function vfcTdExtractionRules_(){return[
   'Same or near-identical dollar amount by itself NEVER proves debt.',
   'Fee-only rows are not recurring obligations. A row containing fee wording is preserved only when it also contains independent financing evidence.',
   'MONTHLY PLAN FEE, BUS LINE FEE, TAX PYT FEE, SERVICE CHARGE and ordinary transaction fees are not debt obligations.',
+  'TD BUSINESS LINE OF CREDIT LIMIT: $X printed in the statement footer is a facility-limit disclosure only. It is not a transaction, financing advance, monthly debt payment or recurring obligation.',
+  'SMALL BUS LN FEE, BUS LINE FEE and PPSA registration/administration fees are fee-only rows, not debt service.',
+  'Numbered account transfers such as XX123 TFR-TO 5000118 or TFR-TO 6366272 are transfer outflows, not debt, even when they recur.',
   'A financing CREDIT must be in the DEPOSIT/CREDIT column and contain explicit financing wording or a known financing entity. Ordinary deposits and transfers are not financing merely because they are large.',
   'Cheque-image pages are supporting images only. Do not duplicate a cheque already listed in statement activity.'
 ].join('\n');}
@@ -87,7 +90,7 @@ function vfcTdClassifyDebit_(t){
   else if(/\bPAD\b|PRE[- ]?AUTH/.test(s)){family='OTHER';entityKey='TD_OTHER_PAD_'+vfcCounterpartyKey_(cp||raw);label=cp||raw;}
   else return null;return Object.assign({},t,{family:family,entityKey:entityKey,key:entityKey,label:label,debtJustification:debtJustification});
 }
-function vfcTdIsTransferDebit_(s){return/TFR-TO\s+C\/C|TFR-FR\s+C\/C|E-TRANSFER|SEND\s+E-TFR|\bTRANSFER\b|CHQ#|CHEQUE|ATM\s+W\/D|ATM\s+DEP|GC\s+\d+-(?:TRANSFER|DEPOSIT)/.test(String(s||'').toUpperCase());}
+function vfcTdIsTransferDebit_(s){return/TFR-TO\s+C\/C|TFR-FR\s+C\/C|\bTFR-(?:TO|FR)\s+\d{5,}\b|E-TRANSFER|SEND\s+E-TFR|\bTRANSFER\b|CHQ#|CHEQUE|ATM\s+W\/D|ATM\s+DEP|GC\s+\d+-(?:TRANSFER|DEPOSIT)/.test(String(s||'').toUpperCase());}
 function vfcTdIsNonOperatingTransferCredit_(t){if(String((t&&t.direction)||'').toUpperCase()!=='CREDIT')return false;const s=String((t&&t.description)||'').toUpperCase().replace(/\s+/g,' ').trim();if(/\bTFR[- ]FR\s+C\/C\b/.test(s))return true;if(/\bTRANSFER\s+FROM\s+(?:C\/C|ACCOUNT)\b/.test(s))return true;return false;}
 function vfcTdLoanReference_(s){s=String(s||'').toUpperCase();let m=s.match(/\*([0-9]{6,})/);if(m)return m[1];m=s.match(/(?:LN\s+PYT\s+(?:INT|PRI)|LN\s+PYMT|LOAN\s+(?:PYMT|PAYMENT))[^0-9]{0,20}([0-9]{6,})/);if(m)return m[1];m=s.match(/\b([0-9]{9})\b/);return m?m[1]:'';}
 function vfcTdKnownFinancingCredit_(t){const s=String((t&&t.description)||'').toUpperCase();if(vfcTdIsReturnedFinancingCredit_(t))return false;return/JOURNEY|ONDECK|MERCHANT\s+GROWTH|\bCANACAP\b|GREENBOX|\bICAPITAL\b|\bBDC\b|LOAN\s+(?:ADVANCE|PROCEEDS|CREDIT)|\bMCA\b|\bMORTGAGE\b|\bLOC\b|LINE\s+OF\s+CREDIT|CREDIT\s+LINE|\bFINANC(?:E|ING)?\b/.test(s);}
@@ -103,6 +106,40 @@ function runTdBankingSelfTests(){
   function truthy(value,label){if(!value)throw new Error((label||'value')+' expected truthy');}
   function test(name,fn){try{const detail=fn()||'';results.push({name:name,pass:true,detail:String(detail||'')});}catch(e){results.push({name:name,pass:false,detail:String(e&&e.message||e)});}}
   function footerText(range,opening,pages,minLine){const parts=[range,'BALANCE FORWARD '+String(range||'').split(' ')[0]+'01 '+(opening<0?Math.abs(opening).toFixed(2)+'OD':Number(opening).toLocaleString('en-CA',{minimumFractionDigits:2,maximumFractionDigits:2}))];(pages||[]).forEach(function(p,i){parts.push('Page '+(i+1)+' of '+pages.length);parts.push('Credits '+(p[2]||0)+' '+Number(p[0]).toLocaleString('en-CA',{minimumFractionDigits:2,maximumFractionDigits:2}));parts.push('Debits '+(p[3]||0)+' '+Number(p[1]).toLocaleString('en-CA',{minimumFractionDigits:2,maximumFractionDigits:2}));});if(minLine)parts.push(minLine);return parts.join('\n');}
+
+
+  test('Shepherd Enterprises six real TD statements reconcile exactly',function(){
+    const cases=[
+      {range:'MAR 31/26 - APR 30/26',opening:180930.51,deposits:899502.78,withdrawals:848245.27,closing:232188.02,credits:5,debits:15,min:'MONTHLY MIN. BAL. $12,217.44'},
+      {range:'APR 30/26 - MAY 29/26',opening:232188.02,deposits:779235.16,withdrawals:755874.00,closing:255549.18,credits:5,debits:11,min:'MONTHLY MIN. BAL. $60,660.95'},
+      {range:'MAY 29/26 - JUN 30/26',opening:255549.18,deposits:737847.30,withdrawals:971435.24,closing:21961.24,credits:5,debits:16,min:'MONTHLY MIN. BAL. $21,961.24'},
+      {range:'JUN 30/26 - JUL 31/26',opening:21961.24,deposits:1046105.55,withdrawals:776972.18,closing:291094.61,credits:5,debits:18,min:'MONTHLY MIN. BAL. $10,412.50'},
+      {range:'JUL 31/26 - AUG 31/26',opening:291094.61,deposits:642735.12,withdrawals:770135.23,closing:163694.50,credits:4,debits:15,min:'MONTHLY MIN. BAL. $97,682.38'},
+      {range:'AUG 31/26 - SEP 29/26',opening:163694.50,deposits:556174.49,withdrawals:635774.26,closing:84094.73,credits:4,debits:20,min:'MONTHLY MIN. BAL. $84,094.73'}
+    ];
+    let gross=0;
+    cases.forEach(function(x,i){
+      const text=footerText(x.range,x.opening,[[x.deposits,x.withdrawals,x.credits,x.debits]],x.min);
+      const s=vfcTdLockFacts_({},text,'shepherd-'+i+'.pdf');
+      close(s.total_deposits,x.deposits,.02,'Shepherd deposits '+i);
+      close(s.total_withdrawals,x.withdrawals,.02,'Shepherd withdrawals '+i);
+      close(s.closing_balance,x.closing,.02,'Shepherd closing '+i);
+      gross+=s.total_deposits;
+    });
+    close(gross,4661600.40,.02,'Shepherd total deposits');
+    close(gross/6,776933.40,.02,'Shepherd average deposits');
+    return'average deposits=776933.40';
+  });
+  test('Shepherd TD operating credits and administrative rows do not create financing debt',function(){
+    equal(vfcTdKnownFinancingCredit_(tx('2026-04-01','PIX PHARMACY IN BPY','CREDIT',168767.75,'PIX PHARMACY IN BPY')),false,'PIX revenue financing credit');
+    equal(vfcTdClassifyDebit_(tx('2026-06-02','SMALL BUS LN FEE','DEBIT',250,'SMALL BUS LN FEE')),null,'small business loan fee');
+    equal(vfcTdClassifyDebit_(tx('2026-06-30','BUS LINE FEE','DEBIT',25,'BUS LINE FEE')),null,'business line fee');
+    equal(vfcTdClassifyDebit_(tx('2026-07-02','PPSA Registr MSP','DEBIT',48.74,'PPSA Registr MSP')),null,'PPSA fee');
+    equal(vfcTdClassifyDebit_(tx('2026-07-02','IW274 TFR-TO 6366272','DEBIT',10000,'TFR-TO 6366272')),null,'numbered transfer');
+    equal(vfcTdClassifyDebit_(tx('2026-07-14','WIRE TO CUSTOMER','DEBIT',268837.26,'WIRE TO CUSTOMER')),null,'wire');
+    equal(vfcTdClassifyDebit_(tx('2026-07-20','CAD DRAFT 13845142','DEBIT',136628.56,'CAD DRAFT')),null,'bank draft');
+    return'no false debt';
+  });
 
   test('Waveform nine real TD statements reconcile exactly',function(){const cases=[{range:'APR 01/25 - APR 30/25',opening:0,closing:-39.02,pages:[[0,39.02,1,2]],min:'MONTHLY MIN. BAL. $39.02OD'},{range:'APR 30/25 - MAY 30/25',opening:-39.02,closing:-78.76,pages:[[0,39.74,0,2]],min:'MONTHLY MIN. BAL. $78.76OD'},{range:'MAY 30/25 - JUN 30/25',opening:-78.76,closing:28443.61,pages:[[28561.92,39.55,8,3]],min:'MONTHLY MIN. BAL. $78.76OD'},{range:'JUN 30/25 - JUL 31/25',opening:28443.61,closing:30892.06,pages:[[21403.47,36528.45,7,24],[16394.56,12628.50,4,27],[24428.67,4556.90,2,29],[22013.80,7351.00,4,27],[0,20713.45,0,31],[0,13.75,0,1]],min:'MONTHLY MIN. BAL. $124.79'},{range:'JUL 31/25 - AUG 29/25',opening:30892.06,closing:56583.80,pages:[[22909.35,25787.95,3,28],[22135.12,8143.50,1,30],[23164.33,13441.12,3,28],[21366.32,8864.81,5,26],[0,7646.00,0,8]],min:'MONTHLY MIN. BAL. $28,013.46'},{range:'AUG 29/25 - SEP 29/25',opening:56583.80,closing:71699.58,pages:[[33132.31,39968.90,3,28],[15043.38,16693.00,2,29],[18603.11,16908.00,2,29],[20198.13,11199.04,1,30],[25724.74,12816.95,2,26]],min:'MONTHLY MIN. BAL. $35,227.59'},{range:'SEP 29/25 - OCT 31/25',opening:71699.58,closing:86143.26,pages:[[44636.46,35049.90,7,24],[150.00,16812.50,1,30],[44904.13,15918.50,8,23],[33.99,6295.50,2,29],[39.00,1243.50,1,7]],min:'MONTHLY MIN. BAL. $53,113.68'},{range:'OCT 31/25 - NOV 28/25',opening:86143.26,closing:96425.78,pages:[[25652.16,12517.64,3,28],[22431.40,43791.35,6,25],[27612.68,14078.00,2,29],[20130.77,13332.50,2,29],[39.00,1864.00,1,12]],min:'MONTHLY MIN. BAL. $65,824.33'},{range:'NOV 28/25 - DEC 31/25',opening:96425.78,closing:118371.74,pages:[[30992.62,40469.40,3,28],[18063.91,7552.50,1,30],[40296.08,6169.50,2,29],[200.00,13312.50,1,30],[39.00,141.75,1,4]],min:'MONTHLY MIN. BAL. $86,143.00'}];let gross=0,withdrawals=0;cases.forEach(function(c,i){const s=vfcTdLockFacts_({},footerText(c.range,c.opening,c.pages,c.min),'waveform-'+i+'.pdf');close(s.closing_balance,c.closing,.02,'Waveform closing '+i);gross+=s.total_deposits;withdrawals+=s.total_withdrawals;});close(gross,590300.41,.02,'Waveform deposits');close(withdrawals,471928.67,.02,'Waveform withdrawals');return'gross='+vfcRound_(gross,.01)+', withdrawals='+vfcRound_(withdrawals,.01);});
   test('Waveform latest six benchmark average remains 93623.08',function(){const deposits=[84240.50,89575.12,112701.67,89763.58,95866.01,89591.61];close(deposits.reduce(function(a,b){return a+b;},0),561738.49,.02,'latest six deposits');close(deposits.reduce(function(a,b){return a+b;},0)/6,93623.081666,.02,'latest six average');return'latest six average=93623.08';});
