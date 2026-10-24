@@ -1,5 +1,5 @@
 /**
- * TD BANK ENGINE v2.6 — CANDIDATE
+ * TD BANK ENGINE v2.7 — CANDIDATE
  *
  * One permanent TD module. All TD-specific behavior lives here:
  * - extraction instructions
@@ -19,7 +19,7 @@ function vfcTdBankProfile_(){
     id:'TD',
     label:'TD',
     status:'CANDIDATE',
-    rulesVersion:'TD-2.6-CANDIDATE',
+    rulesVersion:'TD-2.7-CANDIDATE',
     intakeContract:'BANK_MATCHED_FROZEN_LEDGER_V4',
     aliases:['TD CANADA TRUST','THE TORONTO-DOMINION BANK','TORONTO-DOMINION','TD BANK','TD CANADA TRUST BUSINESS']
   };
@@ -103,7 +103,7 @@ function vfcTdLoanReference_(s){s=String(s||'').toUpperCase();let m=s.match(/\*(
 function vfcTdKnownFinancingCredit_(t){const s=String((t&&t.description)||'').toUpperCase();if(vfcTdIsReturnedFinancingCredit_(t))return false;return/JOURNEY|ONDECK|MERCHANT\s+GROWTH|\bCANACAP\b|GREENBOX|\bICAPITAL\b|\bBDC\b|LOAN\s+(?:ADVANCE|PROCEEDS|CREDIT)|\bMCA\b|\bMORTGAGE\b|\bLOC\b|LINE\s+OF\s+CREDIT|CREDIT\s+LINE|\bFINANC(?:E|ING)?\b/.test(s);}
 function vfcTdStrongEntityKey_(key){return/^(TD_JOURNEY_ONDECK|TD_MERCHANT_GROWTH|TD_CANACAP|TD_GREENBOX|TD_ICAPITAL|TD_BDC|TD_FORD_CREDIT|TD_AFFIRM_CANADA|TD_RBC_LOAN_PAYMENT_|TD_INSURANCE_LOAN_|TD_PREMIUM_FINANCE_|TD_LOAN_|TD_UNREFERENCED_LOAN_|TD_FINANCE_|TD_STANDALONE_LOAN_)/.test(String(key||'').toUpperCase());}
 function vfcTdIsReturnedFinancingCredit_(t){const s=String((t&&t.description)||'').toUpperCase();return/\bLN\s+PYMT-C\b|\bLOAN\s+PYMT-C\b|\bLOAN\s+PAYMENT-C\b|^RTN\s+NSF\b|^RTN#?\d+\s+(?:NSF|FUNDS\s+HELD)\b|RETURNED\s+CHEQUE|CHEQUE\s+RETURNED/.test(s);}
-function vfcTdIsNonOperatingReversalCredit_(t){if(String((t&&t.direction)||'').toUpperCase()!=='CREDIT')return false;const s=String((t&&t.description)||'').toUpperCase().replace(/\s+/g,' ').trim();if(vfcTdIsReturnedFinancingCredit_(t))return true;return /^RECLAIM\s+E-TFR\b|^REVERSE\s+E-TFR\s+FEE\b|\bDELETED\b/.test(s);}
+function vfcTdIsNonOperatingReversalCredit_(t){if(String((t&&t.direction)||'').toUpperCase()!=='CREDIT')return false;const s=String((t&&t.description)||'').toUpperCase().replace(/\s+/g,' ').trim();if(vfcTdIsReturnedFinancingCredit_(t))return true;return /^RECLAIM\s+E-TFR\b|^REVERSE\s+E-TFR\s+FEE\b|^CANCEL\s+E-TFR\b|^ACCT\s+BAL\s+REBATE\b|^SQ\s+ACCTVERIFY\s+MSP\b|\bDELETED\b/.test(s);}
 
 function runTdBankingSelfTests(){
   const results=[];
@@ -245,5 +245,30 @@ function runTdBankingSelfTests(){
   test('TD returned credits reduce estimated operating deposits',function(){const txs=vfcNormalizeTransactions_([tx('2025-09-09','LN PYMT *602099601','DEBIT',1265.14),tx('2025-09-09','LN PYMT-C *602099601','CREDIT',1265.14)],'TD'),p={bankId:'TD',bankName:'TD',statementStartDate:'2025-08-29',statementEndDate:'2025-09-29',openingBalance:0,closingBalance:0,totalDeposits:5000,totalWithdrawals:5000,reconciliationDifference:0,nsfCount:1,negativeBalanceDetected:false,transactionsVerified:true,transactions:txs},f=vfcBuildBankingFeatures_({},[{row:{fileName:'td.pdf'},payload:p}]);close(f.estimatedOperatingTotalDeposits,3734.86,.02,'operating');equal(f.returnedPaymentFlag,1,'return flag');return'operating='+f.estimatedOperatingTotalDeposits;});
   test('TD intake payload freezes a usable bank-matched ledger',function(){const summary={bank_name:'TD',statement_start_date:'2025-08-29',statement_end_date:'2025-09-29',opening_balance:1000,closing_balance:5725.79,total_deposits:9000,total_withdrawals:4274.21,nsf_count:0,negative_balance_detected:false,banking_transactions:[tx('2025-09-04','E-TRANSFER CUSTOMER','CREDIT',9000),tx('2025-09-04','JOURNEY/ONDECK BUS','DEBIT',4274.21)]},raw=vfcBankCreateIntakePayload_(summary,'td-intake-contract.pdf'),p=vfcValidateFrozenPayload_(raw,'TD','td-intake-contract.pdf');equal(p.bankId,'TD','frozen bank');equal(p.transactionsVerified,true,'transactions verified');equal(p.transactions.length,2,'frozen transactions');equal(p.intakeContract,VFC_BANK_ENGINE.INTAKE_CONTRACT,'intake contract');equal(p.bankRulesVersion,vfcTdBankProfile_().rulesVersion,'rules version');let mismatch=false;try{vfcValidateFrozenPayload_(raw,'RBC','td-intake-contract.pdf');}catch(e){mismatch=/bank mismatch/i.test(String(e&&e.message||e));}truthy(mismatch,'wrong-bank rejection');return'bank='+p.bankId+', transactions='+p.transactions.length;});
   test('TD debt profile is deterministic for identical frozen facts',function(){const rows=[row('2026-01-31',[tx('2026-01-10','FORD CREDIT CA APY','DEBIT',950.61),tx('2026-01-18','FIRST INSURANCE LOAN','DEBIT',437.99)]),row('2026-02-28',[tx('2026-02-10','FORD CREDIT CA APY','DEBIT',950.61),tx('2026-02-18','FIRST INSURANCE LOAN','DEBIT',437.99)]),row('2026-03-31',[tx('2026-03-10','FORD CREDIT CA APY','DEBIT',950.61),tx('2026-03-18','FIRST INSURANCE LOAN','DEBIT',437.99)])],a=JSON.stringify(vfcDebtProfile_(rows)),b=JSON.stringify(vfcDebtProfile_(rows));equal(a,b,'deterministic JSON');return'deterministic';});
+
+  test('Waveform cancelled transfers and bank rebates are non-operating credits',function(){
+    truthy(vfcTdIsNonOperatingReversalCredit_(tx('2025-09-10','CANCEL E-TFR ***8bX','CREDIT',360)),'cancelled e-transfer');
+    truthy(vfcTdIsNonOperatingReversalCredit_(tx('2025-10-31','ACCT BAL REBATE','CREDIT',39)),'account balance rebate');
+    truthy(vfcTdIsNonOperatingReversalCredit_(tx('2025-06-19','SQ ACCTVERIFY MSP','CREDIT',0.01)),'Square account verification');
+    equal(vfcTdIsNonOperatingReversalCredit_(tx('2025-10-20','Square, Inc. MSP','CREDIT',26041.81)),false,'Square merchant revenue');
+    equal(vfcTdIsNonOperatingReversalCredit_(tx('2025-10-20','STRIPE MSP','CREDIT',31.43)),false,'Stripe merchant revenue');
+    return'cancel/rebate/verification excluded; merchant revenue retained';
+  });
+  test('Waveform nine statement gross-deposit benchmark retains dormant months',function(){
+    const deposits=[0,0,28561.92,84240.50,89575.12,112701.67,89763.58,95866.01,89591.61];
+    const total=deposits.reduce(function(a,b){return a+b;},0);
+    close(total,590300.41,.02,'Waveform gross deposits');
+    close(total/9,65588.934444,.02,'Waveform nine-month average');
+    return'average deposits=65588.93 including two zero-activity months';
+  });
+  test('Waveform standalone LOAN debit is not monthly debt without recurrence',function(){
+    const d=vfcDebtProfile_([
+      row('2025-06-30',[]),row('2025-07-31',[]),row('2025-08-29',[]),
+      row('2025-09-29',[tx('2025-09-08','LOAN','DEBIT',11105,'LOAN')]),
+      row('2025-10-31',[]),row('2025-11-28',[]),row('2025-12-31',[])
+    ]);
+    close(d.confirmedMonthlyDebtService,0,.02,'one-off standalone loan debt');
+    return'one-off LOAN not monthly debt';
+  });
   const failed=results.filter(function(x){return!x.pass;});return{ok:failed.length===0,coreVersion:VFC_BANK_ENGINE.VERSION,tdRulesVersion:vfcTdBankProfile_().rulesVersion,total:results.length,passed:results.length-failed.length,failed:failed.length,results:results};
 }
