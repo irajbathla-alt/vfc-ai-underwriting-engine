@@ -1,5 +1,5 @@
 /**
- * TD BANK ENGINE v2.3 — CANDIDATE
+ * TD BANK ENGINE v2.4 — CANDIDATE
  *
  * One permanent TD module. All TD-specific behavior lives here:
  * - extraction instructions
@@ -19,7 +19,7 @@ function vfcTdBankProfile_(){
     id:'TD',
     label:'TD',
     status:'CANDIDATE',
-    rulesVersion:'TD-2.3-CANDIDATE',
+    rulesVersion:'TD-2.4-CANDIDATE',
     intakeContract:'BANK_MATCHED_FROZEN_LEDGER_V4',
     aliases:['TD CANADA TRUST','THE TORONTO-DOMINION BANK','TORONTO-DOMINION','TD BANK','TD CANADA TRUST BUSINESS']
   };
@@ -43,7 +43,7 @@ function vfcTdExtractionRules_(){return[
   'RBC LOAN PYMT LOAN is financing even though it appears on a TD account. When no reference is printed, materially different payment amounts remain separate streams so a catch-up payment cannot inflate the regular monthly obligation.',
   'EMPTX, GST-B, GST-P, TXBAL, TAX PYT, CRA, CCRA and HST are TAX/informational, not financing debt.',
   'TFR-FR C/C, TFR-TO C/C, E-TRANSFER, SEND E-TFR, GC ... TRANSFER and ordinary cheques are transfers, not debt. A transfer remains non-debt even if its memo contains the word LOAN.',
-  'For operating-deposit analysis, exclude only direction-explicit inbound account-transfer credits such as TFR-FR C/C or TRANSFER FROM C/C/ACCOUNT. GC ####-TRANSFER is direction-ambiguous in TD OCR and must never be excluded from operating deposits solely from its description. Generic E-TRANSFER, SEND E-TFR, MOBILE DEPOSIT and GC ####-DEPOSIT are also not treated as internal transfers merely from wording.',
+  'For operating-deposit analysis, exclude only direction-explicit inbound account-transfer credits such as TFR-FR C/C, numbered TFR-FR 5221256, or TRANSFER FROM C/C/ACCOUNT. GC ####-TRANSFER is direction-ambiguous in TD OCR and must never be excluded from operating deposits solely from its description. Generic E-TRANSFER, SEND E-TFR, MOBILE DEPOSIT and GC ####-DEPOSIT are also not treated as internal transfers merely from wording.',
   'Same or near-identical dollar amount by itself NEVER proves debt.',
   'Fee-only rows are not recurring obligations. A row containing fee wording is preserved only when it also contains independent financing evidence.',
   'MONTHLY PLAN FEE, BUS LINE FEE, TAX PYT FEE, SERVICE CHARGE and ordinary transaction fees are not debt obligations.',
@@ -91,7 +91,7 @@ function vfcTdClassifyDebit_(t){
   else return null;return Object.assign({},t,{family:family,entityKey:entityKey,key:entityKey,label:label,debtJustification:debtJustification});
 }
 function vfcTdIsTransferDebit_(s){return/TFR-TO\s+C\/C|TFR-FR\s+C\/C|\bTFR-(?:TO|FR)\s+\d{5,}\b|E-TRANSFER|SEND\s+E-TFR|\bTRANSFER\b|CHQ#|CHEQUE|ATM\s+W\/D|ATM\s+DEP|GC\s+\d+-(?:TRANSFER|DEPOSIT)/.test(String(s||'').toUpperCase());}
-function vfcTdIsNonOperatingTransferCredit_(t){if(String((t&&t.direction)||'').toUpperCase()!=='CREDIT')return false;const s=String((t&&t.description)||'').toUpperCase().replace(/\s+/g,' ').trim();if(/\bTFR[- ]FR\s+C\/C\b/.test(s))return true;if(/\bTRANSFER\s+FROM\s+(?:C\/C|ACCOUNT)\b/.test(s))return true;return false;}
+function vfcTdIsNonOperatingTransferCredit_(t){if(String((t&&t.direction)||'').toUpperCase()!=='CREDIT')return false;const s=String((t&&t.description)||'').toUpperCase().replace(/\s+/g,' ').trim();if(/\bTFR[- ]FR\s+C\/C\b/.test(s))return true;if(/\bTFR[- ]FR\s+\d{5,}\b/.test(s))return true;if(/\bTRANSFER\s+FROM\s+(?:C\/C|ACCOUNT)\b/.test(s))return true;return false;}
 function vfcTdLoanReference_(s){s=String(s||'').toUpperCase();let m=s.match(/\*([0-9]{6,})/);if(m)return m[1];m=s.match(/(?:LN\s+PYT\s+(?:INT|PRI)|LN\s+PYMT|LOAN\s+(?:PYMT|PAYMENT))[^0-9]{0,20}([0-9]{6,})/);if(m)return m[1];m=s.match(/\b([0-9]{9})\b/);return m?m[1]:'';}
 function vfcTdKnownFinancingCredit_(t){const s=String((t&&t.description)||'').toUpperCase();if(vfcTdIsReturnedFinancingCredit_(t))return false;return/JOURNEY|ONDECK|MERCHANT\s+GROWTH|\bCANACAP\b|GREENBOX|\bICAPITAL\b|\bBDC\b|LOAN\s+(?:ADVANCE|PROCEEDS|CREDIT)|\bMCA\b|\bMORTGAGE\b|\bLOC\b|LINE\s+OF\s+CREDIT|CREDIT\s+LINE|\bFINANC(?:E|ING)?\b/.test(s);}
 function vfcTdStrongEntityKey_(key){return/^(TD_JOURNEY_ONDECK|TD_MERCHANT_GROWTH|TD_CANACAP|TD_GREENBOX|TD_ICAPITAL|TD_BDC|TD_FORD_CREDIT|TD_AFFIRM_CANADA|TD_RBC_LOAN_PAYMENT_|TD_INSURANCE_LOAN_|TD_PREMIUM_FINANCE_|TD_LOAN_|TD_UNREFERENCED_LOAN_|TD_FINANCE_|TD_STANDALONE_LOAN_)/.test(String(key||'').toUpperCase());}
@@ -139,6 +139,60 @@ function runTdBankingSelfTests(){
     equal(vfcTdClassifyDebit_(tx('2026-07-14','WIRE TO CUSTOMER','DEBIT',268837.26,'WIRE TO CUSTOMER')),null,'wire');
     equal(vfcTdClassifyDebit_(tx('2026-07-20','CAD DRAFT 13845142','DEBIT',136628.56,'CAD DRAFT')),null,'bank draft');
     return'no false debt';
+  });
+
+  test('Vivace six real TD statements reconcile exactly across activity and cheque-image pages',function(){
+    const cases=[
+      {range:'JUN 30/25 - JUL 31/25',opening:17942.28,pages:[[60314.54,38002.05,5,26],[7500.00,7006.76,1,6]],closing:40748.01,min:'MONTHLY MIN. BAL. $2,784.71'},
+      {range:'SEP 29/25 - OCT 31/25',opening:44209.12,pages:[[33312.62,67307.95,6,25],[44244.80,20829.96,5,25]],closing:33628.63,min:'MONTHLY MIN. BAL. $33.18'},
+      {range:'OCT 31/25 - NOV 28/25',opening:33628.63,pages:[[17606.91,41920.52,2,29],[6425.78,107.75,1,3]],closing:15633.05,min:'MONTHLY MIN. BAL. $11.77'},
+      {range:'NOV 28/25 - DEC 31/25',opening:15633.05,pages:[[50746.53,65283.17,5,26],[49009.77,10357.35,5,22]],closing:39748.83,min:'MONTHLY MIN. BAL. $703.01'},
+      {range:'MAR 31/26 - APR 30/26',opening:41878.44,pages:[[0.00,39845.71,0,31],[21182.53,20108.99,1,30],[49164.90,9919.42,4,12]],closing:42351.75,min:'MONTHLY MIN. BAL. $289.03'},
+      {range:'MAY 29/26 - JUN 30/26',opening:37381.09,pages:[[14890.98,39877.62,3,28],[148.36,12403.39,1,30],[39145.24,32670.08,3,12]],closing:6614.58,min:'MONTHLY MIN. BAL. $18.13'}
+    ];
+    let gross=0;
+    cases.forEach(function(x,i){
+      const text=footerText(x.range,x.opening,x.pages,x.min);
+      const s=vfcTdLockFacts_({},text,'vivace-'+i+'.pdf');
+      close(s.closing_balance,x.closing,.02,'Vivace closing '+i);
+      gross+=s.total_deposits;
+    });
+    close(gross,393692.96,.02,'Vivace gross deposits');
+    close(gross/6,65615.493333,.02,'Vivace average deposits');
+    return'average deposits=65615.49';
+  });
+  test('Vivace numbered TFR-FR credits are internal transfers, not operating deposits',function(){
+    truthy(vfcTdIsNonOperatingTransferCredit_(tx('2025-10-24','JU242 TFR-FR 5221256','CREDIT',7000)),'numbered TFR-FR 7000');
+    truthy(vfcTdIsNonOperatingTransferCredit_(tx('2025-10-30','IL431 TFR-FR 5221256','CREDIT',8900)),'numbered TFR-FR 8900');
+    truthy(vfcTdIsNonOperatingTransferCredit_(tx('2025-12-24','WB240 TFR-FR 5221256','CREDIT',50)),'numbered TFR-FR 50');
+    equal(vfcTdIsNonOperatingTransferCredit_(tx('2025-07-31','GC 9080-TRANSFER','CREDIT',7500)),false,'GC transfer remains direction-ambiguous');
+    return'explicit numbered inbound transfers excluded';
+  });
+  test('Vivace returned cheque reduces operating deposits but is not financing debt',function(){
+    const txs=vfcNormalizeTransactions_([
+      tx('2025-07-28','GC 9080-DEPOSIT','CREDIT',7500),
+      tx('2025-07-30','RETURNED CHEQUE','DEBIT',7500),
+      tx('2025-07-31','GC 9080-TRANSFER','CREDIT',7500)
+    ],'TD');
+    const p={bankId:'TD',bankName:'TD',statementStartDate:'2025-06-30',statementEndDate:'2025-07-31',openingBalance:0,closingBalance:7500,totalDeposits:15000,totalWithdrawals:7500,reconciliationDifference:0,nsfCount:1,negativeBalanceDetected:false,transactionsVerified:true,transactions:txs};
+    const features=vfcBuildBankingFeatures_({},[{row:{fileName:'vivace-return.pdf'},payload:p}]);
+    close(features.excludedReversalCredits,7500,.02,'returned cheque exclusion');
+    close(features.estimatedOperatingTotalDeposits,7500,.02,'operating after return');
+    close(features.existingMonthlyDebtService,0,.02,'returned cheque debt');
+    return'operating=7500';
+  });
+  test('Vivace recurring Consumer Loans Loan is confirmed financing debt',function(){
+    const d=vfcDebtProfile_([
+      row('2025-07-31',[tx('2025-07-28','CONSUMER LOANS LOAN','DEBIT',772.19,'CONSUMER LOANS LOAN')]),
+      row('2025-10-31',[tx('2025-10-27','CONSUMER LOANS LOAN','DEBIT',772.19,'CONSUMER LOANS LOAN')]),
+      row('2025-11-28',[tx('2025-11-27','CONSUMER LOANS LOAN','DEBIT',772.19,'CONSUMER LOANS LOAN')]),
+      row('2025-12-31',[tx('2025-12-29','CONSUMER LOANS LOAN','DEBIT',772.19,'CONSUMER LOANS LOAN')]),
+      row('2026-04-30',[tx('2026-04-27','CONSUMER LOANS LOAN','DEBIT',772.19,'CONSUMER LOANS LOAN')]),
+      row('2026-06-30',[tx('2026-06-29','CONSUMER LOANS LOAN','DEBIT',772.19,'CONSUMER LOANS LOAN')])
+    ]);
+    close(d.confirmedMonthlyDebtService,772.19,.02,'consumer loan debt');
+    truthy(d.activeDebtObligations.some(function(x){return Math.abs((x.monthlyEquivalent||0)-772.19)<.02;}),'consumer loan active');
+    return'debt=772.19';
   });
 
   test('Waveform nine real TD statements reconcile exactly',function(){const cases=[{range:'APR 01/25 - APR 30/25',opening:0,closing:-39.02,pages:[[0,39.02,1,2]],min:'MONTHLY MIN. BAL. $39.02OD'},{range:'APR 30/25 - MAY 30/25',opening:-39.02,closing:-78.76,pages:[[0,39.74,0,2]],min:'MONTHLY MIN. BAL. $78.76OD'},{range:'MAY 30/25 - JUN 30/25',opening:-78.76,closing:28443.61,pages:[[28561.92,39.55,8,3]],min:'MONTHLY MIN. BAL. $78.76OD'},{range:'JUN 30/25 - JUL 31/25',opening:28443.61,closing:30892.06,pages:[[21403.47,36528.45,7,24],[16394.56,12628.50,4,27],[24428.67,4556.90,2,29],[22013.80,7351.00,4,27],[0,20713.45,0,31],[0,13.75,0,1]],min:'MONTHLY MIN. BAL. $124.79'},{range:'JUL 31/25 - AUG 29/25',opening:30892.06,closing:56583.80,pages:[[22909.35,25787.95,3,28],[22135.12,8143.50,1,30],[23164.33,13441.12,3,28],[21366.32,8864.81,5,26],[0,7646.00,0,8]],min:'MONTHLY MIN. BAL. $28,013.46'},{range:'AUG 29/25 - SEP 29/25',opening:56583.80,closing:71699.58,pages:[[33132.31,39968.90,3,28],[15043.38,16693.00,2,29],[18603.11,16908.00,2,29],[20198.13,11199.04,1,30],[25724.74,12816.95,2,26]],min:'MONTHLY MIN. BAL. $35,227.59'},{range:'SEP 29/25 - OCT 31/25',opening:71699.58,closing:86143.26,pages:[[44636.46,35049.90,7,24],[150.00,16812.50,1,30],[44904.13,15918.50,8,23],[33.99,6295.50,2,29],[39.00,1243.50,1,7]],min:'MONTHLY MIN. BAL. $53,113.68'},{range:'OCT 31/25 - NOV 28/25',opening:86143.26,closing:96425.78,pages:[[25652.16,12517.64,3,28],[22431.40,43791.35,6,25],[27612.68,14078.00,2,29],[20130.77,13332.50,2,29],[39.00,1864.00,1,12]],min:'MONTHLY MIN. BAL. $65,824.33'},{range:'NOV 28/25 - DEC 31/25',opening:96425.78,closing:118371.74,pages:[[30992.62,40469.40,3,28],[18063.91,7552.50,1,30],[40296.08,6169.50,2,29],[200.00,13312.50,1,30],[39.00,141.75,1,4]],min:'MONTHLY MIN. BAL. $86,143.00'}];let gross=0,withdrawals=0;cases.forEach(function(c,i){const s=vfcTdLockFacts_({},footerText(c.range,c.opening,c.pages,c.min),'waveform-'+i+'.pdf');close(s.closing_balance,c.closing,.02,'Waveform closing '+i);gross+=s.total_deposits;withdrawals+=s.total_withdrawals;});close(gross,590300.41,.02,'Waveform deposits');close(withdrawals,471928.67,.02,'Waveform withdrawals');return'gross='+vfcRound_(gross,.01)+', withdrawals='+vfcRound_(withdrawals,.01);});
