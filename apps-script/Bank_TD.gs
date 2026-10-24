@@ -1,5 +1,5 @@
 /**
- * TD BANK ENGINE v2.4 — CANDIDATE
+ * TD BANK ENGINE v2.5 — CANDIDATE
  *
  * One permanent TD module. All TD-specific behavior lives here:
  * - extraction instructions
@@ -19,7 +19,7 @@ function vfcTdBankProfile_(){
     id:'TD',
     label:'TD',
     status:'CANDIDATE',
-    rulesVersion:'TD-2.4-CANDIDATE',
+    rulesVersion:'TD-2.5-CANDIDATE',
     intakeContract:'BANK_MATCHED_FROZEN_LEDGER_V4',
     aliases:['TD CANADA TRUST','THE TORONTO-DOMINION BANK','TORONTO-DOMINION','TD BANK','TD CANADA TRUST BUSINESS']
   };
@@ -43,7 +43,7 @@ function vfcTdExtractionRules_(){return[
   'RBC LOAN PYMT LOAN is financing even though it appears on a TD account. When no reference is printed, materially different payment amounts remain separate streams so a catch-up payment cannot inflate the regular monthly obligation.',
   'EMPTX, GST-B, GST-P, TXBAL, TAX PYT, CRA, CCRA and HST are TAX/informational, not financing debt.',
   'TFR-FR C/C, TFR-TO C/C, E-TRANSFER, SEND E-TFR, GC ... TRANSFER and ordinary cheques are transfers, not debt. A transfer remains non-debt even if its memo contains the word LOAN.',
-  'For operating-deposit analysis, exclude only direction-explicit inbound account-transfer credits such as TFR-FR C/C, numbered TFR-FR 5221256, or TRANSFER FROM C/C/ACCOUNT. GC ####-TRANSFER is direction-ambiguous in TD OCR and must never be excluded from operating deposits solely from its description. Generic E-TRANSFER, SEND E-TFR, MOBILE DEPOSIT and GC ####-DEPOSIT are also not treated as internal transfers merely from wording.',
+  'For operating-deposit analysis, exclude direction-explicit inbound account-transfer credits such as TFR-FR C/C, numbered TFR-FR account transfers, TRANSFER FROM C/C/ACCOUNT, and GC ####-TRANSFER when the frozen transaction direction is CREDIT. Generic E-TRANSFER, SEND E-TFR, MOBILE DEPOSIT and GC ####-DEPOSIT are not treated as internal transfers merely from wording.',
   'Same or near-identical dollar amount by itself NEVER proves debt.',
   'Fee-only rows are not recurring obligations. A row containing fee wording is preserved only when it also contains independent financing evidence.',
   'MONTHLY PLAN FEE, BUS LINE FEE, TAX PYT FEE, SERVICE CHARGE and ordinary transaction fees are not debt obligations.',
@@ -55,10 +55,17 @@ function vfcTdExtractionRules_(){return[
 ].join('\n');}
 
 function vfcTdLockFacts_(summary,text,fileName){
-  const locked=Object.assign({},summary||{}),dates=vfcTdStatementDates_(text),opening=vfcTdOpeningBalance_(text),totals=vfcTdPageTotals_(text),negative=vfcTdNegativeBalanceFlag_(text);
+  const locked=Object.assign({},summary||{}),dates=vfcTdStatementDates_(text),opening=vfcTdOpeningBalance_(text),totals=vfcTdPageTotals_(text),negative=vfcTdNegativeBalanceFlag_(text),explicitNsf=vfcTdExplicitNsfCount_(text);
   if(dates.startDate)locked.statement_start_date=dates.startDate;if(dates.endDate)locked.statement_end_date=dates.endDate;if(opening!==null)locked.opening_balance=opening;
   if(!totals.complete)throw new Error('TD printed activity-page subtotals could not be fully verified for '+String(fileName||'statement')+'. PDF pages: '+totals.declaredPageCount+', cheque-image pages: '+totals.chequeImagePageCount+', expected activity pages: '+totals.expectedActivityPageCount+', found '+totals.creditCount+' Credits subtotal(s) and '+totals.debitCount+' Debits subtotal(s).');
-  locked.total_deposits=totals.totalDeposits;locked.total_withdrawals=totals.totalWithdrawals;locked.td_page_subtotal_count=totals.pageCount;locked.td_cheque_image_page_count=totals.chequeImagePageCount;if(opening!==null)locked.closing_balance=vfcRound_(opening+totals.totalDeposits-totals.totalWithdrawals,.01);if(negative!==null)locked.negative_balance_detected=negative;return locked;
+  locked.total_deposits=totals.totalDeposits;locked.total_withdrawals=totals.totalWithdrawals;locked.td_page_subtotal_count=totals.pageCount;locked.td_cheque_image_page_count=totals.chequeImagePageCount;if(opening!==null)locked.closing_balance=vfcRound_(opening+totals.totalDeposits-totals.totalWithdrawals,.01);if(negative!==null)locked.negative_balance_detected=negative;if(explicitNsf>vfcNum_(locked.nsf_count))locked.nsf_count=explicitNsf;return locked;
+}
+function vfcTdExplicitNsfCount_(text){
+  const s=String(text||'').toUpperCase();
+  let n=0,m;
+  const patterns=[/\bNSF\s+PAID\s+FEE\b/g,/\bRTN#?\d*\s+NSF\b/g,/\bRTN\s+NSF\b/g,/\bITEM\s+RETURNED\s+NSF\b/g];
+  patterns.forEach(function(re){while((m=re.exec(s))!==null)n++;});
+  return n;
 }
 function vfcTdStatementDates_(text){const s=String(text||'').replace(/\u00a0/g,' '),m=s.match(/\b(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\s+(\d{1,2})\/(\d{2,4})\s*[-–—]\s*(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\s+(\d{1,2})\/(\d{2,4})\b/i);if(!m)return{startDate:'',endDate:''};return{startDate:vfcTdIsoParts_(m[1],m[2],m[3]),endDate:vfcTdIsoParts_(m[4],m[5],m[6])};}
 function vfcTdIsoParts_(month,day,year){const months={JAN:1,FEB:2,MAR:3,APR:4,MAY:5,JUN:6,JUL:7,AUG:8,SEP:9,OCT:10,NOV:11,DEC:12},mm=months[String(month||'').toUpperCase()],dd=Number(day),raw=Number(year),yyyy=String(year||'').length===2?2000+raw:raw;if(!mm||!dd||!yyyy)return'';return String(yyyy).padStart(4,'0')+'-'+String(mm).padStart(2,'0')+'-'+String(dd).padStart(2,'0');}
@@ -91,7 +98,7 @@ function vfcTdClassifyDebit_(t){
   else return null;return Object.assign({},t,{family:family,entityKey:entityKey,key:entityKey,label:label,debtJustification:debtJustification});
 }
 function vfcTdIsTransferDebit_(s){return/TFR-TO\s+C\/C|TFR-FR\s+C\/C|\bTFR-(?:TO|FR)\s+\d{5,}\b|E-TRANSFER|SEND\s+E-TFR|\bTRANSFER\b|CHQ#|CHEQUE|ATM\s+W\/D|ATM\s+DEP|GC\s+\d+-(?:TRANSFER|DEPOSIT)/.test(String(s||'').toUpperCase());}
-function vfcTdIsNonOperatingTransferCredit_(t){if(String((t&&t.direction)||'').toUpperCase()!=='CREDIT')return false;const s=String((t&&t.description)||'').toUpperCase().replace(/\s+/g,' ').trim();if(/\bTFR[- ]FR\s+C\/C\b/.test(s))return true;if(/\bTFR[- ]FR\s+\d{5,}\b/.test(s))return true;if(/\bTRANSFER\s+FROM\s+(?:C\/C|ACCOUNT)\b/.test(s))return true;return false;}
+function vfcTdIsNonOperatingTransferCredit_(t){if(String((t&&t.direction)||'').toUpperCase()!=='CREDIT')return false;const s=String((t&&t.description)||'').toUpperCase().replace(/\s+/g,' ').trim();if(/\bTFR[- ]FR\s+C\/C\b/.test(s))return true;if(/\bTFR[- ]FR\s+\d{5,}\b/.test(s))return true;if(/\bTRANSFER\s+FROM\s+(?:C\/C|ACCOUNT)\b/.test(s))return true;if(/\bGC\s+\d+\s*-\s*TRANSFER\b/.test(s))return true;return false;}
 function vfcTdLoanReference_(s){s=String(s||'').toUpperCase();let m=s.match(/\*([0-9]{6,})/);if(m)return m[1];m=s.match(/(?:LN\s+PYT\s+(?:INT|PRI)|LN\s+PYMT|LOAN\s+(?:PYMT|PAYMENT))[^0-9]{0,20}([0-9]{6,})/);if(m)return m[1];m=s.match(/\b([0-9]{9})\b/);return m?m[1]:'';}
 function vfcTdKnownFinancingCredit_(t){const s=String((t&&t.description)||'').toUpperCase();if(vfcTdIsReturnedFinancingCredit_(t))return false;return/JOURNEY|ONDECK|MERCHANT\s+GROWTH|\bCANACAP\b|GREENBOX|\bICAPITAL\b|\bBDC\b|LOAN\s+(?:ADVANCE|PROCEEDS|CREDIT)|\bMCA\b|\bMORTGAGE\b|\bLOC\b|LINE\s+OF\s+CREDIT|CREDIT\s+LINE|\bFINANC(?:E|ING)?\b/.test(s);}
 function vfcTdStrongEntityKey_(key){return/^(TD_JOURNEY_ONDECK|TD_MERCHANT_GROWTH|TD_CANACAP|TD_GREENBOX|TD_ICAPITAL|TD_BDC|TD_FORD_CREDIT|TD_AFFIRM_CANADA|TD_RBC_LOAN_PAYMENT_|TD_INSURANCE_LOAN_|TD_PREMIUM_FINANCE_|TD_LOAN_|TD_UNREFERENCED_LOAN_|TD_FINANCE_|TD_STANDALONE_LOAN_)/.test(String(key||'').toUpperCase());}
@@ -165,7 +172,7 @@ function runTdBankingSelfTests(){
     truthy(vfcTdIsNonOperatingTransferCredit_(tx('2025-10-24','JU242 TFR-FR 5221256','CREDIT',7000)),'numbered TFR-FR 7000');
     truthy(vfcTdIsNonOperatingTransferCredit_(tx('2025-10-30','IL431 TFR-FR 5221256','CREDIT',8900)),'numbered TFR-FR 8900');
     truthy(vfcTdIsNonOperatingTransferCredit_(tx('2025-12-24','WB240 TFR-FR 5221256','CREDIT',50)),'numbered TFR-FR 50');
-    equal(vfcTdIsNonOperatingTransferCredit_(tx('2025-07-31','GC 9080-TRANSFER','CREDIT',7500)),false,'GC transfer remains direction-ambiguous');
+    truthy(vfcTdIsNonOperatingTransferCredit_(tx('2025-07-31','GC 9080-TRANSFER','CREDIT',7500)),'GC transfer credit');
     return'explicit numbered inbound transfers excluded';
   });
   test('Vivace returned cheque reduces operating deposits but is not financing debt',function(){
@@ -202,6 +209,9 @@ function runTdBankingSelfTests(){
   test('Lotus Pharmacy 7-page TD statement has 6 activity pages plus one cheque-image page',function(){const text=['APR 30/25 - MAY 30/25','BALANCE FORWARD APR30 13,860.16OD','Page 1 of 7','Credits 20 30,324.40','Debits 11 9,110.85','Page 2 of 7','Credits 23 27,337.51','Debits 8 62,985.31','Page 3 of 7','Credits 27 29,595.72','Debits 4 10,631.20','Page 4 of 7','Credits 25 29,557.15','Debits 6 15,492.49','Page 5 of 7','Credits 23 34,578.29','Debits 8 72,099.88','Page 6 of 7','Credits 12 209,806.93','Debits 10 89,450.33','Page 7 of 7','9280-5229903','CHEQUE # 01866 $5,551.88 CHEQUE # 01866','MONTHLY MIN. BAL. $39,804.16OD'].join('\n'),t=vfcTdPageTotals_(text);equal(t.declaredPageCount,7,'Lotus declared pages');equal(t.chequeImagePageCount,1,'Lotus cheque-image pages');equal(t.expectedActivityPageCount,6,'Lotus expected activity pages');equal(t.creditCount,6,'Lotus Credits subtotals');equal(t.debitCount,6,'Lotus Debits subtotals');truthy(t.complete,'Lotus statement completeness');close(t.totalDeposits,361200.00,.02,'Lotus deposits');close(t.totalWithdrawals,259770.06,.02,'Lotus withdrawals');const s=vfcTdLockFacts_({},text,'TD_EVERY_DAY_B_BUSINESS_PLAN_9280-5229903_Apr_30-May_30_2025.pdf');close(s.opening_balance,-13860.16,.02,'Lotus opening');close(s.closing_balance,87569.78,.02,'Lotus closing');return'activity=6, cheque=1, deposits='+t.totalDeposits+', withdrawals='+t.totalWithdrawals;});
   test('TD lock sets dates opening closing and OD deterministically',function(){const text=['MAR 31/26 - APR 30/26','Page 1 of 2','Credits 13 11,441.88','Debits 18 8,762.88','MONTHLY MIN. BAL. $30.76OD','BALANCE FORWARD MAR31 3.63','Page 2 of 2','Credits 1 2,520.00','Debits 10 2,142.71','MONTHLY MIN. BAL. $30.76OD','BALANCE FORWARD APR27 2,682.63'].join('\n'),s=vfcTdLockFacts_({closing_balance:999999,negative_balance_detected:false},text,'test.pdf');equal(s.statement_start_date,'2026-03-31','start');equal(s.statement_end_date,'2026-04-30','end');close(s.opening_balance,3.63,.001,'opening');close(s.total_deposits,13961.88,.001,'deposits');close(s.total_withdrawals,10905.59,.001,'withdrawals');close(s.closing_balance,3059.92,.001,'closing');equal(s.negative_balance_detected,true,'OD');return'closing='+s.closing_balance;});
   test('TD incomplete activity pages fail closed',function(){let threw=false;try{vfcTdLockFacts_({},['MAR 31/26 - APR 30/26','Page 1 of 2','Credits 13 11,441.88','Debits 18 8,762.88','BALANCE FORWARD MAR31 3.63'].join('\n'),'incomplete.pdf');}catch(e){threw=/could not be fully verified/i.test(String(e&&e.message||e));}truthy(threw,'fail closed');return'failed closed';});
+  test('TD verified GC transfer credit is non-operating',function(){truthy(vfcTdIsNonOperatingTransferCredit_(tx('2026-02-04','GC 9080-TRANSFER','CREDIT',79300)),'GC transfer credit');equal(vfcTdIsNonOperatingTransferCredit_(tx('2026-02-19','GC 9096-DEPOSIT','CREDIT',46.50)),false,'GC deposit');return'gc transfer excluded';});
+  test('TD NSF paid fee is counted deterministically',function(){const s=vfcTdLockFacts_({},['JUL 31/25 - AUG 29/25','BALANCE FORWARD JUL31 1000.00','Page 1 of 1','Credits 1 100.00','Debits 2 105.00','NSF PAID FEE 5.00','MONTHLY MIN. BAL. $1.00OD'].join('\n'),'nsf-test.pdf');equal(s.nsf_count,1,'NSF count');equal(s.negative_balance_detected,true,'OD');return'nsf=1';});
+
   test('TD explicit internal transfer credit patterns are narrow and directional',function(){truthy(vfcTdIsNonOperatingTransferCredit_(tx('2025-05-23','JX353 TFR-FR C/C','CREDIT',3000)),'TFR-FR credit');equal(vfcTdIsNonOperatingTransferCredit_(tx('2025-05-30','GC 9993-TRANSFER','CREDIT',10000)),false,'GC transfer description alone');equal(vfcTdIsNonOperatingTransferCredit_(tx('2025-05-30','GC 9993-TRANSFER','DEBIT',10000)),false,'GC transfer debit');equal(vfcTdIsNonOperatingTransferCredit_(tx('2025-05-01','E-TRANSFER ***Bpq','CREDIT',1500)),false,'customer e-transfer');equal(vfcTdIsNonOperatingTransferCredit_(tx('2025-05-29','GC 9993-DEPOSIT','CREDIT',5500)),false,'GC deposit');equal(vfcTdIsNonOperatingTransferCredit_(tx('2025-05-29','MOBILE DEPOSIT','CREDIT',5500)),false,'mobile deposit');return'direction-safe transfer rules';});
   test('TD only direction-explicit inbound transfers reduce operating deposits',function(){const txs=vfcNormalizeTransactions_([tx('2025-05-23','JX353 TFR-FR C/C','CREDIT',3000),tx('2025-05-30','GC 9993-TRANSFER','CREDIT',10000),tx('2025-05-01','E-TRANSFER ***Bpq','CREDIT',1500),tx('2025-05-29','GC 9993-DEPOSIT','CREDIT',5500)],'TD'),p={bankId:'TD',bankName:'TD',statementStartDate:'2025-04-30',statementEndDate:'2025-05-30',openingBalance:0,closingBalance:20000,totalDeposits:20000,totalWithdrawals:0,reconciliationDifference:0,nsfCount:0,negativeBalanceDetected:false,transactionsVerified:true,transactions:txs},f=vfcBuildBankingFeatures_({},[{row:{fileName:'lotus-transfer-test.pdf'},payload:p}]);close(f.excludedTransferCredits,3000,.02,'excluded transfers');close(f.estimatedOperatingTotalDeposits,17000,.02,'operating deposits');return'excluded=3000, operating=17000';});
   test('TD transfer memo containing LOAN is never debt',function(){equal(vfcTdClassifyDebit_(tx('2025-06-01','SEND E-TFR *Esd LOAN','DEBIT',2000)),null,'transfer loan memo');return'excluded';});
