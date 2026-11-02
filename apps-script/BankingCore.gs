@@ -1,10 +1,10 @@
 /**
- * VFC Banking Core 4.17
+ * VFC Banking Core 4.19
  * Shared bank-agnostic banking math over frozen statement facts.
  * No PDF or OpenAI call occurs during underwriting.
  */
 const VFC_BANK_ENGINE={
-  VERSION:'VFC-BANKING-CORE-4.18',
+  VERSION:'VFC-BANKING-CORE-4.19',
   FACTS_VERSION:'VFC-BANK-FACTS-1.4',
   INTAKE_CONTRACT:'BANK_MATCHED_FROZEN_LEDGER_V4',
   CACHE_PREFIX:'VFC_BANK_FACTS_V1:',
@@ -555,6 +555,19 @@ function vfcCatchUpInstallmentBase_(items,failedEvents){
   };
 }
 
+function vfcIsUtilityObligation_(g){
+  const key=String(g&&g.entityKey||'').toUpperCase(),
+        label=String(g&&g.label||'').toUpperCase(),
+        text=key+' '+label;
+  if(String(g&&g.family||'').toUpperCase()!=='OTHER')return false;
+  return /_UTILITY_/.test(key)||/\bB\.?C\.?\s+HYDRO\b|HYDRO-PAP|\bBC\s+HYDRO\b|FORTIS\s+BC|FORTISBC|\bUTILITY\b|\bELECTRIC(?:ITY)?\b/.test(text);
+}
+
+function vfcUtilityMonthlyEquivalent_(months){
+  const values=Object.keys(months||{}).sort().map(function(k){return vfcPos_(months[k]);}).filter(function(v){return v>0;});
+  return values.length?vfcRound_(vfcMedian_(values),.01):0;
+}
+
 function vfcStableInstallmentComponents_(items,totalDistinctMonths){
   items=(items||[]).slice().sort(function(a,b){return vfcNum_(a.amount)-vfcNum_(b.amount);});
   totalDistinctMonths=Math.max(0,Number(totalDistinctMonths||0));
@@ -591,8 +604,8 @@ function vfcStableInstallmentComponents_(items,totalDistinctMonths){
 }
 
 function vfcSummarizeGroup_(g,latestEnd){
-  const items=(g.items||[]).slice().sort(function(a,b){return vfcTime_(a.date)-vfcTime_(b.date);});if(!items.length)return null;const amounts=items.map(function(x){return x.amount;}),months={},evidenceMonths={};items.forEach(function(x){const m=x.date.slice(0,7);months[m]=(months[m]||0)+x.amount;evidenceMonths[m]=1;});(g.failedEvents||[]).forEach(function(e){const d=e&&e.failedDebit&&e.failedDebit.date;if(d)evidenceMonths[String(d).slice(0,7)]=1;});const distinct=Object.keys(months).length,occ=items.length,gaps=[];for(let i=1;i<items.length;i++)gaps.push((vfcDate_(items[i].date)-vfcDate_(items[i-1].date))/86400000);const medianGap=gaps.length?vfcMedian_(gaps):0,median=vfcMedian_(amounts),cv=vfcCv_(amounts),weeklyRatio=gaps.length?gaps.filter(function(x){return x>=5&&x<=10;}).length/gaps.length:0,biweeklyRatio=gaps.length?gaps.filter(function(x){return x>10&&x<=18;}).length/gaps.length:0,daysSince=vfcDays_(items[items.length-1].date,latestEnd),active=daysSince===null?true:daysSince<=VFC_BANK_ENGINE.ACTIVE_DAYS,isFinance=(g.family==='FINANCING'||g.family==='MCA'||g.family==='PAD'),catchup=isFinance?vfcCatchUpInstallmentBase_(items,g.failedEvents||[]):null,twoPointFinanceRecurring=!isFinance||occ!==2||!!catchup||Object.keys(evidenceMonths).length>=3||(medianGap>=20&&medianGap<=45),recurring=(distinct>=2||occ>=3)&&twoPointFinanceRecurring;let frequency='Observed statement-period cash flow',monthly=0,method='OBSERVED_ONLY',displayPayment=median;
-  if(recurring&&medianGap>=5&&medianGap<=10&&occ>=4&&weeklyRatio>=.65){frequency='Weekly observed cadence';monthly=median*52/12;method='WEEKLY_MEDIAN';}else if(recurring&&medianGap>10&&medianGap<=18&&occ>=3&&biweeklyRatio>=.55){frequency='Biweekly observed cadence';monthly=median*26/12;method='BIWEEKLY_MEDIAN';}else if(recurring&&catchup){frequency='Catch-up normalized monthly installment';monthly=catchup.monthlyEquivalent;displayPayment=catchup.baseInstallment;method='CATCHUP_NORMALIZED_INSTALLMENT';}else if(recurring&&distinct>=2&&occ===distinct){frequency='Monthly observed cadence';monthly=cv<=.03?median:vfcMeanObject_(months);method=cv<=.03?'MONTHLY_MEDIAN':'MONTHLY_VARIABLE_MEAN';}else if(recurring){const stable=isFinance?vfcStableInstallmentComponents_(items,distinct):null;if(stable){frequency='Stable recurring installment component';monthly=stable.monthlyEquivalent;method='STABLE_INSTALLMENT_COMPONENTS';}else{frequency='Multiple payments per month';monthly=vfcRecentMonthAverage_(months,3);method='RECENT_3_MONTH_AVERAGE';}}
+  const items=(g.items||[]).slice().sort(function(a,b){return vfcTime_(a.date)-vfcTime_(b.date);});if(!items.length)return null;const amounts=items.map(function(x){return x.amount;}),months={},evidenceMonths={};items.forEach(function(x){const m=x.date.slice(0,7);months[m]=(months[m]||0)+x.amount;evidenceMonths[m]=1;});(g.failedEvents||[]).forEach(function(e){const d=e&&e.failedDebit&&e.failedDebit.date;if(d)evidenceMonths[String(d).slice(0,7)]=1;});const distinct=Object.keys(months).length,occ=items.length,gaps=[];for(let i=1;i<items.length;i++)gaps.push((vfcDate_(items[i].date)-vfcDate_(items[i-1].date))/86400000);const medianGap=gaps.length?vfcMedian_(gaps):0,median=vfcMedian_(amounts),cv=vfcCv_(amounts),weeklyRatio=gaps.length?gaps.filter(function(x){return x>=5&&x<=10;}).length/gaps.length:0,biweeklyRatio=gaps.length?gaps.filter(function(x){return x>10&&x<=18;}).length/gaps.length:0,daysSince=vfcDays_(items[items.length-1].date,latestEnd),active=daysSince===null?true:daysSince<=VFC_BANK_ENGINE.ACTIVE_DAYS,isFinance=(g.family==='FINANCING'||g.family==='MCA'||g.family==='PAD'),isUtility=!isFinance&&vfcIsUtilityObligation_(g),catchup=isFinance?vfcCatchUpInstallmentBase_(items,g.failedEvents||[]):null,twoPointFinanceRecurring=!isFinance||occ!==2||!!catchup||Object.keys(evidenceMonths).length>=3||(medianGap>=20&&medianGap<=45),recurring=(distinct>=2||occ>=3)&&twoPointFinanceRecurring;let frequency='Observed statement-period cash flow',monthly=0,method='OBSERVED_ONLY',displayPayment=median;
+  if(recurring&&isUtility){frequency='Variable utility billing — median observed month';monthly=vfcUtilityMonthlyEquivalent_(months);method='UTILITY_MEDIAN_OBSERVED_MONTH';}else if(recurring&&medianGap>=5&&medianGap<=10&&occ>=4&&weeklyRatio>=.65){frequency='Weekly observed cadence';monthly=median*52/12;method='WEEKLY_MEDIAN';}else if(recurring&&medianGap>10&&medianGap<=18&&occ>=3&&biweeklyRatio>=.55){frequency='Biweekly observed cadence';monthly=median*26/12;method='BIWEEKLY_MEDIAN';}else if(recurring&&catchup){frequency='Catch-up normalized monthly installment';monthly=catchup.monthlyEquivalent;displayPayment=catchup.baseInstallment;method='CATCHUP_NORMALIZED_INSTALLMENT';}else if(recurring&&distinct>=2&&occ===distinct){frequency='Monthly observed cadence';monthly=cv<=.03?median:vfcMeanObject_(months);method=cv<=.03?'MONTHLY_MEDIAN':'MONTHLY_VARIABLE_MEAN';}else if(recurring){const stable=isFinance?vfcStableInstallmentComponents_(items,distinct):null;if(stable){frequency='Stable recurring installment component';monthly=stable.monthlyEquivalent;method='STABLE_INSTALLMENT_COMPONENTS';}else{frequency='Multiple payments per month';monthly=vfcRecentMonthAverage_(months,3);method='RECENT_3_MONTH_AVERAGE';}}
   if(!active&&!isFinance){monthly=0;method='STALE_INFORMATIONAL';}
   let why=String(g.debtJustification||'').trim();if(why&&recurring)why+=' Recurrence evidence: '+occ+' observed payment'+(occ===1?'':'s')+' across '+distinct+' month'+(distinct===1?'':'s')+'; '+frequency+'.';
   return{bankId:g.bankId||'',family:g.family,key:g.entityKey,entityKey:g.entityKey,counterparty:g.label,description:g.label,category:g.family==='FINANCING'?'LOAN':g.family,paymentAmount:vfcRound_(displayPayment,.01),averagePayment:vfcRound_(vfcMean_(amounts),.01),frequency:frequency,monthlyEquivalent:vfcRound_(monthly,.01),monthlyEquivalentMethod:method,catchUpNormalization:catchup||null,occurrences:occ,distinctMonths:distinct,firstSeen:items[0].date,lastSeen:items[items.length-1].date,daysSinceLastObserved:daysSince,active:active,recurring:recurring,confidence:!recurring?'Low':(distinct>=3?'High':'Moderate'),observedTotal:vfcRound_(vfcSum_(amounts),.01),observedMonthlyTotals:vfcSortedMoneyObject_(months),components:vfcAmountComponents_(items),debtJustification:why};
@@ -738,6 +751,25 @@ function runBankingCoreRecurrenceSelfTests(){
     close(d.otherRecurringObligations[0].monthlyEquivalent,1250,.05,'residual monthly equivalent');
     return d.otherRecurringObligations[0].counterparty;
   });
+  test('Irregular BC Hydro bills use median observed month, not recent-month averaging',function(){
+    const g={bankId:'RBC',family:'OTHER',entityKey:'RBC_OTHER_UTILITY_BC_HYDRO',label:'BC HYDRO',items:[
+      {date:'2026-05-01',amount:341.08},
+      {date:'2026-05-29',amount:1080.00},
+      {date:'2026-06-01',amount:450.00},
+      {date:'2026-07-03',amount:419.72},
+      {date:'2026-07-03',amount:1150.00},
+      {date:'2026-07-30',amount:439.00},
+      {date:'2026-07-30',amount:1250.00},
+      {date:'2026-08-27',amount:1250.00},
+      {date:'2026-08-31',amount:1410.00},
+      {date:'2026-09-28',amount:160.00}
+    ]};
+    const r=vfcSummarizeGroup_(g,'2026-10-13');
+    close(r.monthlyEquivalent,1421.08,.05,'utility monthly equivalent');
+    equal(r.monthlyEquivalentMethod,'UTILITY_MEDIAN_OBSERVED_MONTH','utility method');
+    return r.monthlyEquivalent;
+  });
+
   test('Unknown weekly counterparty is informational, not debt',function(){
     const txs=[
       {date:'2026-01-05',description:'EFT XYZ SERVICE',counterparty:'XYZ SERVICE',direction:'DEBIT',amount:681},
