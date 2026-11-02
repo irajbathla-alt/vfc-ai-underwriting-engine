@@ -1,5 +1,5 @@
 /**
- * RBC BANK ENGINE v2.1.4 — LOCKED
+ * RBC BANK ENGINE v2.1.5 — LOCKED
  * ONE PERMANENT RBC FILE.
  * Contains RBC extraction, deterministic printed-fact locking, debit/debt classification,
  * financing credits, returns, internal transfers, duplicate preservation and RBC self-tests.
@@ -10,7 +10,7 @@ return{
 id:'RBC',
 label:'RBC',
 status:'LOCKED',
-rulesVersion:'RBC-2.1.4-LOCKED',
+rulesVersion:'RBC-2.1.5-LOCKED',
 intakeContract:'BANK_MATCHED_FROZEN_LEDGER_V4',
 aliases:['ROYAL BANK OF CANADA','RBC ROYAL BANK','RBC']
 };
@@ -90,6 +90,7 @@ function vfcRbcClassifyDebit_(t){
 const raw=String(t.description||'').replace(/\s+/g,' ').trim();
 const s=raw.toUpperCase();
 const cp=String(t.counterparty||'').replace(/\s+/g,' ').trim();
+const canonical=(typeof vfcCanonicalCounterpartyLabel_==='function'?vfcCanonicalCounterpartyLabel_(raw,cp):(cp||raw));
 const genericLoanPaymentOnly=/^LOAN\s+PAYMENT$/i.test(raw)&&(!cp||/^LOAN\s+PAYMENT$/i.test(cp));
 const hasFinancingSignal=/\bLOAN\b|\bMORTGAGE\b|\bLOC\b|LINE\s+OF\s+CREDIT|CREDIT\s+LINE|\bFINANC(?:E|ING)?\b|\bMCA\b|\bLEASE\b|\bLSE\b/.test(s);
 const isFeeLine=/\bFEES?\b|SERVICE\s+CHARGE|NSF\s+ITEM\s+FEES?|OVERDRAFT\s+INTEREST|PAYMENT\s+COVERAGE/.test(s);
@@ -122,9 +123,9 @@ debtJustification='Known MCA-style business financing counterparty plus recurrin
 }else if(/\bICAPITAL\b/.test(s)){
 family='FINANCING';entityKey='ICAPITAL';label='iCapital';
 debtJustification='Known financing counterparty plus recurring observed payment cadence; iCapital is not assumed to be MCA without explicit MCA evidence.';
-}else if(/\bIPFS\b|PREMIUM\s+FINANC/.test(s)){
-family='FINANCING';entityKey='RBC_PREMIUM_FINANCE_'+vfcCounterpartyKey_(cp||raw);label=cp||'Premium Finance';
-debtJustification='Explicit premium-finance wording plus recurring observed payment cadence.';
+}else if(/IPFS|PREMIUM\s+FINANC/.test(s)){
+family='FINANCING';entityKey='RBC_PREMIUM_FINANCE_IPFS';label='IPFS Canada';
+debtJustification='Explicit IPFS/premium-finance wording plus recurring observed payment cadence.';
 }else if(/\bCRA\b|\bCCRA\b|GST|HST|COMMERCIAL\s+TAXES|EMPTX|TXINS|TXBAL|\bTAX\b/.test(s)){
 family='TAX';entityKey='RBC_OTHER_TAX_'+vfcCounterpartyKey_(cp||raw);label=cp||raw;
 }else if(/INSURANCE/.test(s)){
@@ -135,7 +136,11 @@ else if(/IND\s+ALL\s+LIFE/.test(s)){entityKey='INSURANCE_IND_ALL_LIFE';label='In
 else if(/\bOWIC\b/.test(s)){entityKey='INSURANCE_OWIC';label='Insurance OWIC';}
 else entityKey='RBC_OTHER_INSURANCE_'+vfcCounterpartyKey_(cp||raw);
 }else if(/CREDIT\s+CARD|VISA\s+(ROYAL|TD|BNS)|RBC\s+CREDIT\s+CARD|MASTERCARD|AMERICAN\s+EXPRESS|\bAMEX\b|CAPITAL\s+ONE|\bMBNA\b/.test(s)){
-family='OTHER';entityKey='RBC_OTHER_CARD_'+vfcCounterpartyKey_(cp||raw);label=cp||raw;
+family='OTHER';
+if(/VISA\s+TD\s+BANK/.test(s)){entityKey='RBC_OTHER_CARD_VISA_TD_BANK';label='VISA TD BANK';}
+else if(/VISA\s+(?:ROYAL|RBC)/.test(s)){entityKey='RBC_OTHER_CARD_VISA_RBC';label='VISA RBC';}
+else if(/AMERICAN\s+EXPRESS|\bAMEX\b/.test(s)){entityKey='RBC_OTHER_CARD_AMEX';label='AMEX CARDS';}
+else{entityKey='RBC_OTHER_CARD_'+vfcCounterpartyKey_(canonical||cp||raw);label=canonical||cp||raw;}
 }else if(/^AUTO\s+PAYMENT\b/.test(s)){
 const clean=raw.replace(/^AUTO\s+PAYMENT\s*/i,'').trim();
 const financeLike=/\bAFS\b|FINANC|LEASE|LENDING|DEALER\s+ADVANTAGE|AUTO\s+FINANCE|\bLOAN\b|\bMCA\b|\bMORTGAGE\b|\bLOC\b|LINE\s+OF\s+CREDIT|CREDIT\s+LINE|\bCANACAP\b|\bICAPITAL\b|\bGREENBOX\b|CAPITAL\s+(?:LENDING|FINANCE|FUNDING)|CREDIT\s+(?:CORP|FINANCE|LENDING)/.test(s);
@@ -180,8 +185,10 @@ family='OTHER';entityKey='RBC_OTHER_POSSIBLE_FINANCE_'+vfcCounterpartyKey_(cp||r
 family='OTHER';entityKey='RBC_OTHER_UTILITY_BC_HYDRO';label='BC HYDRO';
 }else if(/FORTIS\s+BC|FORTISBC/.test(s)){
 family='OTHER';entityKey='RBC_OTHER_UTILITY_FORTIS_BC';label='FORTIS BC';
+}else if(/FIRST\s+DATA\s+CORP/.test(s)){
+family='OTHER';entityKey='RBC_OTHER_BUSINESS_FIRST_DATA_CORP';label='FIRST DATA CORP';
 }else if(/COMMERCIAL\s+RENT|\bRENT\b|HYDRO|FORTIS|TELUS|UTILITY|SUPERPASS|PETROLEUM|\bFUEL\b|EQUIPMENT\s+RENT|MISC\s+PAYMENT|PAY\s+EMPLOYEE|PAYROLL/.test(s)){
-family='OTHER';entityKey='RBC_OTHER_BUSINESS_'+vfcCounterpartyKey_(cp||raw);label=cp||raw;
+family='OTHER';entityKey='RBC_OTHER_BUSINESS_'+vfcCounterpartyKey_(canonical||cp||raw);label=canonical||cp||raw;
 }else{
 return null;
 }
@@ -219,6 +226,17 @@ function close(actual,expected,tol,label){tol=tol==null?.02:tol;if(Math.abs(Numb
 function equal(actual,expected,label){if(actual!==expected)throw new Error((label||'value')+' expected '+expected+' but got '+actual);}
 function truthy(value,label){if(!value)throw new Error((label||'value')+' expected truthy');}
 function test(name,fn){try{const detail=fn()||'';results.push({name:name,pass:true,detail:String(detail||'')});}catch(e){results.push({name:name,pass:false,detail:String(e&&e.message||e)});}}
+test('RBC canonical aliases merge tagged and model forms',function(){
+  const a=vfcRbcClassifyDebit_({description:'Online Banking payment - 3876 VISA TD BANK',counterparty:'Online Banking payment - 3876 VISA TD BANK',direction:'DEBIT',amount:100}),
+        b=vfcRbcClassifyDebit_({description:'Online Banking payment - 3876 VISA TD BANK',counterparty:'VISA TD BANK',direction:'DEBIT',amount:100}),
+        c=vfcRbcClassifyDebit_({description:'Equipment Rent FIRST DATA CORP',counterparty:'Equipment Rent FIRST DATA CORP',direction:'DEBIT',amount:313.29}),
+        d=vfcRbcClassifyDebit_({description:'Equipment Rent FIRST DATA CORP',counterparty:'FIRST DATA CORP',direction:'DEBIT',amount:313.29}),
+        e=vfcRbcClassifyDebit_({description:'Business PAD INSLINEALDIPFS',counterparty:'INSLINEALDIPFS',direction:'DEBIT',amount:453.60});
+  equal(a.entityKey,b.entityKey,'TD Visa identity');
+  equal(c.entityKey,d.entityKey,'First Data identity');
+  equal(e.entityKey,'RBC_PREMIUM_FINANCE_IPFS','IPFS identity');
+  return a.entityKey;
+});
 test('RBC printed NSF count and negative balance flag are deterministic',function(){
 equal(vfcRbcCountNsf_('Item returned NSF 2375.88\nItem returned NSF 419.40\nCheque returned NSF 500.00'),3,'NSF count');
 truthy(vfcRbcNegativeBalanceFlag_('Balance -1,915.48',{opening:462.40,closing:35606.52}),'negative running balance');
