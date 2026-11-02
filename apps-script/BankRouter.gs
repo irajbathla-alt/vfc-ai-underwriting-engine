@@ -248,28 +248,33 @@ function vfcUnifiedBankStatementIntake_(bankId,summary,text,fileName){
     out.push(row);
   });
 
-  let addedCritical=0;
+  // The tagged transcript is the deterministic source ledger. If the model omits a visible
+  // tagged row, preserve that row instead of silently dropping it from recurrence analysis.
+  let addedTagged=0,addedCritical=0;
   tagged.forEach(function(t,index){
-    if(used[index]||!vfcIntakeCriticalTaggedRow_(t))return;
+    if(used[index])return;
+    const critical=vfcIntakeCriticalTaggedRow_(t);
     out.push(Object.assign({},t,{counterparty:t.description}));
-    used[index]=1;addedCritical++;
+    used[index]=1;addedTagged++;
+    if(critical)addedCritical++;
   });
 
   locked.banking_transactions=out;
   locked._direction_validation={
-    method:'UNIFIED_TAGGED_LEDGER_V1',
-    intakeEngineVersion:'VFC-BANK-INTAKE-1.0',
+    method:'UNIFIED_TAGGED_LEDGER_V2',
+    intakeEngineVersion:'VFC-BANK-INTAKE-1.1',
     bankId:id,
     transactionCount:out.length,
     taggedRowCount:tagged.length,
-    verifiedCount:verified+addedCritical,
+    verifiedCount:verified+addedTagged,
     correctedCount:corrected.length,
     unresolvedCount:unresolved,
+    taggedRowsAdded:addedTagged,
     criticalRowsAdded:addedCritical,
     creditProtectedCount:out.filter(function(t){return t.sourceCreditProtected===true&&String(t.direction||'').toUpperCase()==='CREDIT';}).length,
     corrections:corrected.slice(0,25)
   };
-  locked._intake_engine_version='VFC-BANK-INTAKE-1.0';
+  locked._intake_engine_version='VFC-BANK-INTAKE-1.1';
   return locked;
 }
 
@@ -347,6 +352,27 @@ function runBankingIntakeSelfTests(){
     equal(vfcIntakeCriticalTaggedRow_(rows[0]),true,'critical return marker');return rows[0].direction;
   });
 
+  test('Unified intake preserves visible Hydro row omitted by model extraction',function(){
+    const text=[
+      'Opening balance on August 13, 2026 | BALANCE 1000.00',
+      'DATE 27 Aug | DESCRIPTION Online Banking payment - 3028 BC HYDRO | DEBIT 1,250.00 | CREDIT | BALANCE -250.00'
+    ].join('\n');
+    const locked=vfcUnifiedBankStatementIntake_('RBC',{
+      statement_start_date:'2026-08-13',
+      statement_end_date:'2026-09-11',
+      opening_balance:1000,
+      closing_balance:-250,
+      total_deposits:0,
+      total_withdrawals:1250,
+      banking_transactions:[]
+    },text,'hydro-test.pdf');
+    equal(locked.banking_transactions.length,1,'preserved tagged row');
+    equal(locked.banking_transactions[0].direction,'DEBIT','hydro direction');
+    close(locked.banking_transactions[0].amount,1250,.001,'hydro amount');
+    equal(locked._intake_engine_version,'VFC-BANK-INTAKE-1.1','intake version');
+    return locked.banking_transactions[0].description;
+  });
+
   test('No printed direction evidence means no invented correction',function(){
     const fixed=vfcValidateTransactionDirectionsFromSource_(
       {banking_transactions:[{date:'2026-01-01',description:'Misc Payment ABC',counterparty:'ABC',direction:'DEBIT',amount:500}]},
@@ -358,7 +384,7 @@ function runBankingIntakeSelfTests(){
   });
 
   const failed=results.filter(function(x){return!x.pass;});
-  return{ok:failed.length===0,intakeVersion:'VFC-BANK-INTAKE-1.0',total:results.length,passed:results.length-failed.length,failed:failed.length,results:results};
+  return{ok:failed.length===0,intakeVersion:'VFC-BANK-INTAKE-1.1',total:results.length,passed:results.length-failed.length,failed:failed.length,results:results};
 }
 
 function vfcNormalizeBankDocumentType_(value,summary){
