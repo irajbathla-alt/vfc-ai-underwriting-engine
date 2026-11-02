@@ -1,10 +1,10 @@
 /**
- * VFC Banking Core 4.19
+ * VFC Banking Core 4.20
  * Shared bank-agnostic banking math over frozen statement facts.
  * No PDF or OpenAI call occurs during underwriting.
  */
 const VFC_BANK_ENGINE={
-  VERSION:'VFC-BANKING-CORE-4.19',
+  VERSION:'VFC-BANKING-CORE-4.20',
   FACTS_VERSION:'VFC-BANK-FACTS-1.4',
   INTAKE_CONTRACT:'BANK_MATCHED_FROZEN_LEDGER_V4',
   CACHE_PREFIX:'VFC_BANK_FACTS_V1:',
@@ -456,28 +456,41 @@ function vfcResolveReturnedObligationDebits_(debits,credits){
 /** Backward-compatible wrapper retained for callers outside BankingCore. */
 function vfcSuppressReturnedFinanceDebits_(debits,credits){return vfcResolveReturnedObligationDebits_(debits,credits).debits;}
 
-function vfcResidualRecurringLabel_(t){
-  const raw=String(t&&t.description||'').replace(/\s+/g,' ').trim(),cp=String(t&&t.counterparty||'').replace(/\s+/g,' ').trim();
+function vfcCanonicalCounterpartyLabel_(raw,cp){
+  raw=String(raw||'').replace(/\s+/g,' ').trim();
+  cp=String(cp||'').replace(/\s+/g,' ').trim();
+  function strip(v){
+    return String(v||'').replace(/\s+/g,' ').trim()
+      .replace(/^MISC\s+PAYMENT\s*/i,'')
+      .replace(/^BILL\s+PAYMENT\s*/i,'')
+      .replace(/^BUSINESS\s+PAD\s*/i,'')
+      .replace(/^AUTO\s+PAYMENT\s*/i,'')
+      .replace(/^PRE[- ]?AUTH(?:ORIZED)?\s+(?:PAYMENT|DEBIT)?\s*/i,'')
+      .replace(/^ONLINE\s+BANKING\s+PAYMENT\s*-?\s*\d*\s*/i,'')
+      .replace(/^ACCOUNT\s+PAYABLE\s+(?:PMT|PAYMENT)\s*/i,'')
+      .replace(/^PROV\/LOCAL\s+GVT\s+PAYMENT\s*/i,'')
+      .replace(/^E-?TRANSFER\s+SENT\s*/i,'')
+      .replace(/^INTERAC\s+E-?TRANSFER(?:\s+SENT)?\s*/i,'')
+      .replace(/^E-?TRANSFER\s*/i,'')
+      .replace(/\s+/g,' ').trim();
+  }
   function meaningful(v){
     const x=String(v||'').toUpperCase().replace(/[^A-Z0-9 ]/g,' ').replace(/\s+/g,' ').trim();
     if(!x||/^\d+$/.test(x))return false;
-    if(/^(MISC|MISC PAYMENT|PAYMENT|BILL PAYMENT|BUSINESS PAD|PAD|AUTO PAYMENT|ONLINE BANKING|ONLINE BANKING PAYMENT|ONLINE BANKING TRANSFER|TRANSFER|E TRANSFER|INTERAC|CHEQUE|ATM|PURCHASE|DEBIT|WITHDRAWAL|ACCOUNT PAYABLE PMT|ACCOUNT PAYABLE PAYMENT)$/.test(x))return false;
+    if(/^(MISC|MISC PAYMENT|PAYMENT|BILL PAYMENT|BUSINESS PAD|PAD|AUTO PAYMENT|ONLINE BANKING|ONLINE BANKING PAYMENT|ONLINE BANKING TRANSFER|TRANSFER|E TRANSFER|E TRANSFER SENT|INTERAC|INTERAC E TRANSFER|INTERAC E TRANSFER SENT|CHEQUE|ATM|PURCHASE|DEBIT|WITHDRAWAL|ACCOUNT PAYABLE PMT|ACCOUNT PAYABLE PAYMENT|PROV LOCAL GVT PAYMENT)$/.test(x))return false;
     return vfcTokens_(x).length>0;
   }
+  const rawClean=strip(raw),cpClean=strip(cp);
+  // Prefer the statement description after removing payment-method wrappers. This keeps
+  // model-extracted rows and deterministic tagged rows under the same counterparty.
+  if(meaningful(rawClean))return rawClean;
+  if(meaningful(cpClean))return cpClean;
   if(meaningful(cp))return cp;
-  let clean=raw
-    .replace(/^MISC\s+PAYMENT\s*/i,'')
-    .replace(/^BILL\s+PAYMENT\s*/i,'')
-    .replace(/^BUSINESS\s+PAD\s*/i,'')
-    .replace(/^AUTO\s+PAYMENT\s*/i,'')
-    .replace(/^PRE[- ]?AUTH(?:ORIZED)?\s+(?:PAYMENT|DEBIT)?\s*/i,'')
-    .replace(/^ONLINE\s+BANKING\s+PAYMENT\s*-?\s*\d*\s*/i,'')
-    .replace(/^ACCOUNT\s+PAYABLE\s+(?:PMT|PAYMENT)\s*/i,'')
-    .replace(/^E-?TRANSFER\s+SENT\s*/i,'')
-    .replace(/^INTERAC\s+E-?TRANSFER\s*/i,'')
-    .replace(/\s+/g,' ').trim();
-  if(!meaningful(clean))return'';
-  return clean;
+  return'';
+}
+
+function vfcResidualRecurringLabel_(t){
+  return vfcCanonicalCounterpartyLabel_(t&&t.description,t&&t.counterparty);
 }
 
 function vfcResidualRecurringClassifyDebit_(bankId,t){
@@ -485,7 +498,7 @@ function vfcResidualRecurringClassifyDebit_(bankId,t){
   const raw=String(t.description||'').replace(/\s+/g,' ').trim(),s=raw.toUpperCase();
   if(!raw)return null;
   // Never convert fees, returns, reversals, cash withdrawals, card purchases or bare cheque rows into residual obligations.
-  if(/\bNSF\b|RETURNED|REVERSAL|REFUND|MONTHLY\s+FEE|TRANSACTION\s+FEE|SERVICE\s+CHARGE|OVERDRAFT\s+INTEREST|E-?TRANSFER\s+FEE/.test(s))return null;
+  if(/\bNSF\b|RETURNED|REVERSAL|REFUND|MONTHLY\s+FEE|TRANSACTION\s+FEE|SERVICE\s+CHARGE|OVERDRAFT\s+INTEREST|E-?TRANSFER\s+FEE|PAY[- ]?FILE\s+FEES?/.test(s))return null;
   if(/^CHEQUE\b|^ATM\b|CASH\s+WITHDRAWAL|INTERAC\s+PURCHASE|CONTACTLESS\s+INTERAC\s+PURCHASE|\bPOS\s+PURCHASE\b/.test(s))return null;
   const cp=String(t.counterparty||'').replace(/\s+/g,' ').trim(),cpUpper=cp.toUpperCase();
   const genericTransferCp=!cp||/^(ONLINE\s+BANKING\s+TRANSFER|ONLINE\s+TRANSFER|BR\s+TO\s+BR|BANK\s+TRANSFER|TRANSFER)(?:\s*-\s*\d+)?$/.test(cpUpper);
@@ -530,17 +543,27 @@ function vfcCatchUpInstallmentBase_(items,failedEvents){
       matched.push({date:x.date,amount:x.amount,multiple:n,normalized:normalized,failed:x.failed});
     });
     if(matched.length<3)return;
-    const direct=matched.filter(function(x){return x.multiple===1;}).length,multi=matched.filter(function(x){return x.multiple>=2;}).length,failedMatched=matched.filter(function(x){return x.failed;}).length;
-    if(!direct||!multi||!failedMatched)return;
+    const directSuccess=matched.filter(function(x){return !x.failed&&x.multiple===1;}),
+          multi=matched.filter(function(x){return x.multiple>=2;}).length,
+          failedMatched=matched.filter(function(x){return x.failed;}).length,
+          directMonths={};
+    directSuccess.forEach(function(x){directMonths[String(x.date).slice(0,7)]=1;});
+    // A failed debit by itself can never establish the base installment. Require the same
+    // successful direct installment in at least two months before normalizing catch-up multiples.
+    if(directSuccess.length<2||Object.keys(directMonths).length<2||!multi||!failedMatched)return;
     const months={};matched.forEach(function(x){months[String(x.date).slice(0,7)]=1;});
     if(Object.keys(months).length<3)return;
-    const base=vfcMedian_(matched.map(function(x){return x.normalized;}));
+    const base=vfcMedian_(directSuccess.map(function(x){return x.normalized;}));
     const verified=matched.filter(function(x){return Math.abs(x.normalized-base)<=Math.max(20,base*.055);});
     if(verified.length<3)return;
-    const vDirect=verified.filter(function(x){return x.multiple===1;}).length,vMulti=verified.filter(function(x){return x.multiple>=2;}).length,vFailed=verified.filter(function(x){return x.failed;}).length;
-    if(!vDirect||!vMulti||!vFailed)return;
+    const vDirectSuccess=verified.filter(function(x){return !x.failed&&x.multiple===1;}),
+          vMulti=verified.filter(function(x){return x.multiple>=2;}).length,
+          vFailed=verified.filter(function(x){return x.failed;}).length,
+          vDirectMonths={};
+    vDirectSuccess.forEach(function(x){vDirectMonths[String(x.date).slice(0,7)]=1;});
+    if(vDirectSuccess.length<2||Object.keys(vDirectMonths).length<2||!vMulti||!vFailed)return;
     const vMonths={};verified.forEach(function(x){vMonths[String(x.date).slice(0,7)]=1;});
-    const score=Object.keys(vMonths).length*100+verified.length*20+vFailed*10+vDirect*5;
+    const score=Object.keys(vMonths).length*100+verified.length*20+vFailed*10+vDirectSuccess.length*10;
     if(!best||score>best.score||(score===best.score&&base<best.baseInstallment)){
       best={baseInstallment:base,score:score,evidence:verified};
     }
@@ -739,6 +762,30 @@ function runBankingCoreRecurrenceSelfTests(){
     close(d.otherRecurringObligations[0].monthlyEquivalent,800,.05,'verified debit recurring amount');
     return'verified debit allowed';
   });
+  test('Payment-method prefixes collapse to one residual counterparty',function(){
+    const a=vfcResidualRecurringLabel_({description:'e-Transfer sent manav gupta',counterparty:'e-Transfer sent manav gupta'}),
+          b=vfcResidualRecurringLabel_({description:'e-Transfer sent manav gupta',counterparty:'manav gupta'}),
+          c=vfcResidualRecurringLabel_({description:'Prov/Local Gvt Payment PROVINCE OF BC',counterparty:'Prov/Local Gvt Payment PROVINCE OF BC'});
+    equal(a,'manav gupta','tagged e-transfer label');
+    equal(b,'manav gupta','model e-transfer label');
+    equal(c,'PROVINCE OF BC','government label');
+    return a;
+  });
+  test('Bare e-Transfer sent does not become an obligation label',function(){
+    equal(vfcResidualRecurringLabel_({description:'e-Transfer sent',counterparty:'e-Transfer sent'}),'','generic e-transfer');
+    return'ignored';
+  });
+  test('Catch-up base requires successful direct installments, not a lone failed small debit',function(){
+    const items=[
+      {date:'2026-07-17',amount:743.40},
+      {date:'2026-08-04',amount:349.74},
+      {date:'2026-09-01',amount:349.74},
+      {date:'2026-10-01',amount:349.74}
+    ],failed=[{failedDebit:{date:'2026-10-09',amount:194.00}}];
+    if(vfcCatchUpInstallmentBase_(items,failed)!==null)throw new Error('fabricated catch-up base from failed small debit');
+    return'no fabricated base';
+  });
+
   test('Unknown monthly counterparty becomes informational recurring obligation',function(){
     const rows=[
       {payload:{bankId:'UNKNOWN',statementEndDate:'2026-01-31',transactions:[{date:'2026-01-10',description:'Bill Payment ABC123',counterparty:'ABC123',direction:'DEBIT',amount:1250}]}},
