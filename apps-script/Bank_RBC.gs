@@ -1,5 +1,5 @@
 /**
- * RBC BANK ENGINE v2.1.3 — LOCKED
+ * RBC BANK ENGINE v2.1.4 — LOCKED
  * ONE PERMANENT RBC FILE.
  * Contains RBC extraction, deterministic printed-fact locking, debit/debt classification,
  * financing credits, returns, internal transfers, duplicate preservation and RBC self-tests.
@@ -10,7 +10,7 @@ return{
 id:'RBC',
 label:'RBC',
 status:'LOCKED',
-rulesVersion:'RBC-2.1.3-LOCKED',
+rulesVersion:'RBC-2.1.4-LOCKED',
 intakeContract:'BANK_MATCHED_FROZEN_LEDGER_V4',
 aliases:['ROYAL BANK OF CANADA','RBC ROYAL BANK','RBC']
 };
@@ -176,6 +176,10 @@ entityKey='RBC_FINANCE_'+vfcCounterpartyKey_(stable||cp||raw);label=cp||raw;
 family='OTHER';entityKey='RBC_OTHER_PAD_'+vfcCounterpartyKey_(cp||raw);label=cp||raw;
 }else if(/\bCAPITAL\b|\bFUNDING\b|\bFACTOR(?:ING)?\b/.test(s)){
 family='OTHER';entityKey='RBC_OTHER_POSSIBLE_FINANCE_'+vfcCounterpartyKey_(cp||raw);label=cp||raw;
+}else if(/\bB\.?C\.?\s+HYDRO\b|\bBC\s+HYDRO\b|HYDRO-PAP/.test(s)){
+family='OTHER';entityKey='RBC_OTHER_UTILITY_BC_HYDRO';label='BC HYDRO';
+}else if(/FORTIS\s+BC|FORTISBC/.test(s)){
+family='OTHER';entityKey='RBC_OTHER_UTILITY_FORTIS_BC';label='FORTIS BC';
 }else if(/COMMERCIAL\s+RENT|\bRENT\b|HYDRO|FORTIS|TELUS|UTILITY|SUPERPASS|PETROLEUM|\bFUEL\b|EQUIPMENT\s+RENT|MISC\s+PAYMENT|PAY\s+EMPLOYEE|PAYROLL/.test(s)){
 family='OTHER';entityKey='RBC_OTHER_BUSINESS_'+vfcCounterpartyKey_(cp||raw);label=cp||raw;
 }else{
